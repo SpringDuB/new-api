@@ -91,6 +91,12 @@ type TaskSubmitResponse struct {
 	PluginState    []byte
 }
 
+// TaskSubmitRetryPolicy protects upstream creation endpoints that cannot
+// safely recreate work after an ambiguous submission failure.
+type TaskSubmitRetryPolicy interface {
+	DisableSubmitRetry() bool
+}
+
 type OpenAIVideoConverter interface {
 	ConvertToOpenAIVideo(originTask *model.Task) ([]byte, error)
 }
