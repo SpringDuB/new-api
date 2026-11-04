@@ -172,10 +172,108 @@ func TestXOGPURejectsInvalidSubmissionsBeforeBilling(t *testing.T) {
 			}
 		})
 	}
-	for _, field := range []string{"seconds", "size", "width", "height", "ratio", "aspect_ratio", "n", "fps", "reference_video", "image_urls", "audio_urls", "content", "metadata", "reference_images"} {
+	for _, field := range []string{"width", "height", "ratio", "aspect_ratio", "n", "fps", "reference_video", "image_urls", "audio_urls", "content", "metadata", "reference_images"} {
 		t.Run("unsupported field "+field, func(t *testing.T) {
 			_, err := plugin.Engine.Call(t.Context(), "buildSubmitRequest", xogpuContext("xogpu-video-text-480p", map[string]any{"prompt": "p", field: "1"}))
 			require.Error(t, err)
+		})
+	}
+}
+
+// OpenAI fields must produce the same vendor request and charge as their native
+// equivalents, including mapped model aliases and uploaded file references.
+func TestXOGPUOpenAIVideoCompatibility(t *testing.T) {
+	plugin := loadXOGPUPlugin(t)
+	for _, tc := range []struct {
+		name, model, seconds, size, resolution string
+		request                                map[string]any
+		files                                  []map[string]any
+		fileFields                             []string
+	}{
+		{name: "portrait", model: "xogpu-video-text-480p", seconds: "4", size: "720x1280", resolution: "480p竖"},
+		{name: "landscape", model: "xogpu-video-text-768p", seconds: "8", size: "1280x720", resolution: "768p横"},
+		{name: "pro portrait", model: "xogpu-video-text-768p", seconds: "12", size: "1024x1792", resolution: "768p竖"},
+		{name: "pro landscape", model: "xogpu-video-text-480p", seconds: "12", size: "1792x1024", resolution: "480p横"},
+		{name: "single reference", model: "xogpu-video-multiref-quality-480p", seconds: "8", size: "720x1280", resolution: "480p竖", files: []map[string]any{xogpuFile("input_reference", "person.png", 3)}, fileFields: []string{"reference_images"}},
+		{name: "square reference", model: "xogpu-video-multiref-fast-480p", seconds: "12", size: "1024x1024", resolution: "480p(1:1)", files: []map[string]any{xogpuFile("input_reference", "person.webp", 3)}, fileFields: []string{"reference_images"}},
+		{name: "hd landscape", model: "xogpu-video-multiref-hd-1080p", seconds: "8", size: "1920x1080", resolution: "1080p横", files: []map[string]any{xogpuFile("input_reference", "person.jpg", 3)}, fileFields: []string{"reference_images"}},
+		{name: "hd portrait", model: "xogpu-video-multiref-hd-1080p", seconds: "8", size: "1080x1920", resolution: "1080p竖"},
+		{name: "first and last frame", model: "xogpu-video-frames-480p", seconds: "4", size: "1280x720", resolution: "480p横", files: []map[string]any{xogpuFile("input_reference", "start.png", 3), xogpuFile("last_frame", "end.png", 4)}, fileFields: []string{"first_frame", "last_frame"}},
+		{name: "lip sync", model: "xogpu-video-lipsync-480p", seconds: "8", size: "720x1280", resolution: "480p竖", files: []map[string]any{xogpuFile("input_reference", "face.png", 3), xogpuFile("reference_audios", "voice.wav", 4)}, fileFields: []string{"reference_images", "reference_audios"}},
+		{name: "equivalent native fields", model: "xogpu-video-text-480p", seconds: "04", size: "720x1280", resolution: "480p竖", request: map[string]any{"duration": "4", "resolution": "480p竖"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fields := map[string][]string{"model": {"local-video-alias"}, "seconds": {tc.seconds}, "size": {tc.size}}
+			if !strings.Contains(tc.model, "lipsync") {
+				fields["prompt"] = []string{"p"}
+			}
+			for field, value := range tc.request {
+				fields[field] = []string{value.(string)}
+			}
+			value, err := plugin.Engine.CallPath(t.Context(), "protocols", []string{"openai_video", "decodeRequest"}, map[string]any{
+				"model": "local-video-alias", "body": map[string]any{"kind": "multipart", "fields": fields, "files": tc.files},
+			})
+			require.NoError(t, err)
+			intent := value.(map[string]any)
+			assert.Equal(t, "local-video-alias", intent["model"])
+			ctx := xogpuContext("local-video-alias", intent["requestBody"].(map[string]any), tc.files...)
+			ctx["upstreamModel"] = tc.model
+			submit := callXOGPUHook(t, plugin, "buildSubmitRequest", ctx)
+			gotFields := map[string]any{}
+			var gotFiles []string
+			for _, raw := range submit["parts"].([]any) {
+				part := raw.(map[string]any)
+				if part["fileRef"] != nil {
+					gotFiles = append(gotFiles, part["name"].(string))
+					assert.Equal(t, tc.files[len(gotFiles)-1]["ref"], part["fileRef"])
+					continue
+				}
+				gotFields[part["name"].(string)] = part["value"]
+			}
+			durationField := "duration"
+			if strings.Contains(tc.model, "lipsync") {
+				durationField = "audio_duration"
+			}
+			wantSeconds := strings.TrimLeft(tc.seconds, "0")
+			wantFields := map[string]any{"model": tc.model, durationField: wantSeconds, "resolution": tc.resolution}
+			if !strings.Contains(tc.model, "lipsync") {
+				wantFields["prompt"] = "p"
+			}
+			assert.Equal(t, wantFields, gotFields)
+			assert.Equal(t, tc.fileFields, gotFiles)
+			assert.Equal(t, map[string]any{"seconds": float64(map[string]int{"4": 4, "8": 8, "12": 12}[wantSeconds])}, callXOGPUHook(t, plugin, "extractUsage", ctx))
+		})
+	}
+	for _, tc := range []struct {
+		name, model string
+		request     map[string]any
+		files       []map[string]any
+	}{
+		{name: "duration conflict", request: map[string]any{"prompt": "p", "seconds": "4", "duration": "5"}},
+		{name: "resolution conflict", request: map[string]any{"prompt": "p", "size": "720x1280", "resolution": "480p横"}},
+		{name: "wrong native duration", request: map[string]any{"prompt": "p", "seconds": "4", "audio_duration": "4"}},
+		{name: "zero seconds", request: map[string]any{"prompt": "p", "seconds": 0}},
+		{name: "fractional seconds", request: map[string]any{"prompt": "p", "seconds": "4.5"}},
+		{name: "seconds above model limit", model: "xogpu-video-multiref-hd-480p", request: map[string]any{"prompt": "p", "seconds": "12"}},
+		{name: "invalid size", request: map[string]any{"prompt": "p", "size": "0x1280"}},
+		{name: "unsupported square", model: "xogpu-video-multiref-hd-480p", request: map[string]any{"prompt": "p", "size": "1024x1024"}},
+		{name: "reference on text model", request: map[string]any{"prompt": "p"}, files: []map[string]any{xogpuFile("input_reference", "ref.png", 3)}},
+		{name: "missing last frame", model: "xogpu-video-frames-480p", request: map[string]any{"prompt": "p"}, files: []map[string]any{xogpuFile("input_reference", "ref.png", 3)}},
+		{name: "duplicate input reference", model: "xogpu-video-multiref-quality-480p", request: map[string]any{"prompt": "p"}, files: []map[string]any{xogpuFile("input_reference", "ref.png", 3), xogpuFile("input_reference", "other.png", 3)}},
+		{name: "mixed reference fields", model: "xogpu-video-multiref-quality-480p", request: map[string]any{"prompt": "p"}, files: []map[string]any{xogpuFile("input_reference", "ref.png", 3), xogpuFile("reference_images", "other.png", 3)}},
+		{name: "mixed first frame fields", model: "xogpu-video-frames-480p", request: map[string]any{"prompt": "p"}, files: []map[string]any{xogpuFile("input_reference", "ref.png", 3), xogpuFile("first_frame", "start.png", 3), xogpuFile("last_frame", "end.png", 3)}},
+		{name: "oversized input reference", model: "xogpu-video-multiref-quality-480p", request: map[string]any{"prompt": "p"}, files: []map[string]any{xogpuFile("input_reference", "ref.png", (20<<20)+1)}},
+		{name: "URL reference", model: "xogpu-video-multiref-quality-480p", request: map[string]any{"prompt": "p", "input_reference": "https://example.com/image.png"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			modelName := tc.model
+			if modelName == "" {
+				modelName = "xogpu-video-text-480p"
+			}
+			for _, hook := range []string{"buildSubmitRequest", "extractUsage"} {
+				_, err := plugin.Engine.Call(t.Context(), hook, xogpuContext(modelName, tc.request, tc.files...))
+				require.Error(t, err, hook)
+			}
 		})
 	}
 }
@@ -298,9 +396,8 @@ func (*xogpuReservation) Settle(int) error                      { return nil }
 func (*xogpuReservation) Refund(*gin.Context)                   {}
 func (*xogpuReservation) NeedsRefund() bool                     { return false }
 
-// The real host meters a mapped alias, sends multipart bytes and suppresses
-// resubmission after ambiguous transport, HTTP, and accepted-response failures.
-func TestXOGPUHostSubmissionAndRetrySafety(t *testing.T) {
+// The real host meters a mapped alias and sends the uploaded multipart bytes.
+func TestXOGPUHostSubmission(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	plugin := loadXOGPUPlugin(t)
 	service.InitHttpClient()
@@ -315,15 +412,37 @@ func TestXOGPUHostSubmissionAndRetrySafety(t *testing.T) {
 	for _, tc := range []struct {
 		name, reply string
 		status      int
+		openai      bool
+		reference   bool
 	}{
-		{"accepted", `{"id":"private-task","object":"video","status":"queued","duration":12}`, 202},
-		{"server failure", `{"error":{"message":"unavailable"}}`, 503},
-		{"rate limit", `{"error":{"message":"busy"}}`, 429},
-		{"missing task id", `{"object":"video","status":"queued"}`, 202},
-		{"malformed accepted response", `{"id":`, 202},
-		{"transport failure", "", 0},
+		{name: "accepted", reply: `{"id":"private-task","object":"video","status":"queued","duration":12}`, status: 202},
+		{name: "OpenAI frames", reply: `{"id":"private-task","object":"video","status":"queued","duration":12}`, status: 202, openai: true},
+		{name: "OpenAI reference", reply: `{"id":"private-task","object":"video","status":"queued","duration":12}`, status: 202, openai: true, reference: true},
+		{name: "server failure", reply: `{"error":{"message":"unavailable"}}`, status: 503},
+		{name: "rate limit", reply: `{"error":{"message":"busy"}}`, status: 429},
+		{name: "missing task id", reply: `{"object":"video","status":"queued"}`, status: 202},
+		{name: "malformed accepted response", reply: `{"id":`, status: 202},
+		{name: "transport failure", status: 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			clientFields := map[string]any{"model": "Minimax-H3-frame-480p", "prompt": "p", "duration": "7"}
+			clientFiles := map[string]string{"first_frame": "first bytes", "last_frame": "last bytes"}
+			wantFields := map[string][]string{"model": {"xogpu-video-frames-480p"}, "prompt": {"p"}, "duration": {"7"}, "resolution": {"480p竖"}}
+			wantFiles := map[string]string{"first_frame": "first bytes", "last_frame": "last bytes"}
+			wantSeconds, wantUSD := float64(7), 0.07
+			mapping := `{"Minimax-H3-frame-480p":"xogpu-video-frames-480p"}`
+			if tc.openai {
+				clientFields = map[string]any{"model": "Minimax-H3-frame-480p", "prompt": "p", "seconds": "8", "size": "1280x720"}
+				clientFiles = map[string]string{"input_reference": "first bytes", "last_frame": "last bytes"}
+				wantFields = map[string][]string{"model": {"xogpu-video-frames-480p"}, "prompt": {"p"}, "duration": {"8"}, "resolution": {"480p横"}}
+				wantSeconds, wantUSD = 8, 0.08
+			}
+			if tc.reference {
+				clientFiles = map[string]string{"input_reference": "first bytes"}
+				wantFields["model"] = []string{"xogpu-video-multiref-quality-480p"}
+				wantFiles = map[string]string{"reference_images": "first bytes"}
+				mapping = `{"Minimax-H3-frame-480p":"xogpu-video-multiref-quality-480p"}`
+			}
 			var calls atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				calls.Add(1)
@@ -333,8 +452,9 @@ func TestXOGPUHostSubmissionAndRetrySafety(t *testing.T) {
 					return
 				}
 				defer r.MultipartForm.RemoveAll()
-				assert.Equal(t, map[string][]string{"model": {"xogpu-video-frames-480p"}, "prompt": {"p"}, "duration": {"7"}, "resolution": {"480p竖"}}, r.MultipartForm.Value)
-				for field, expected := range map[string]string{"first_frame": "first bytes", "last_frame": "last bytes"} {
+				assert.Equal(t, wantFields, r.MultipartForm.Value)
+				assert.Len(t, r.MultipartForm.File, len(wantFiles))
+				for field, expected := range wantFiles {
 					file, _, err := r.FormFile(field)
 					if !assert.NoError(t, err) {
 						return
@@ -354,10 +474,10 @@ func TestXOGPUHostSubmissionAndRetrySafety(t *testing.T) {
 			defer server.Close()
 			var input bytes.Buffer
 			writer := multipart.NewWriter(&input)
-			for key, value := range map[string]string{"model": "Minimax-H3-frame-480p", "prompt": "p", "duration": "7"} {
-				require.NoError(t, writer.WriteField(key, value))
+			for key, value := range clientFields {
+				require.NoError(t, writer.WriteField(key, value.(string)))
 			}
-			for field, value := range map[string]string{"first_frame": "first bytes", "last_frame": "last bytes"} {
+			for field, value := range clientFiles {
 				part, err := writer.CreateFormFile(field, field+".png")
 				require.NoError(t, err)
 				_, err = io.WriteString(part, value)
@@ -367,8 +487,8 @@ func TestXOGPUHostSubmissionAndRetrySafety(t *testing.T) {
 			c, _ := gin.CreateTestContext(httptest.NewRecorder())
 			c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", &input)
 			c.Request.Header.Set("Content-Type", writer.FormDataContentType())
-			c.Set("model_mapping", `{"Minimax-H3-frame-480p":"xogpu-video-frames-480p"}`)
-			c.Set("task_request", map[string]any{"model": "Minimax-H3-frame-480p", "prompt": "p", "duration": "7"})
+			c.Set("model_mapping", mapping)
+			c.Set("task_request", clientFields)
 			c.Set(jsplugin.ContextKeyPinnedPlugin, jsplugin.PinnedPlugin{Plugin: plugin})
 			common.SetContextKey(c, constant.ContextKeyChannelType, constant.ChannelTypeNewAPI)
 			common.SetContextKey(c, constant.ContextKeyChannelBaseUrl, server.URL)
@@ -378,11 +498,10 @@ func TestXOGPUHostSubmissionAndRetrySafety(t *testing.T) {
 			result, taskErr := relay.RelayTaskSubmit(c, info)
 			assert.Equal(t, int32(1), calls.Load())
 			assert.Equal(t, "Minimax-H3-frame-480p", info.OriginModelName)
-			assert.Equal(t, map[string]any{"seconds": float64(7)}, info.TieredBillingSnapshot.UsageFacts)
-			assert.Equal(t, common.QuotaRound(0.07*common.QuotaPerUnit), reservation.held)
-			if tc.name != "accepted" {
+			assert.Equal(t, map[string]any{"seconds": wantSeconds}, info.TieredBillingSnapshot.UsageFacts)
+			assert.Equal(t, common.QuotaRound(wantUSD*common.QuotaPerUnit), reservation.held)
+			if tc.name != "accepted" && !tc.openai {
 				require.NotNil(t, taskErr)
-				assert.True(t, taskErr.NoRetry, "%+v", taskErr)
 				assert.Nil(t, result)
 				return
 			}

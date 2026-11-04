@@ -6,15 +6,15 @@ export const meta = {
     en: "XOGPU video generation with text, frames, references, and lip sync",
     zh: "XOGPU 视频生成，支持文本、首尾帧、参考素材和口型同步",
   },
-  version: "1.0.0",
+  version: "1.1.0",
   author: { name: "QuantumNous" },
   website: "https://xogpu.com",
   baseUrl: "https://xogpu.com",
   fetchMode: "per_task",
   upstreams: ["vendor", "new_api"],
-  // Creation has no idempotency guarantee. Older hosts must reject this plugin
-  // instead of silently recreating a task after an ambiguous submission failure.
-  requiredCapabilities: ["submit-no-retry@1"],
+  // Uses only existing API v1 hooks so it can be uploaded independently.
+  // Creation is not idempotent; administrators must disable submission retries
+  // in the host's existing settings when the host cannot suppress them per task.
   models: [
     "xogpu-video-text-480p",
     "xogpu-video-text-768p",
@@ -61,12 +61,18 @@ function videoSubmission(ctx) {
   const req = ctx.requestBody || {};
   if (typeof req !== "object" || Array.isArray(req)) throw new Error("request body must be an object");
   for (const field of Object.keys(req)) {
-    if (!["model", "prompt", "duration", "audio_duration", "resolution", "seed"].includes(field)) throw new Error("unsupported field: " + field);
+    if (!["model", "prompt", "duration", "audio_duration", "resolution", "seed", "seconds", "size"].includes(field))
+      throw new Error("unsupported field: " + field);
   }
   const durationField = lipsync ? "audio_duration" : "duration";
   const forbiddenDuration = lipsync ? "duration" : "audio_duration";
   if (Object.prototype.hasOwnProperty.call(req, forbiddenDuration)) throw new Error(forbiddenDuration + " is not supported by this model");
-  const duration = decimalText(req[durationField] === undefined ? 5 : req[durationField], durationField);
+  let duration = decimalText(req[durationField] === undefined ? 5 : req[durationField], durationField);
+  if (Object.prototype.hasOwnProperty.call(req, "seconds")) {
+    const openaiSeconds = decimalText(req.seconds, "seconds");
+    if (Object.prototype.hasOwnProperty.call(req, durationField) && openaiSeconds !== duration) throw new Error("seconds conflicts with " + durationField);
+    duration = openaiSeconds;
+  }
   const seconds = Number(duration);
   const maxSeconds = mode === "multiref-hd" ? 10 : 15;
   if (!Number.isInteger(seconds) || seconds < 1 || seconds > maxSeconds) throw new Error(durationField + " must be between 1 and " + maxSeconds);
@@ -82,7 +88,24 @@ function videoSubmission(ctx) {
   }
   parts.push({ name: durationField, value: duration });
 
-  const resolution = req.resolution === undefined ? quality + "竖" : req.resolution;
+  let resolution = req.resolution === undefined ? quality + "竖" : req.resolution;
+  if (Object.prototype.hasOwnProperty.call(req, "size")) {
+    // OpenAI dimensions select the layout; output quality is fixed by the
+    // mapped XOGPU model, so size cannot silently change the billed model.
+    const layouts = {
+      "720x1280": "竖",
+      "1280x720": "横",
+      "1024x1792": "竖",
+      "1792x1024": "横",
+      "1080x1920": "竖",
+      "1920x1080": "横",
+      "1024x1024": "(1:1)",
+    };
+    if (typeof req.size !== "string" || !Object.prototype.hasOwnProperty.call(layouts, req.size)) throw new Error("unsupported video size");
+    const mappedResolution = quality + layouts[req.size];
+    if (Object.prototype.hasOwnProperty.call(req, "resolution") && resolution !== mappedResolution) throw new Error("size conflicts with resolution");
+    resolution = mappedResolution;
+  }
   const resolutions = [quality + "横", quality + "竖"];
   if (!lipsync && mode !== "multiref-hd") resolutions.push(quality + "(1:1)");
   if (!resolutions.includes(resolution)) throw new Error("resolution must match the model quality and supported aspect ratios");
@@ -95,14 +118,21 @@ function videoSubmission(ctx) {
     parts.push({ name: "seed", value: seed });
   }
 
+  const files = ctx.files || [];
+  const inputReferences = files.filter((file) => file.field === "input_reference");
+  if (inputReferences.length > 1) throw new Error("input_reference must be provided once");
+  const referenceField = mode === "frames" ? "first_frame" : "reference_images";
+  if (inputReferences.length && files.some((file) => file.field === referenceField))
+    throw new Error("input_reference cannot be combined with " + referenceField);
   const counts = { reference_images: 0, reference_audios: 0, first_frame: 0, last_frame: 0 };
   let totalBytes = 0;
   // Reserve space for bounded text fields, part headers, and boundaries. UTF-8
   // uses at most three bytes per UTF-16 code unit in a supplied MIME header.
   let requestBytes = 64 * 1024;
-  for (const file of ctx.files || []) {
-    if (!Object.prototype.hasOwnProperty.call(counts, file.field)) throw new Error("unsupported file field: " + file.field);
-    const audio = file.field === "reference_audios";
+  for (const file of files) {
+    const field = file.field === "input_reference" ? referenceField : file.field;
+    if (!Object.prototype.hasOwnProperty.call(counts, field)) throw new Error("unsupported file field: " + field);
+    const audio = field === "reference_audios";
     const extension = /\.([^.\\/]+)$/.exec(file.filename || "");
     const ext = extension ? extension[1].toLowerCase() : "";
     if (!(audio ? ["mp3", "wav", "mp4", "flac"] : ["jpg", "jpeg", "png", "webp"]).includes(ext)) throw new Error("unsupported file format: " + file.field);
@@ -113,9 +143,9 @@ function videoSubmission(ctx) {
     if (totalBytes > 95 * 1024 * 1024) throw new Error("total media must not exceed 95 MiB");
     requestBytes += file.size + String(file.mimeType || "").length * 3 + 512;
     if (requestBytes > 100 * 1024 * 1024) throw new Error("multipart request must not exceed 100 MiB");
-    counts[file.field]++;
+    counts[field]++;
     // Normalize filenames so arbitrary client names cannot enlarge MIME headers.
-    parts.push({ name: file.field, fileRef: file.ref, filename: file.field + "-" + counts[file.field] + "." + ext });
+    parts.push({ name: field, fileRef: file.ref, filename: field + "-" + counts[field] + "." + ext });
   }
   if (mode === "frames") {
     if (counts.first_frame !== 1 || counts.last_frame !== 1 || counts.reference_images || counts.reference_audios)
