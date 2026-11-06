@@ -25,6 +25,15 @@
   },
   "allOf": [{"if": {"required": ["requiredCapabilities"], "properties": {"requiredCapabilities": {"contains": {"const": "submit-sse-delta@1"}}}}, "then": {"required": ["submitResponseTypes"], "properties": {"submitResponseTypes": {"contains": {"const": "sse"}}}}}],
   "$defs": {
+    "fileUploadRequest": {
+      "type": "object", "additionalProperties": false, "required": ["url", "fileRef"],
+      "properties": {
+        "url": {"type": "string", "format": "uri", "pattern": "^https?://"},
+        "headers": {"type": "object", "additionalProperties": {"type": "string"}},
+        "fileRef": {"type": "string", "pattern": "^request_file:.+"}
+      },
+      "description": "utils.uploadFile request. Only available while building a submission. The host resolves an uploaded multipart file and posts it to a trusted host."
+    },
     "jsonChange": {
       "type": "object", "additionalProperties": false, "required": ["op", "path", "value"],
       "properties": {

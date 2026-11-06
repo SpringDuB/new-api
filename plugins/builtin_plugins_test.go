@@ -13,7 +13,7 @@ import (
 )
 
 var expectedResponseKeys = []string{"alibaba", "doubao", "google", "hailuo", "jimeng", "kling", "sora", "sunoapi", "vertex-ai", "vidu", "xai"}
-var expectedKeys = slices.Concat(expectedResponseKeys, []string{"xogpu"})
+var expectedKeys = slices.Sorted(slices.Values(slices.Concat(expectedResponseKeys, []string{"runninghub-h3", "xogpu"})))
 
 func TestBuiltInVendorPluginsDeclareNativeRoutesAndLegacyChannelTypes(t *testing.T) {
 	generation := jsplugin.DefaultRegistry.Generation()

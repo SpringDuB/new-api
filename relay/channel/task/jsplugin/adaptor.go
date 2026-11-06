@@ -870,6 +870,97 @@ func (a *TaskAdaptor) hookFetcher(baseURL, proxy string) pluginruntime.Fetcher {
 	}
 }
 
+func (a *TaskAdaptor) hookFileUploader(c *gin.Context, baseURL, proxy string) pluginruntime.Fetcher {
+	// Keep completed uploads local to this build call. Usage extraction never
+	// performs uploads, and repeating a reference does not resend the same file.
+	uploaded := make(map[string]pluginruntime.FetchResponse)
+	var totalBytes int64
+	return func(ctx context.Context, request pluginruntime.FetchRequest) (pluginruntime.FetchResponse, error) {
+		if err := pluginruntime.ValidateRequestURL(request.URL, baseURL, a.plugin.Meta.AllowedHosts); err != nil {
+			return pluginruntime.FetchResponse{}, err
+		}
+		if request.Method != http.MethodPost || c == nil || c.Request == nil || !strings.Contains(c.GetHeader("Content-Type"), "multipart/form-data") {
+			return pluginruntime.FetchResponse{}, fmt.Errorf("file uploads require the submitting multipart request")
+		}
+		cacheKey := request.URL + "\x00" + request.FileRef
+		if response, ok := uploaded[cacheKey]; ok {
+			return response, nil
+		}
+		field, index, valid := pluginruntime.ParseFileReference(request.FileRef)
+		form, err := common.ParseMultipartFormReusable(c)
+		if err != nil {
+			return pluginruntime.FetchResponse{}, err
+		}
+		defer form.RemoveAll()
+		if !valid || index >= len(form.File[field]) {
+			return pluginruntime.FetchResponse{}, fmt.Errorf("unknown uploaded file reference")
+		}
+		fileHeader := form.File[field][index]
+		limit := maxInlineFileBytes()
+		if fileHeader.Size <= 0 || fileHeader.Size > limit || totalBytes > limit-fileHeader.Size {
+			return pluginruntime.FetchResponse{}, fmt.Errorf("uploaded files exceed the %d byte limit", limit)
+		}
+		file, err := fileHeader.Open()
+		if err != nil {
+			return pluginruntime.FetchResponse{}, err
+		}
+		defer file.Close()
+		var envelope bytes.Buffer
+		writer := multipart.NewWriter(&envelope)
+		header := make(textproto.MIMEHeader)
+		header.Set("Content-Disposition", mime.FormatMediaType("form-data", map[string]string{"name": "file", "filename": fileHeader.Filename}))
+		mimeType := fileHeader.Header.Get("Content-Type")
+		if mimeType == "" {
+			mimeType = "application/octet-stream"
+		}
+		header.Set("Content-Type", mimeType)
+		if _, err = writer.CreatePart(header); err != nil {
+			return pluginruntime.FetchResponse{}, err
+		}
+		prefixLength := envelope.Len()
+		if err = writer.Close(); err != nil {
+			return pluginruntime.FetchResponse{}, err
+		}
+		body := io.MultiReader(bytes.NewReader(envelope.Bytes()[:prefixLength]), io.LimitReader(file, fileHeader.Size), bytes.NewReader(envelope.Bytes()[prefixLength:]))
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, request.URL, body)
+		if err != nil {
+			return pluginruntime.FetchResponse{}, err
+		}
+		for name, value := range request.Headers {
+			req.Header.Set(name, value)
+		}
+		req.Header.Set("Content-Type", writer.FormDataContentType())
+		req.ContentLength = fileHeader.Size + int64(envelope.Len())
+		client, err := service.GetHttpClientWithProxySettings(proxy, a.channelSetting())
+		if err != nil {
+			return pluginruntime.FetchResponse{}, err
+		}
+		noRedirects := *client
+		noRedirects.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+		totalBytes += fileHeader.Size
+		resp, err := noRedirects.Do(req)
+		if err != nil {
+			return pluginruntime.FetchResponse{}, err
+		}
+		defer resp.Body.Close()
+		data, err := io.ReadAll(io.LimitReader(resp.Body, pluginruntime.MaxFetchBodyBytes+1))
+		if err != nil {
+			return pluginruntime.FetchResponse{}, err
+		}
+		headers := make(map[string]string, len(resp.Header))
+		for name, values := range resp.Header {
+			if len(values) > 0 {
+				headers[name] = values[0]
+			}
+		}
+		response := pluginruntime.FetchResponse{Status: resp.StatusCode, Headers: headers, Body: data}
+		if resp.StatusCode >= 200 && resp.StatusCode < 300 && len(data) <= pluginruntime.MaxFetchBodyBytes {
+			uploaded[cacheKey] = response
+		}
+		return response, nil
+	}
+}
+
 func (a *TaskAdaptor) doFetchDescriptor(baseURL, key, proxy string, descriptor requestDescriptor) (*http.Response, error) {
 	if err := pluginruntime.ValidateRequestURL(descriptor.URL, baseURL, a.plugin.Meta.AllowedHosts); err != nil {
 		return nil, err
@@ -1639,6 +1730,7 @@ func (a *TaskAdaptor) buildSubmit(c *gin.Context, info *relaycommon.RelayInfo) (
 	fetchContext := c.Request.Context()
 	if info.HasChannelMeta() {
 		fetchContext = pluginruntime.WithFetcher(fetchContext, a.hookFetcher(info.ChannelBaseUrl, info.ChannelSetting.Proxy))
+		fetchContext = pluginruntime.WithFileUploader(fetchContext, a.hookFileUploader(c, info.ChannelBaseUrl, info.ChannelSetting.Proxy))
 	}
 	descriptor, err := a.requestDescriptor(fetchContext, "buildSubmitRequest", a.submitContext(c, info))
 	if err != nil {

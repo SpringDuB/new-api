@@ -20,7 +20,10 @@ export interface HostUtils {
   volcSignV4(request: {method: string; url: string; headers?: Record<string, string>; body?: string; accessKey: string; secretKey: string; region?: string; service?: string; timestamp?: number}): Record<string, string>;
   /** Synchronous read-only request from driver hooks to the channel Base URL host or allowedHosts. At most 4 per hook call, 15 s each, 30 s in total, 1 MiB per body; redirects are returned, not followed. */
   fetch(request: FetchRequest): FetchResponse;
+  /** buildSubmitRequest only: upload a request-scoped file as multipart field "file" to a trusted host. Does not start billable work. Shares fetch's time/body limits; at most 16 uploads per hook and MAX_FILE_DOWNLOAD_MB total file bytes. */
+  uploadFile(request: FileUploadRequest): FetchResponse;
 }
+export interface FileUploadRequest {url: string; headers?: Record<string, string>; fileRef: string}
 export interface FetchRequest {url: string; method?: "GET" | "HEAD"; headers?: Record<string, string>; responseType?: "json" | "bytes"}
 /** headers holds the first value of each header under its canonical name; body is parsed JSON when the response parses, otherwise text, and "" for HEAD; with responseType "bytes" it is an ArrayBuffer of the response bytes. */
 export interface FetchResponse {status: number; headers: Record<string, string>; body: JSONValue | string | ArrayBuffer}

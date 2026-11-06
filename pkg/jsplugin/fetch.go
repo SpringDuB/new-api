@@ -22,6 +22,7 @@ type FetchRequest struct {
 	URL     string
 	Method  string
 	Headers map[string]string
+	FileRef string // utils.uploadFile only; bytes remain in the host request.
 }
 
 type FetchResponse struct {
@@ -42,10 +43,17 @@ const (
 )
 
 type fetcherContextKey struct{}
+type fileUploaderContextKey struct{}
 
 // WithFetcher makes utils.fetch available to the hook called with ctx.
 func WithFetcher(ctx context.Context, fetcher Fetcher) context.Context {
 	return context.WithValue(ctx, fetcherContextKey{}, fetcher)
+}
+
+// WithFileUploader binds request-scoped multipart uploads during submit building.
+// It must not be bound to decoders, polling, renderers, or usage hooks.
+func WithFileUploader(ctx context.Context, uploader Fetcher) context.Context {
+	return context.WithValue(ctx, fileUploaderContextKey{}, uploader)
 }
 
 // runtimeCall is the hook call a runtime is running, as its host functions
@@ -57,12 +65,14 @@ type runtimeCall struct {
 	ctx      context.Context
 	hook     string
 	fetcher  Fetcher
+	uploader Fetcher
 	watchdog *runtimeWatchdog
 	// holdsSlot and parked are what the call holds of the engine's
 	// semaphore and parked tokens; release returns exactly that.
 	holdsSlot bool
 	parked    bool
 	fetches   int
+	uploads   int
 	fetchTime time.Duration
 }
 
@@ -93,14 +103,58 @@ func (c *runtimeCall) fetch(r *moejs.Realm, argument moejs.Value) (moejs.Value, 
 	if c.fetches >= maxFetchesPerCall {
 		return moejs.Undefined(), fmt.Errorf("utils.fetch allows at most %d requests per hook call", maxFetchesPerCall)
 	}
+	c.fetches++
+	return c.performFetch(r, request, host, wantBytes, c.fetcher, "utils.fetch")
+}
+
+func (c *runtimeCall) uploadFile(r *moejs.Realm, argument moejs.Value) (moejs.Value, error) {
+	if c.uploader == nil || c.hook != "buildSubmitRequest" {
+		return moejs.Undefined(), fmt.Errorf("utils.uploadFile is not available in %s", c.hook)
+	}
+	exported, err := r.ToGoStrict(argument)
+	if err != nil {
+		return moejs.Undefined(), err
+	}
+	members, ok := exported.(map[string]any)
+	if !ok {
+		return moejs.Undefined(), r.TypeError("utils.uploadFile request must be an object")
+	}
+	for name := range members {
+		if name != "url" && name != "headers" && name != "fileRef" {
+			return moejs.Undefined(), r.TypeError("utils.uploadFile request has unsupported member %q", name)
+		}
+	}
+	ref, _ := members["fileRef"].(string)
+	if _, _, valid := ParseFileReference(ref); !valid {
+		return moejs.Undefined(), r.TypeError("utils.uploadFile requires an uploaded file reference")
+	}
+	// Reuse the ordinary URL/header validation without enabling writes in fetch.
+	validated, err := r.FromGo(map[string]any{"url": members["url"], "headers": members["headers"]})
+	if err != nil {
+		return moejs.Undefined(), err
+	}
+	request, host, _, err := fetchRequest(r, validated)
+	if err != nil {
+		return moejs.Undefined(), err
+	}
+	if c.uploads >= 16 {
+		return moejs.Undefined(), fmt.Errorf("utils.uploadFile allows at most 16 uploads per hook call")
+	}
+	c.uploads++
+	request.Method, request.FileRef = http.MethodPost, ref
+	return c.performFetch(r, request, host, false, c.uploader, "utils.uploadFile")
+}
+
+// performFetch shares the bounded network wait and JSON response handling.
+func (c *runtimeCall) performFetch(r *moejs.Realm, request FetchRequest, host string, wantBytes bool, fetcher Fetcher, tool string) (moejs.Value, error) {
+	request.Hook = c.hook
 	remaining := maxFetchTimePerCall - c.fetchTime
 	if remaining <= 0 {
-		return moejs.Undefined(), fmt.Errorf("utils.fetch requests used up their %s per hook call", maxFetchTimePerCall)
+		return moejs.Undefined(), fmt.Errorf("%s requests used up their %s per hook call", tool, maxFetchTimePerCall)
 	}
-	c.fetches++
-	timeout, timeoutCause := fetchTimeout, fmt.Errorf("utils.fetch to %s timed out after %s", host, fetchTimeout)
+	timeout, timeoutCause := fetchTimeout, fmt.Errorf("%s to %s timed out after %s", tool, host, fetchTimeout)
 	if remaining < fetchTimeout {
-		timeout, timeoutCause = remaining, fmt.Errorf("utils.fetch to %s ran past the %s of requests per hook call", host, maxFetchTimePerCall)
+		timeout, timeoutCause = remaining, fmt.Errorf("%s to %s ran past the %s of requests per hook call", tool, host, maxFetchTimePerCall)
 	}
 
 	if !c.watchdog.pause() {
@@ -110,7 +164,7 @@ func (c *runtimeCall) fetch(r *moejs.Realm, argument moejs.Value) (moejs.Value, 
 	c.yieldSlot()
 	fetchContext, cancel := context.WithTimeoutCause(c.ctx, timeout, timeoutCause)
 	started := time.Now()
-	response, err := c.fetcher(fetchContext, request)
+	response, err := fetcher(fetchContext, request)
 	c.fetchTime += time.Since(started)
 	if err != nil && fetchContext.Err() != nil {
 		err = context.Cause(fetchContext)
@@ -136,10 +190,10 @@ func (c *runtimeCall) fetch(r *moejs.Realm, argument moejs.Value) (moejs.Value, 
 		if errors.As(err, &transportErr) {
 			err = transportErr.Err
 		}
-		return moejs.Undefined(), fmt.Errorf("utils.fetch to %s failed: %v", host, err)
+		return moejs.Undefined(), fmt.Errorf("%s to %s failed: %v", tool, host, err)
 	}
 	if len(response.Body) > MaxFetchBodyBytes {
-		return moejs.Undefined(), fmt.Errorf("utils.fetch response from %s exceeds %d bytes", host, MaxFetchBodyBytes)
+		return moejs.Undefined(), fmt.Errorf("%s response from %s exceeds %d bytes", tool, host, MaxFetchBodyBytes)
 	}
 	// The result is built from JavaScript objects, not a host map: a hook may
 	// return it, or part of it, as it is.
