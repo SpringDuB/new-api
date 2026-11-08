@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { AlertTriangle, ChevronDown, PaintBucket } from 'lucide-react'
+import { AlertTriangle, ChevronDown, PaintBucket, Trash2 } from 'lucide-react'
 import { useRef, useState, type KeyboardEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -81,6 +81,8 @@ type TaskPricingMatrixProps = {
   matchedRowIndex: number | null
   onRowChange: (index: number, next: TaskMatrixRow) => void
   onFillColumn: (priceKey: string, value: number) => void
+  onRemoveRow?: (index: number) => void
+  disabledFields?: string[]
 }
 
 type IndexedTaskMatrixRow = {
@@ -89,6 +91,7 @@ type IndexedTaskMatrixRow = {
 }
 
 type FillColumnPopoverProps = {
+  disabled?: boolean
   currency?: PricingCurrency
   priceKey: string
   initialValue: number
@@ -126,6 +129,7 @@ function FillColumnPopover(props: FillColumnPopoverProps) {
             size='sm'
             className='h-8 min-w-8 shrink-0 px-2'
             aria-label={t('Fill entire column')}
+            disabled={props.disabled}
           />
         }
       >
@@ -177,6 +181,8 @@ type TaskMatrixTableProps = {
   matchedRowIndex: number | null
   onRowChange: (index: number, next: TaskMatrixRow) => void
   onFillColumn: (priceKey: string, value: number) => void
+  onRemoveRow?: (index: number) => void
+  disabledFields?: string[]
   onPriceKeyDown: (
     event: KeyboardEvent<HTMLInputElement>,
     rowIndex: number,
@@ -228,6 +234,7 @@ function TaskMatrixTable(props: TaskMatrixTableProps) {
                 <FillColumnPopover
                   currency={props.currency}
                   priceKey={field}
+                  disabled={props.disabledFields?.includes(field)}
                   initialValue={props.firstRow.unitPrices[field] ?? 0}
                   onFillColumn={props.onFillColumn}
                 />
@@ -259,6 +266,11 @@ function TaskMatrixTable(props: TaskMatrixTableProps) {
           <TableHead scope='col' className='w-10 px-1 text-center'>
             <span className='sr-only'>{t('Status')}</span>
           </TableHead>
+          {props.onRemoveRow && (
+            <TableHead scope='col'>
+              <span className='sr-only'>{t('Actions')}</span>
+            </TableHead>
+          )}
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -288,11 +300,13 @@ function TaskMatrixTable(props: TaskMatrixTableProps) {
               {visibleEnumFields.map(([field]) => (
                 <TableCell key={field}>
                   <span className='break-words whitespace-normal'>
-                    {taskEnumLabel(
-                      usageSchema[field],
-                      entry.row.combination[field],
-                      i18n.language
-                    )}
+                    {entry.row.combination[field] === undefined
+                      ? t('Fallback tier')
+                      : taskEnumLabel(
+                          usageSchema[field],
+                          entry.row.combination[field],
+                          i18n.language
+                        )}
                   </span>
                 </TableCell>
               ))}
@@ -303,6 +317,7 @@ function TaskMatrixTable(props: TaskMatrixTableProps) {
                     min={0}
                     step={0.000001}
                     value={entry.row.unitPrices[field] ?? 0}
+                    disabled={props.disabledFields?.includes(field)}
                     data-matrix-col={field}
                     data-matrix-row={entry.index}
                     aria-label={`${taskPriceLabel(usageSchema[field]?.description, t('Unit price: {{field}}', { field }), i18n.language)}: ${rowLabel}`}
@@ -379,6 +394,21 @@ function TaskMatrixTable(props: TaskMatrixTableProps) {
                   </Tooltip>
                 ) : null}
               </TableCell>
+              {props.onRemoveRow && (
+                <TableCell>
+                  {Object.keys(entry.row.combination).length > 0 && (
+                    <Button
+                      type='button'
+                      variant='ghost'
+                      size='icon'
+                      aria-label={t('Remove tier {{name}}', { name: rowLabel })}
+                      onClick={() => props.onRemoveRow?.(entry.index)}
+                    >
+                      <Trash2 aria-hidden='true' />
+                    </Button>
+                  )}
+                </TableCell>
+              )}
             </TableRow>
           )
         })}
@@ -471,7 +501,9 @@ export function TaskPricingMatrix(props: TaskPricingMatrixProps) {
   )
   const firstEnumField = enumFields[0]
   const shouldGroup =
-    props.rows.length > TASK_MATRIX_GROUP_THRESHOLD && Boolean(firstEnumField)
+    !props.onRemoveRow &&
+    props.rows.length > TASK_MATRIX_GROUP_THRESHOLD &&
+    Boolean(firstEnumField)
   const [openGroups, setOpenGroups] = useState<string[]>(() => {
     const firstGroupValue = firstEnumField?.[1].enum?.[0]
     return firstGroupValue ? [firstGroupValue] : []
@@ -547,6 +579,7 @@ export function TaskPricingMatrix(props: TaskPricingMatrixProps) {
                 firstRow={firstRow}
                 allRowsFree={allRowsFree}
                 matchedRowIndex={props.matchedRowIndex}
+                disabledFields={props.disabledFields}
                 onRowChange={props.onRowChange}
                 onFillColumn={props.onFillColumn}
                 onPriceKeyDown={handlePriceKeyDown}
@@ -565,6 +598,8 @@ export function TaskPricingMatrix(props: TaskPricingMatrixProps) {
             onRowChange={props.onRowChange}
             onFillColumn={props.onFillColumn}
             onPriceKeyDown={handlePriceKeyDown}
+            onRemoveRow={props.onRemoveRow}
+            disabledFields={props.disabledFields}
           />
         )}
       </div>

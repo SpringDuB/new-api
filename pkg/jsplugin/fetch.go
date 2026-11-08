@@ -44,6 +44,12 @@ const (
 
 type fetcherContextKey struct{}
 type fileUploaderContextKey struct{}
+type mediaProberContextKey struct{}
+
+// WithMediaProber binds a credentialless, request-scoped media duration reader.
+func WithMediaProber(ctx context.Context, prober Fetcher) context.Context {
+	return context.WithValue(ctx, mediaProberContextKey{}, prober)
+}
 
 // WithFetcher makes utils.fetch available to the hook called with ctx.
 func WithFetcher(ctx context.Context, fetcher Fetcher) context.Context {
@@ -66,6 +72,7 @@ type runtimeCall struct {
 	hook     string
 	fetcher  Fetcher
 	uploader Fetcher
+	prober   Fetcher
 	watchdog *runtimeWatchdog
 	// holdsSlot and parked are what the call holds of the engine's
 	// semaphore and parked tokens; release returns exactly that.
@@ -73,6 +80,7 @@ type runtimeCall struct {
 	parked    bool
 	fetches   int
 	uploads   int
+	probes    int
 	fetchTime time.Duration
 }
 
@@ -143,6 +151,49 @@ func (c *runtimeCall) uploadFile(r *moejs.Realm, argument moejs.Value) (moejs.Va
 	c.uploads++
 	request.Method, request.FileRef = http.MethodPost, ref
 	return c.performFetch(r, request, host, false, c.uploader, "utils.uploadFile")
+}
+
+func (c *runtimeCall) mediaDuration(r *moejs.Realm, argument moejs.Value) (moejs.Value, error) {
+	if c.prober == nil || (c.hook != "extractUsage" && c.hook != "buildSubmitRequest") {
+		return moejs.Undefined(), fmt.Errorf("utils.mediaDuration is not available in %s", c.hook)
+	}
+	value, err := r.ToGoStrict(argument)
+	if err != nil {
+		return moejs.Undefined(), err
+	}
+	members, ok := value.(map[string]any)
+	if !ok || len(members) != 1 {
+		return moejs.Undefined(), r.TypeError("mediaDuration requires one url or fileRef")
+	}
+	request := FetchRequest{Method: http.MethodGet}
+	host := "uploaded video"
+	if raw, ok := members["url"].(string); ok {
+		parsed, err := url.Parse(raw)
+		if err != nil || len(raw) > maxFetchURLBytes || parsed.Host == "" || parsed.User != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+			return moejs.Undefined(), r.TypeError("mediaDuration requires an absolute HTTP(S) URL without credentials")
+		}
+		request.URL, host = raw, parsed.Host
+	} else if ref, ok := members["fileRef"].(string); ok {
+		if _, _, valid := ParseFileReference(ref); !valid {
+			return moejs.Undefined(), r.TypeError("mediaDuration requires a request file reference")
+		}
+		request.FileRef = ref
+	} else {
+		return moejs.Undefined(), r.TypeError("mediaDuration requires one url or fileRef")
+	}
+	if c.probes >= 16 {
+		return moejs.Undefined(), fmt.Errorf("mediaDuration allows at most 16 references")
+	}
+	c.probes++
+	result, err := c.performFetch(r, request, host, false, c.prober, "utils.mediaDuration")
+	if err != nil {
+		return moejs.Undefined(), err
+	}
+	decoded, err := r.ToGoStrict(result)
+	if err != nil {
+		return moejs.Undefined(), err
+	}
+	return r.FromGo(decoded.(map[string]any)["body"])
 }
 
 // performFetch shares the bounded network wait and JSON response handling.

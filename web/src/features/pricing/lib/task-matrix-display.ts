@@ -106,6 +106,7 @@ function readTaskPricingTiers(
   let combinations: TaskTierCondition[][] = [[]]
   for (const field of fields) {
     const definition = schema[field]
+    if (definition?.allowCustom) return tiers
     const values =
       definition?.type === 'boolean' ? ['false', 'true'] : definition?.enum
     // Avoid expanding large plugin schemas merely to name a fallback row.

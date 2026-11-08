@@ -27,12 +27,14 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	pluginruntime "github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/relay/channel"
 	"github.com/QuantumNous/new-api/relay/channel/task/taskcommon"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	kitdto "github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/gin-gonic/gin"
 )
 
@@ -271,7 +273,9 @@ func (a *TaskAdaptor) ExtractUsageFactsValidated(c *gin.Context, info *relaycomm
 	}
 	usageContext := a.submitContext(c, info)
 	usageContext["usagePurpose"] = "facts"
-	value, err := a.plugin.Engine.Call(c.Request.Context(), "extractUsage", usageContext)
+	expression, _ := billing_setting.ResolveTaskBillingExpr(a.plugin.Meta.Key, info.OriginModelName, info.UpstreamModelName)
+	usageContext["usageKeys"] = slices.Sorted(maps.Keys(billingexpr.UsedUsageKeys(expression)))
+	value, err := a.plugin.Engine.Call(mediaProbeContext(c.Request.Context(), c), "extractUsage", usageContext)
 	if err != nil {
 		return nil, fmt.Errorf("plugin usage hook failed")
 	}
@@ -1728,6 +1732,7 @@ func (a *TaskAdaptor) buildSubmit(c *gin.Context, info *relaycommon.RelayInfo) (
 	// buildSubmitRequest runs before quota is reserved, so a failed fetch
 	// costs nothing; requests that start vendor work stay the descriptor.
 	fetchContext := c.Request.Context()
+	fetchContext = mediaProbeContext(fetchContext, c)
 	if info.HasChannelMeta() {
 		fetchContext = pluginruntime.WithFetcher(fetchContext, a.hookFetcher(info.ChannelBaseUrl, info.ChannelSetting.Proxy))
 		fetchContext = pluginruntime.WithFileUploader(fetchContext, a.hookFileUploader(c, info.ChannelBaseUrl, info.ChannelSetting.Proxy))
@@ -2063,6 +2068,9 @@ func validateUsageValue(value any, schema pluginruntime.UsageFieldSchema) (float
 			return 0, fmt.Errorf("plugin usage enum must be a string")
 		}
 		if slices.Contains(schema.Enum, text) {
+			return 0, nil
+		}
+		if schema.AllowCustom && pluginruntime.ValidCustomUsageValue(text) {
 			return 0, nil
 		}
 		return 0, fmt.Errorf("plugin usage enum is not an allowed value")

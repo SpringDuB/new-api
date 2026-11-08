@@ -209,8 +209,15 @@ type UsageFieldSchema struct {
 	Unit        string                   `json:"unit,omitempty"`
 	UnitLabel   LocalizedText            `json:"unitLabel,omitempty"`
 	Enum        []string                 `json:"enum,omitempty"`
+	AllowCustom bool                     `json:"allowCustom,omitempty"`
+	Optional    bool                     `json:"optional,omitempty"`
 	Description LocalizedText            `json:"description,omitempty"`
 	EnumLabels  map[string]LocalizedText `json:"enumLabels,omitempty"`
+}
+
+// ValidCustomUsageValue bounds plugin-defined categorical billing facts.
+func ValidCustomUsageValue(value string) bool {
+	return value != "" && len(value) <= 64 && strings.TrimSpace(value) == value && !strings.ContainsFunc(value, unicode.IsControl)
 }
 
 type LoadedPlugin struct {
@@ -1534,12 +1541,29 @@ func decodeUsageSchema(value any) (map[string]UsageFieldSchema, error) {
 		}
 		for key := range fieldObject {
 			switch key {
-			case "type", "unit", "unitLabel", "enum", "description", "enumLabels":
+			case "type", "unit", "unitLabel", "enum", "description", "enumLabels", "allowCustom", "optional":
 			default:
 				return nil, fmt.Errorf("plugin meta usageSchema field %q has unknown property %q", name, key)
 			}
 		}
 		field := UsageFieldSchema{}
+		if value, exists := fieldObject["optional"]; exists {
+			var ok bool
+			field.Optional, ok = value.(bool)
+			if !ok || fieldObject["type"] != "number" {
+				return nil, fmt.Errorf("plugin meta usageSchema field %q optional requires a number field and boolean value", name)
+			}
+		}
+		if value, exists := fieldObject["allowCustom"]; exists {
+			if _, enum := fieldObject["enum"]; !enum {
+				return nil, fmt.Errorf("plugin meta usageSchema field %q allowCustom requires enum", name)
+			}
+			var ok bool
+			field.AllowCustom, ok = value.(bool)
+			if !ok {
+				return nil, fmt.Errorf("plugin meta usageSchema field %q allowCustom must be a boolean", name)
+			}
+		}
 		var err error
 		if field.Type, err = stringMetaField(fieldObject, "type"); err != nil {
 			return nil, err
@@ -1581,6 +1605,12 @@ func decodeUsageSchema(value any) (map[string]UsageFieldSchema, error) {
 }
 
 func validateUsageFieldSchema(name string, field UsageFieldSchema) error {
+	if field.Optional && field.Type != "number" {
+		return fmt.Errorf("plugin meta usageSchema field %q optional requires number", name)
+	}
+	if field.AllowCustom && len(field.Enum) == 0 {
+		return fmt.Errorf("plugin meta usageSchema field %q allowCustom requires enum", name)
+	}
 	if field.UnitLabel != nil {
 		if field.Type != "number" || field.Unit != "count" || field.Enum != nil {
 			return fmt.Errorf("plugin meta usageSchema field %q unitLabel requires a number field with count unit", name)
@@ -1737,7 +1767,7 @@ func validateUsageExampleValue(value any, field UsageFieldSchema) error {
 		if !ok {
 			return fmt.Errorf("enum is not an allowed value")
 		}
-		if slices.Contains(field.Enum, text) {
+		if slices.Contains(field.Enum, text) || field.AllowCustom && ValidCustomUsageValue(text) {
 			return nil
 		}
 		return fmt.Errorf("enum is not an allowed value")

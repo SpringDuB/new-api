@@ -125,7 +125,10 @@ export function createDefaultTaskMatrixConfig(
     getTaskNumberFields(schema).map(([field]) => [field, 0])
   )
   return {
-    rows: getTaskEnumCombinations(schema).map((combination) => ({
+    rows: (getTaskEnumFields(schema).some(([, field]) => field.allowCustom)
+      ? [{}]
+      : getTaskEnumCombinations(schema)
+    ).map((combination) => ({
       combination,
       constant: 0,
       unitPrices: { ...unitPrices },
@@ -149,6 +152,18 @@ export function taskMatrixToTiers(
   const numberFields = getTaskNumberFields(schema)
   const firstRow = config.rows[0]
   if (numberFields.length === 0 || !firstRow) return []
+
+  if (getTaskEnumFields(schema).some(([, field]) => field.allowCustom)) {
+    return config.rows.map((row) => ({
+      label: taskMatrixRowLabel(row.combination),
+      conditions: Object.entries(row.combination).map(([field, value]) => ({
+        field,
+        value,
+      })),
+      constant: row.constant,
+      unitPrices: { ...row.unitPrices },
+    }))
+  }
 
   const isUniform = config.rows.every(
     (row) =>
@@ -204,6 +219,20 @@ export function tryParseTaskMatrixConfig(
   for (const tier of tiers) {
     const fields = new Set(tier.conditions.map((condition) => condition.field))
     if (fields.size !== tier.conditions.length) return null
+  }
+
+  if (getTaskEnumFields(schema).some(([, field]) => field.allowCustom)) {
+    return {
+      rows: tiers.map((tier) => ({
+        combination: Object.fromEntries(
+          tier.conditions.map(({ field, value }) => [field, value])
+        ),
+        constant: tier.constant,
+        unitPrices: Object.fromEntries(
+          numberFields.map(([field]) => [field, tier.unitPrices[field] ?? 0])
+        ),
+      })),
+    }
   }
 
   const rows = combinations.map((combination) => {
@@ -330,8 +359,12 @@ export function normalizeTaskVisualConfig(
       const constant = Number(tier.constant)
       return {
         label: tier.label || (index === 0 ? 'base' : `tier_${index + 1}`),
-        conditions: (tier.conditions ?? []).filter((condition) =>
-          enumFields.get(condition.field)?.includes(condition.value)
+        conditions: (tier.conditions ?? []).filter(
+          (condition) =>
+            enumFields.get(condition.field)?.includes(condition.value) ||
+            (schema[condition.field]?.allowCustom &&
+              condition.value.trim() !== '' &&
+              condition.value.length <= 64)
         ),
         constant: Number.isFinite(constant) && constant >= 0 ? constant : 0,
         unitPrices,
@@ -348,6 +381,7 @@ function generateTaskTierBody(
   if (tier.constant > 0) parts.push(String(tier.constant))
   for (const [field, definition] of numberFields) {
     const price = tier.unitPrices[field] ?? 0
+    if (price === 0 && definition.optional) continue
     if (definition.unit === 'token') {
       parts.push(
         `u(${JSON.stringify(field)}) * ${price} / ${TASK_TOKEN_PRICE_SCALE}`

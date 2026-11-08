@@ -57,6 +57,41 @@ afterEach(async () => {
   await act(() => i18next.changeLanguage('en'))
 })
 
+it('reuses optional price controls for a plugin without resolution tiers', async () => {
+  const onChange = vi.fn()
+  const user = userEvent.setup()
+  render(
+    <TaskUsagePricingEditor
+      billingExpr='tier("base", u("jobs") * 2)'
+      requestRuleExpr=''
+      usageSchema={{
+        jobs: { type: 'number', unit: 'count', description: 'Job price' },
+        credits: {
+          type: 'number',
+          unit: 'credit',
+          optional: true,
+          description: 'Extra processing price',
+        },
+      }}
+      onBillingExprChange={onChange}
+      onRequestRuleExprChange={vi.fn()}
+    />
+  )
+  const optional = screen.getByRole('checkbox', {
+    name: 'Include Extra processing price',
+  })
+  const price = screen.getByRole('textbox', { name: 'credits' })
+  expect(price).toBeDisabled()
+  await user.click(optional)
+  expect(price).toBeEnabled()
+  await user.clear(price)
+  await user.type(price, '0.1')
+  expect(onChange.mock.lastCall?.[0]).toContain('u("credits") * 0.1')
+  await user.click(optional)
+  expect(onChange.mock.lastCall?.[0]).not.toContain('credits')
+  expect(onChange.mock.lastCall?.[0]).toContain('u("jobs") * 2')
+})
+
 it('shows localized schema explanations in the price table and calculator', async () => {
   renderPricing()
   const table = screen.getByRole('table')
@@ -351,3 +386,115 @@ it.each(['image', 'video'] as const)(
     }
   }
 )
+
+it('adds and removes custom resolution branches while keeping the fallback price', async () => {
+  const onChange = vi.fn()
+  const user = userEvent.setup()
+  render(
+    <TaskUsagePricingEditor
+      billingExpr='tier("base", u("seconds") * 0.2)'
+      requestRuleExpr=''
+      usageSchema={{
+        resolution: {
+          enum: ['720p'],
+          allowCustom: true,
+          description: 'Resolution',
+        },
+        seconds: {
+          type: 'number',
+          unit: 'second',
+          description: 'Output price',
+        },
+        reference_seconds: {
+          type: 'number',
+          unit: 'second',
+          optional: true,
+          description: 'Reference video unit price',
+        },
+      }}
+      onBillingExprChange={onChange}
+      onRequestRuleExprChange={vi.fn()}
+    />
+  )
+  await user.click(screen.getByRole('button', { name: 'Add pricing branch' }))
+  const resolution = screen.getByRole('textbox', { name: 'Resolution value' })
+  await user.type(resolution, '1440p')
+  await user.click(screen.getByRole('button', { name: 'Add tier' }))
+  expect(screen.getByText('1440p')).toBeVisible()
+  const price = screen.getByRole('textbox', {
+    name: 'Output price: Resolution: 1440p',
+  })
+  await user.clear(price)
+  await user.type(price, '0.8')
+  expect(onChange.mock.lastCall?.[0]).toContain('u("resolution") == "1440p"')
+  expect(onChange.mock.lastCall?.[0]).toContain('u("seconds") * 0.8')
+  expect(onChange.mock.lastCall?.[0]).toContain('u("seconds") * 0.2')
+  await user.click(screen.getByRole('button', { name: 'Add pricing branch' }))
+  await user.type(
+    screen.getByRole('textbox', { name: 'Resolution value' }),
+    '1440p'
+  )
+  await user.click(screen.getByRole('button', { name: 'Add tier' }))
+  expect(screen.getByRole('alert')).toHaveTextContent(
+    'A tier with these conditions already exists.'
+  )
+  await user.click(screen.getByRole('button', { name: 'Cancel' }))
+  await user.click(
+    screen.getByRole('button', { name: 'Remove tier Resolution: 1440p' })
+  )
+  expect(screen.queryByText('1440p')).not.toBeInTheDocument()
+  expect(onChange.mock.lastCall?.[0]).not.toContain('1440p')
+  expect(onChange.mock.lastCall?.[0]).toContain('u("seconds") * 0.2')
+})
+
+it('disables reference video charges without changing output prices and restores saved custom branches', async () => {
+  const onChange = vi.fn()
+  const user = userEvent.setup()
+  render(
+    <TaskUsagePricingEditor
+      billingExpr='u("resolution") == "1440p" ? tier("high", u("seconds") * 0.4 + u("reference_seconds") * 0.1) : tier("base", u("seconds") * 0.2 + u("reference_seconds") * 0.05)'
+      requestRuleExpr=''
+      usageSchema={{
+        resolution: {
+          enum: ['720p'],
+          allowCustom: true,
+          description: 'Resolution',
+        },
+        seconds: {
+          type: 'number',
+          unit: 'second',
+          description: 'Output price',
+        },
+        reference_seconds: {
+          type: 'number',
+          unit: 'second',
+          optional: true,
+          description: 'Reference video unit price',
+        },
+      }}
+      onBillingExprChange={onChange}
+      onRequestRuleExprChange={vi.fn()}
+    />
+  )
+  expect(screen.getByText('1440p')).toBeVisible()
+  const toggle = screen.getByRole('checkbox', {
+    name: 'Include Reference video unit price',
+  })
+  expect(toggle).toBeChecked()
+  await user.click(toggle)
+  expect(
+    screen.getByRole('textbox', {
+      name: 'Reference video unit price: Resolution: 1440p',
+    })
+  ).toBeDisabled()
+  expect(onChange.mock.lastCall?.[0]).not.toContain('reference_seconds')
+  expect(onChange.mock.lastCall?.[0]).toContain('u("seconds") * 0.4')
+  await user.click(toggle)
+  const price = screen.getByRole('textbox', {
+    name: 'Reference video unit price: Resolution: 1440p',
+  })
+  expect(price).toBeEnabled()
+  await user.clear(price)
+  await user.type(price, '0.3')
+  expect(onChange.mock.lastCall?.[0]).toContain('u("reference_seconds") * 0.3')
+})

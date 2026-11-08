@@ -410,6 +410,7 @@ func (e *Engine) call(ctx context.Context, opts callOptions, exportName string, 
 	call.runtime, call.hook = instance.runtime, hook.Name()
 	call.fetcher, _ = ctx.Value(fetcherContextKey{}).(Fetcher)
 	call.uploader, _ = ctx.Value(fileUploaderContextKey{}).(Fetcher)
+	call.prober, _ = ctx.Value(mediaProberContextKey{}).(Fetcher)
 	instance.call = call
 	reusable := true
 	defer func() {

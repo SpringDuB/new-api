@@ -36,6 +36,13 @@ type volcSignRequest struct {
 // budget there, so no request data lives in the runtime's globals.
 func injectGlobals(runtime *moejs.Runtime, identity func() string, now func() time.Time, logOutput func(string), currentCall func() *runtimeCall) error {
 	utils := map[string]any{
+		"mediaDuration": runtime.Function("mediaDuration", 1, func(r *moejs.Realm, _ moejs.Value, args []moejs.Value) (moejs.Value, error) {
+			call := currentCall()
+			if call == nil {
+				return moejs.Undefined(), fmt.Errorf("utils.mediaDuration is not available outside hooks")
+			}
+			return call.mediaDuration(r, moejs.Arg(args, 0))
+		}),
 		"uploadFile": runtime.Function("uploadFile", 1, func(r *moejs.Realm, _ moejs.Value, args []moejs.Value) (moejs.Value, error) {
 			call := currentCall()
 			if call == nil {

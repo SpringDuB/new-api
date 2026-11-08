@@ -357,7 +357,7 @@ function taskConditions(
       if (!includeBoolean || typeof value !== 'boolean') return null
     } else if (typeof value !== 'string' || !definition.enum) {
       return null
-    } else if (!definition.enum.includes(value)) {
+    } else if (!definition.allowCustom && !definition.enum.includes(value)) {
       reachable = false
     }
     conditions.push({ field, value: String(value) })

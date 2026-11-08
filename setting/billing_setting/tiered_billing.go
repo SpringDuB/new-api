@@ -14,6 +14,8 @@ import (
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/setting/config"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
+	"github.com/expr-lang/expr/ast"
+	"github.com/expr-lang/expr/parser"
 	"github.com/samber/lo"
 )
 
@@ -243,16 +245,88 @@ func SmokeTestTaskExpr(exprStr string, schema map[string]jsplugin.UsageFieldSche
 			return fmt.Errorf("usage key %q is not declared by the task plugin", key)
 		}
 	}
-
-	for _, usage := range taskUsageSmokeVectors(schema) {
-		for _, request := range billingExprSmokeRequests() {
-			request.Usage = usage
-			result, _, err := billingexpr.RunExprWithRequest(exprStr, billingexpr.TokenParams{}, request)
-			if err != nil {
-				return fmt.Errorf("usage vector %v: run failed: %w", usage, err)
+	// Open enums include authored values and a fallback probe. Keep custom
+	// dimensions separate from numeric-vector truncation so no authored
+	// resolution combination can hide a negative-price branch.
+	_, body := billingexpr.ParseExprVersion(exprStr)
+	tree, err := parser.Parse(body)
+	if err != nil {
+		return err
+	}
+	schemas := []map[string]jsplugin.UsageFieldSchema{schema}
+	customValues := make(map[string]map[string]bool)
+	for key, field := range schema {
+		if !field.AllowCustom {
+			continue
+		}
+		values := map[string]bool{}
+		for _, value := range field.Enum {
+			values[value] = true
+		}
+		customValues[key] = values
+	}
+	ast.Find(tree.Node, func(node ast.Node) bool {
+		comparison, ok := node.(*ast.BinaryNode)
+		if !ok {
+			return false
+		}
+		for _, pair := range [][2]ast.Node{{comparison.Left, comparison.Right}, {comparison.Right, comparison.Left}} {
+			call, ok := pair[0].(*ast.CallNode)
+			if !ok || len(call.Arguments) != 1 {
+				continue
 			}
-			if math.IsNaN(result) || math.IsInf(result, 0) || result < 0 {
-				return fmt.Errorf("usage vector %v: result must be finite and non-negative, got %f", usage, result)
+			callee, ok := call.Callee.(*ast.IdentifierNode)
+			if !ok || callee.Value != "u" {
+				continue
+			}
+			key, ok := call.Arguments[0].(*ast.StringNode)
+			if !ok || !schema[key.Value].AllowCustom {
+				continue
+			}
+			value, ok := pair[1].(*ast.StringNode)
+			if !ok {
+				continue
+			}
+			customValues[key.Value][value.Value] = true
+		}
+		return false
+	})
+	for key, values := range customValues {
+		fallback := "__other__"
+		for index := 0; values[fallback]; index++ {
+			fallback = fmt.Sprintf("__other_%d", index)
+		}
+		values[fallback] = true
+		if len(values)*len(schemas) > maxTaskExprSmokeTests {
+			return fmt.Errorf("custom pricing conditions exceed the %d-combination limit", maxTaskExprSmokeTests)
+		}
+		nextSchemas := make([]map[string]jsplugin.UsageFieldSchema, 0, len(values)*len(schemas))
+		for value := range values {
+			if !jsplugin.ValidCustomUsageValue(value) {
+				return fmt.Errorf("custom pricing condition must be a trimmed string of at most 64 bytes")
+			}
+			for _, previous := range schemas {
+				candidate := maps.Clone(previous)
+				field := candidate[key]
+				field.Enum = []string{value}
+				candidate[key] = field
+				nextSchemas = append(nextSchemas, candidate)
+			}
+		}
+		schemas = nextSchemas
+	}
+
+	for _, candidate := range schemas {
+		for _, usage := range taskUsageSmokeVectors(candidate) {
+			for _, request := range billingExprSmokeRequests() {
+				request.Usage = usage
+				result, _, err := billingexpr.RunExprWithRequest(exprStr, billingexpr.TokenParams{}, request)
+				if err != nil {
+					return fmt.Errorf("usage vector %v: run failed: %w", usage, err)
+				}
+				if math.IsNaN(result) || math.IsInf(result, 0) || result < 0 {
+					return fmt.Errorf("usage vector %v: result must be finite and non-negative, got %f", usage, result)
+				}
 			}
 		}
 	}

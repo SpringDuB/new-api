@@ -23,6 +23,8 @@ import { useTranslation } from 'react-i18next'
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Combobox } from '@/components/ui/combobox'
 import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
@@ -76,6 +78,7 @@ import type {
 
 import { formatPricingNumber } from './pricing-format'
 import { RequestSimulation } from './request-simulation'
+import { TaskPricingBranchDialog } from './task-pricing-branch-dialog'
 import { TaskPricingMatrix } from './task-pricing-matrix'
 
 type TaskUsagePricingEditorProps = {
@@ -197,6 +200,7 @@ function TaskBillingPreview(props: TaskBillingPreviewProps) {
                     i18n.language
                   )}
                   options={items}
+                  allowCustomValue={definition.allowCustom}
                   value={String(props.sample[field] ?? '')}
                   onValueChange={(value) =>
                     value !== null && props.onSampleChange(field, value)
@@ -294,6 +298,17 @@ export const TaskUsagePricingEditor = memo(function TaskUsagePricingEditor(
     return (parsed ?? createDefaultTaskMatrixConfig(props.usageSchema)).rows
   })
   const [confirmVisualSwitch, setConfirmVisualSwitch] = useState(false)
+  const [addingBranch, setAddingBranch] = useState(false)
+  const [enabledOptionalFields, setEnabledOptionalFields] = useState<string[]>(
+    () =>
+      getTaskNumberFields(props.usageSchema)
+        .filter(
+          ([field, definition]) =>
+            definition.optional &&
+            matrixRows.some((row) => (row.unitPrices[field] ?? 0) > 0)
+        )
+        .map(([field]) => field)
+  )
   const [rawExpr, setRawExpr] = useState(() =>
     combineBillingExpr(props.billingExpr, props.requestRuleExpr)
   )
@@ -313,6 +328,7 @@ export const TaskUsagePricingEditor = memo(function TaskUsagePricingEditor(
     return sample
   })
   const enumFields = getTaskEnumFields(props.usageSchema)
+  const customTiers = enumFields.some(([, field]) => field.allowCustom)
   const numberFields = getTaskNumberFields(props.usageSchema)
   const combinations = getTaskEnumCombinations(props.usageSchema)
   const visualTiers = taskMatrixToTiers({ rows: matrixRows }, props.usageSchema)
@@ -326,7 +342,9 @@ export const TaskUsagePricingEditor = memo(function TaskUsagePricingEditor(
       props.usageSchema
     )
     if (generatedExpression) previewConfig = { tiers: visualTiers }
-    const nextMatchedRowIndex = combinations.findIndex((combination) =>
+    const nextMatchedRowIndex = (
+      customTiers ? matrixRows.map((row) => row.combination) : combinations
+    ).findIndex((combination) =>
       Object.entries(combination).every(
         ([field, value]) => previewSample[field] === value
       )
@@ -400,6 +418,15 @@ export const TaskUsagePricingEditor = memo(function TaskUsagePricingEditor(
       rawMatrix ?? createDefaultTaskMatrixConfig(props.usageSchema)
     ).rows
     setMatrixRows(nextRows)
+    setEnabledOptionalFields(
+      getTaskNumberFields(props.usageSchema)
+        .filter(
+          ([field, definition]) =>
+            definition.optional &&
+            nextRows.some((row) => (row.unitPrices[field] ?? 0) > 0)
+        )
+        .map(([field]) => field)
+    )
     props.onBillingExprChange(
       generateTaskExprFromConfig(
         { tiers: taskMatrixToTiers({ rows: nextRows }, props.usageSchema) },
@@ -423,6 +450,25 @@ export const TaskUsagePricingEditor = memo(function TaskUsagePricingEditor(
 
   return (
     <div className='space-y-5'>
+      <TaskPricingBranchDialog
+        open={addingBranch}
+        onOpenChange={setAddingBranch}
+        schema={props.usageSchema}
+        rows={matrixRows}
+        onAdd={(combination) => {
+          const fallback = matrixRows.at(-1)
+          if (!fallback) return
+          publishRows([
+            ...matrixRows.slice(0, -1),
+            {
+              combination,
+              constant: fallback.constant,
+              unitPrices: { ...fallback.unitPrices },
+            },
+            fallback,
+          ])
+        }}
+      />
       <ConfirmDialog
         open={confirmVisualSwitch}
         onOpenChange={setConfirmVisualSwitch}
@@ -482,6 +528,37 @@ export const TaskUsagePricingEditor = memo(function TaskUsagePricingEditor(
       <div className='bg-muted/30 space-y-3 rounded-md border p-3'>
         {editorMode === 'visual' ? (
           <>
+            {numberFields
+              .filter(([, definition]) => definition.optional)
+              .map(([field, definition]) => (
+                <Label key={field} className='flex items-center gap-2'>
+                  <Checkbox
+                    checked={enabledOptionalFields.includes(field)}
+                    onCheckedChange={(checked) => {
+                      setEnabledOptionalFields((current) =>
+                        checked
+                          ? [...current, field]
+                          : current.filter((value) => value !== field)
+                      )
+                      if (!checked) {
+                        publishRows(
+                          matrixRows.map((row) => ({
+                            ...row,
+                            unitPrices: { ...row.unitPrices, [field]: 0 },
+                          }))
+                        )
+                      }
+                    }}
+                  />
+                  {t('Include {{price}}', {
+                    price: taskPriceLabel(
+                      definition.description,
+                      field,
+                      i18n.language
+                    ),
+                  })}
+                </Label>
+              ))}
             {enumFields.length > 0 ? (
               <div className='flex flex-col gap-3'>
                 <p className='text-muted-foreground text-xs'>
@@ -496,7 +573,34 @@ export const TaskUsagePricingEditor = memo(function TaskUsagePricingEditor(
                   matchedRowIndex={matchedRowIndex}
                   onRowChange={handleRowChange}
                   onFillColumn={handleFillColumn}
+                  onRemoveRow={
+                    customTiers
+                      ? (index) =>
+                          publishRows(
+                            matrixRows.filter(
+                              (_, rowIndex) => rowIndex !== index
+                            )
+                          )
+                      : undefined
+                  }
+                  disabledFields={numberFields
+                    .filter(
+                      ([field, definition]) =>
+                        definition.optional &&
+                        !enabledOptionalFields.includes(field)
+                    )
+                    .map(([field]) => field)}
                 />
+                {customTiers && (
+                  <Button
+                    type='button'
+                    variant='outline'
+                    className='self-start'
+                    onClick={() => setAddingBranch(true)}
+                  >
+                    {t('Add pricing branch')}
+                  </Button>
+                )}
               </div>
             ) : (
               <>
@@ -532,6 +636,10 @@ export const TaskUsagePricingEditor = memo(function TaskUsagePricingEditor(
                                 min={0}
                                 step={0.000001}
                                 value={matrixRows[0].unitPrices[field] ?? 0}
+                                disabled={
+                                  definition.optional &&
+                                  !enabledOptionalFields.includes(field)
+                                }
                                 onFocus={(event) => {
                                   if (Number(event.currentTarget.value) === 0) {
                                     event.currentTarget.select()
