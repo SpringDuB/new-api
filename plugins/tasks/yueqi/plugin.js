@@ -2,18 +2,18 @@
 // Its descriptions and request_spec disagree about reference capabilities, so
 // preserve media fields and let the upstream validate each model's inputs.
 const MODELS = {
-  "BD Seedance2.5": { family: "seedance", defaultResolution: "720p" },
+  "BD Seedance2.5": { defaultResolution: "720p" },
   "kling-4.0": { defaultResolution: "720p" },
-  "sd2.5新": { family: "seedance", defaultResolution: "720p" },
-  "seedance-2.0-fast-通用": { family: "seedance", defaultResolution: "720p" },
-  "seedance2.5无限并发版": { family: "seedance", defaultResolution: "720p" },
+  "sd2.5新": { defaultResolution: "720p" },
+  "seedance-2.0-fast-通用": { defaultResolution: "720p" },
+  "seedance2.5无限并发版": { defaultResolution: "720p" },
   "vidu-q4": { defaultResolution: "720p" },
   "vidu-q4-nopeak": { defaultResolution: "720p" },
   "w3-c1": { defaultResolution: "720p" },
   "wan3.0-vedio-deal": { defaultResolution: "480p" },
   "wan3.0-video-nsfw": { defaultResolution: "480p" },
   "wan3.0-video-prime-deal": { defaultResolution: "720p" },
-  "新seedance2.0-933": { family: "seedance", defaultResolution: "720p" },
+  "新seedance2.0-933": { defaultResolution: "720p" },
 };
 // Explicit public model names are video protocol bindings as well as driver
 // aliases. This keeps routing independent of cross-channel alias inference,
@@ -111,7 +111,7 @@ export const meta = {
     en: "Seedance, Wan, Kling, and Vidu video generation through Yueqi with frame and media references",
     zh: "通过 Yueqi 调用 Seedance、Wan、Kling 和 Vidu 视频模型，支持首尾帧和参考素材",
   },
-  version: "1.1.0",
+  version: "1.1.2",
   author: { name: "QuantumNous" },
   website: "https://yueqi.icu/docs",
   baseUrl: "https://yueqi.icu",
@@ -146,15 +146,14 @@ function videoSubmission(ctx) {
   const profile = MODELS[model];
   const input = ctx.requestBody;
   if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("request body must be an object");
-  const seedance = profile.family === "seedance";
-  const scopes = [seedance ? { ...input } : input];
+  const scopes = [{ ...input }];
   let seconds, resolution, ratio;
   for (let i = 0; i < scopes.length; i++) {
     const scope = scopes[i];
     for (const container of CONTAINERS) {
       if (scope[container] === undefined) continue;
       if (!scope[container] || typeof scope[container] !== "object" || Array.isArray(scope[container])) throw new Error(container + " must be an object");
-      if (seedance) scope[container] = { ...scope[container] };
+      scope[container] = { ...scope[container] };
       scopes.push(scope[container]);
       if (scopes.length > 64) throw new Error("too many video parameter containers");
     }
@@ -165,32 +164,43 @@ function videoSubmission(ctx) {
       if (seconds !== undefined && seconds !== value) throw new Error("seconds conflicts with duration");
       seconds = value;
     }
-    // Seedance clients use size for either a resolution label or an aspect
+    // Video clients use size for either a resolution label or an aspect
     // ratio. Rewrite only parameter containers, leaving media metadata intact.
-    const sizeIsRatio = seedance && typeof scope.size === "string" && scope.size.includes(":");
+    const sizeIsRatio = typeof scope.size === "string" && scope.size.includes(":");
     let scopeResolution, scopeRatio;
-    for (const field of seedance ? ["size", "resolution", "resolution_name"] : ["size", "resolution"]) {
+    for (const field of ["size", "resolution", "resolution_name"]) {
       if (scope[field] === undefined) continue;
       if (field === "size" && sizeIsRatio) continue;
-      const value = seedance && typeof scope[field] === "string" ? scope[field].trim().toLowerCase() : scope[field];
+      const value = typeof scope[field] === "string" ? scope[field].trim().toLowerCase() : scope[field];
       if (typeof value !== "string" || !/^[1-9]\d{1,3}p$/.test(value)) throw new Error("resolution must be a label such as 480p, 720p or 1080p");
       if (resolution !== undefined && resolution !== value) throw new Error("conflicting video resolution parameters");
       scopeResolution = resolution = value;
     }
     for (const field of sizeIsRatio ? ["aspect_ratio", "ratio", "size"] : ["aspect_ratio", "ratio"]) {
       if (scope[field] === undefined) continue;
-      const value = seedance && typeof scope[field] === "string" ? scope[field].trim() : scope[field];
+      const value = typeof scope[field] === "string" ? scope[field].trim() : scope[field];
       if (typeof value !== "string" || !/^\d{1,2}:\d{1,2}$/.test(value) || value.split(":").some((part) => Number(part) === 0))
         throw new Error("aspect_ratio must be a positive width:height ratio");
       if (ratio !== undefined && ratio !== value) throw new Error("ratio conflicts with aspect_ratio");
       scopeRatio = ratio = value;
     }
-    if (seedance) {
-      if (scopeResolution !== undefined) scope.resolution = scopeResolution;
-      if (scopeRatio !== undefined) scope.aspect_ratio = scopeRatio;
-      delete scope.resolution_name;
-      delete scope.size;
-      delete scope.ratio;
+    if (scopeResolution !== undefined) scope.resolution = scopeResolution;
+    if (scopeRatio !== undefined) scope.aspect_ratio = scopeRatio;
+    delete scope.resolution_name;
+    delete scope.size;
+    delete scope.ratio;
+    // Canvas clients wrap image URLs in input_reference; Yueqi's reference
+    // requests take an images array. Keep signed URLs byte-for-byte intact.
+    const reference = scope.input_reference;
+    if (reference && typeof reference === "object" && !Array.isArray(reference) && reference.image_url !== undefined) {
+      const image = reference.image_url;
+      const url = image && typeof image === "object" && !Array.isArray(image) ? image.url : image;
+      if (typeof url !== "string" || !/^https?:\/\/[^\s]+$/.test(url)) throw new Error("input_reference.image_url must be a public image URL");
+      if (scope.images !== undefined && !Array.isArray(scope.images)) throw new Error("images must be an array");
+      const images = [...(scope.images || [])];
+      if (!images.includes(url)) images.unshift(url);
+      scope.images = images;
+      delete scope.input_reference;
     }
     for (const field of ["n", "count", "batch_size", "batch_count", "num_videos"]) {
       if (scope[field] !== undefined && scope[field] !== 1 && scope[field] !== "1") throw new Error("Yueqi video requests must generate exactly one video");
@@ -375,19 +385,13 @@ export function extractUsageOnComplete(ctx, result, response) {
   if (result.status !== "SUCCESS") return null;
   const body = videoObject(response);
   const facts = {};
-  const requestedModel = ctx.upstreamModel || ctx.model;
-  const model = Object.prototype.hasOwnProperty.call(MODEL_ALIASES, requestedModel) ? MODEL_ALIASES[requestedModel] : requestedModel;
   // Only output video duration replaces seconds; generation wall time and
   // reference duration never replace it. Measured reference_seconds stays frozen.
   // A per-call expression ignores this fact and continues charging once.
   if (body.seconds !== undefined) facts.seconds = secondsValue(body.seconds);
   else if (body.duration !== undefined) facts.seconds = secondsValue(body.duration);
-  const profile = Object.prototype.hasOwnProperty.call(MODELS, model) ? MODELS[model] : undefined;
-  let resolution = body.resolution || body.size;
-  if (profile?.family === "seedance") {
-    resolution = body.resolution || body.resolution_name || body.size;
-    if (typeof resolution === "string") resolution = resolution.trim().toLowerCase();
-  }
+  let resolution = body.resolution || body.resolution_name || body.size;
+  if (typeof resolution === "string") resolution = resolution.trim().toLowerCase();
   if (typeof resolution === "string" && /^[1-9]\d{1,3}p$/.test(resolution)) facts.resolution = resolution;
   return facts;
 }

@@ -195,6 +195,7 @@ func TestYueqiPreservesFrameAndReferenceSemantics(t *testing.T) {
 	}{
 		{"frames", "frames_to_video", map[string]any{"first_frame_url": "https://media.example/start.png", "last_frame_url": "https://media.example/end.png"}},
 		{"image references", "reference_to_video", map[string]any{"images": []any{"https://media.example/character.png", "https://media.example/scene.png"}}},
+		{"input reference URL", "reference_to_video", map[string]any{"input_reference": "https://media.example/frame.png"}},
 		{"multimedia", "reference_to_video", map[string]any{"video_urls": []any{"https://media.example/ref.mp4"}, "audio_urls": []any{"https://media.example/ref.mp3"}, "image_references": []any{map[string]any{"url": "https://media.example/ref.png", "role": "reference"}}}},
 		{"nested billing aliases", "reference_to_video", map[string]any{"metadata": map[string]any{"duration": 8, "resolution": "720p", "images": []any{"https://media.example/ref.png"}}, "seconds": 8}},
 	} {
@@ -245,6 +246,92 @@ func TestYueqiPreservesFrameAndReferenceSemantics(t *testing.T) {
 	assert.Equal(t, "7", parts["seconds"]["value"])
 }
 
+func TestYueqiInputReferenceImageObjects(t *testing.T) {
+	plugin := loadYueqiPlugin(t)
+	const signedURL = "https://media.example/frame.png?Expires=1794225387&Signature=a%2Bb%2Fc%3D"
+	for _, tc := range []struct {
+		name, reference string
+		images, want    []any
+	}{
+		{"image URL object", `{"image_url":"https://media.example/frame.png?Expires=1794225387\u0026Signature=a%2Bb%2Fc%3D"}`, nil, []any{signedURL}},
+		{"nested image URL", `{"image_url":{"url":"https://media.example/frame.png"}}`, nil, []any{"https://media.example/frame.png"}},
+		{"existing references", `{"image_url":"https://media.example/frame.png"}`, []any{"https://media.example/other.png"}, []any{"https://media.example/frame.png", "https://media.example/other.png"}},
+		{"duplicate reference", `{"image_url":"https://media.example/frame.png"}`, []any{"https://media.example/frame.png"}, []any{"https://media.example/frame.png"}},
+	} {
+		for _, kind := range []string{"json", "multipart"} {
+			t.Run(tc.name+" "+kind, func(t *testing.T) {
+				const modelName = "seedance-2.0-fast-per"
+				var reference any
+				require.NoError(t, common.UnmarshalJsonStr(tc.reference, &reference))
+				input := map[string]any{
+					"model": modelName, "prompt": "Animate the reference character", "input_reference": reference,
+					"seconds": "5", "resolution_name": "720p", "size": "16:9",
+				}
+				if tc.images != nil {
+					input["images"] = tc.images
+				}
+				before, err := common.Marshal(input)
+				require.NoError(t, err)
+				body := map[string]any{"kind": kind, "value": input}
+				if kind == "multipart" {
+					fields := map[string][]string{}
+					for key, value := range input {
+						if str, ok := value.(string); ok {
+							fields[key] = []string{str}
+							continue
+						}
+						encoded, err := common.Marshal(value)
+						require.NoError(t, err)
+						fields[key] = []string{string(encoded)}
+					}
+					body = map[string]any{"kind": kind, "fields": fields}
+				}
+				decoded, err := plugin.Engine.CallPath(t.Context(), "protocols", []string{"openai_video", "decodeRequest"}, map[string]any{"model": modelName, "body": body})
+				require.NoError(t, err)
+				ctx := yueqiContext(modelName, decoded.(map[string]any)["requestBody"].(map[string]any))
+				ctx["usageKeys"] = []string{"reference_seconds"}
+				if kind == "multipart" {
+					ctx["files"] = []map[string]any{{"ref": "request_file:input_reference", "field": "input_reference", "filename": "frame.png", "mimeType": "image/png", "size": 3}}
+				}
+				submit := yueqiHook(t, plugin, "buildSubmitRequest", ctx)
+				assert.Equal(t, "reference_to_video", submit["action"])
+				if kind == "json" {
+					upstream := submit["body"].(map[string]any)
+					assert.Equal(t, "seedance-2.0-fast-通用", upstream["model"])
+					assert.Equal(t, tc.want, upstream["images"])
+					assert.NotContains(t, upstream, "input_reference")
+				} else {
+					parts := map[string]map[string]any{}
+					for _, item := range submit["parts"].([]any) {
+						part := item.(map[string]any)
+						parts[part["name"].(string)] = part
+					}
+					var images []any
+					require.NoError(t, common.UnmarshalJsonStr(parts["images"]["value"].(string), &images))
+					assert.Equal(t, tc.want, images)
+					assert.Equal(t, "request_file:input_reference", parts["input_reference"]["fileRef"])
+				}
+				assert.Equal(t, map[string]any{"requests": float64(1), "seconds": float64(5), "resolution": "720p", "reference_seconds": float64(0)}, yueqiHook(t, plugin, "extractUsage", ctx))
+				after, err := common.Marshal(input)
+				require.NoError(t, err)
+				assert.JSONEq(t, string(before), string(after), "reference conversion must preserve the client input")
+			})
+		}
+	}
+	for _, reference := range []any{
+		map[string]any{"image_url": ""},
+		map[string]any{"image_url": 123},
+		map[string]any{"image_url": nil},
+		map[string]any{"image_url": map[string]any{}},
+		map[string]any{"image_url": "https://media.example/frame.png extra"},
+	} {
+		for _, hook := range []string{"buildSubmitRequest", "extractUsage"} {
+			_, err := plugin.Engine.Call(t.Context(), hook, yueqiContext("seedance-2.0-fast-per", map[string]any{"prompt": "boat", "input_reference": reference}))
+			require.Error(t, err, "invalid image objects must fail before billable submission")
+		}
+	}
+}
+
 func TestYueqiRejectsInvalidBillingBeforeSubmission(t *testing.T) {
 	plugin := loadYueqiPlugin(t)
 	for _, tc := range []struct {
@@ -279,9 +366,9 @@ func TestYueqiRejectsInvalidBillingBeforeSubmission(t *testing.T) {
 	}
 }
 
-func TestYueqiSeedanceResolutionAndAspectRatioAliases(t *testing.T) {
+func TestYueqiResolutionAndAspectRatioAliases(t *testing.T) {
 	plugin := loadYueqiPlugin(t)
-	for _, modelName := range []string{"BD Seedance2.5", "sd2.5新", "seedance-2.0-fast-通用", "seedance2.5无限并发版", "新seedance2.0-933", "seedance-2.0-fast-per"} {
+	for _, modelName := range plugin.Meta.Models {
 		t.Run(modelName, func(t *testing.T) {
 			for _, tc := range []struct {
 				name       string
@@ -340,8 +427,10 @@ func TestYueqiSeedanceResolutionAndAspectRatioAliases(t *testing.T) {
 			body := maps.Clone(tc.body)
 			body["prompt"] = "boat"
 			for _, hook := range []string{"buildSubmitRequest", "extractUsage"} {
-				_, err := plugin.Engine.Call(t.Context(), hook, yueqiContext("seedance-2.0-fast-per", body))
-				require.Error(t, err, "invalid/conflicting aliases must fail before sending or reserving a price tier")
+				for _, modelName := range []string{"seedance-2.0-fast-per", "wan3.0-video-nsfw"} {
+					_, err := plugin.Engine.Call(t.Context(), hook, yueqiContext(modelName, body))
+					require.Error(t, err, "invalid/conflicting aliases must fail before sending or reserving a price tier")
+				}
 			}
 		})
 	}
@@ -354,28 +443,50 @@ func TestYueqiSeedanceResolutionAndAspectRatioAliases(t *testing.T) {
 	}))
 	require.ErrorContains(t, err, "conflicting video resolution parameters")
 
-	value, err := plugin.Engine.CallPath(t.Context(), "protocols", []string{"openai_video", "decodeRequest"}, map[string]any{
-		"model": "seedance-2.0-fast-per", "body": map[string]any{"kind": "multipart", "fields": map[string]any{
-			"prompt": []string{"boat"}, "resolution_name": []string{"720P"}, "seconds": []string{"15"}, "size": []string{"16:9"},
-		}},
-	})
-	require.NoError(t, err)
-	ctx := yueqiContext("seedance-2.0-fast-per", value.(map[string]any)["requestBody"].(map[string]any))
-	ctx["files"] = []map[string]any{{"ref": "request_file:input_reference", "field": "input_reference", "filename": "frame.png", "size": 3}}
-	submit := yueqiHook(t, plugin, "buildSubmitRequest", ctx)
-	parts := map[string]any{}
-	for _, item := range submit["parts"].([]any) {
-		part := item.(map[string]any)
-		parts[part["name"].(string)] = part["value"]
-	}
-	assert.Equal(t, "720p", parts["resolution"])
-	assert.Equal(t, "16:9", parts["aspect_ratio"])
-	assert.Equal(t, "15", parts["seconds"])
-	assert.NotContains(t, parts, "resolution_name")
-	assert.NotContains(t, parts, "size")
-	for _, modelName := range []string{"kling-4.0", "vidu-q4", "wan3.0-video-prime-deal"} {
-		_, err := plugin.Engine.Call(t.Context(), "buildSubmitRequest", yueqiContext(modelName, map[string]any{"prompt": "boat", "resolution": "720P"}))
-		require.Error(t, err, "other model families keep their current parameter validation")
+	for _, tc := range []struct{ model, kind string }{
+		{"wan3.0-video-nsfw", "json"},
+		{"wan3.0-video-nsfw", "multipart"},
+		{"seedance-2.0-fast-per", "multipart"},
+	} {
+		t.Run(tc.model+" client "+tc.kind, func(t *testing.T) {
+			modelName, kind := tc.model, tc.kind
+			body := map[string]any{"kind": kind, "value": map[string]any{
+				"model": modelName, "prompt": "boat", "resolution_name": "480p", "seconds": "5", "size": "16:9",
+			}}
+			if kind == "multipart" {
+				body = map[string]any{"kind": kind, "fields": map[string]any{
+					"model": []string{modelName}, "prompt": []string{"boat"}, "resolution_name": []string{"480p"}, "seconds": []string{"5"}, "size": []string{"16:9"},
+				}}
+			}
+			value, err := plugin.Engine.CallPath(t.Context(), "protocols", []string{"openai_video", "decodeRequest"}, map[string]any{
+				"model": modelName, "body": body,
+			})
+			require.NoError(t, err)
+			ctx := yueqiContext(modelName, value.(map[string]any)["requestBody"].(map[string]any))
+			if kind == "multipart" {
+				ctx["files"] = []map[string]any{{"ref": "request_file:input_reference", "field": "input_reference", "filename": "frame.png", "size": 3}}
+			}
+			submit := yueqiHook(t, plugin, "buildSubmitRequest", ctx)
+			if kind == "json" {
+				assert.Equal(t, map[string]any{
+					"model": modelName, "prompt": "boat", "resolution": "480p", "seconds": float64(5), "aspect_ratio": "16:9",
+				}, submit["body"])
+			} else {
+				parts := map[string]any{}
+				for _, item := range submit["parts"].([]any) {
+					part := item.(map[string]any)
+					parts[part["name"].(string)] = part["value"]
+				}
+				assert.Equal(t, "480p", parts["resolution"])
+				assert.Equal(t, "16:9", parts["aspect_ratio"])
+				assert.Equal(t, "5", parts["seconds"])
+				assert.NotContains(t, parts, "resolution_name")
+				assert.NotContains(t, parts, "size")
+			}
+			assert.Equal(t, map[string]any{
+				"requests": float64(1), "seconds": float64(5), "resolution": "480p", "reference_seconds": float64(0),
+			}, yueqiHook(t, plugin, "extractUsage", ctx))
+		})
 	}
 }
 
