@@ -553,6 +553,10 @@ export function read(request) { return utils.fetch(request); }
 		{"url": "https://api.example/upload", "fileRef": "request_file:x", "body": "unexpected"},
 		{"url": "file:///private/file.png", "fileRef": "request_file:x"},
 		{"url": "https://api.example/upload", "fileRef": "request_file:x", "headers": map[string]any{"Host": "other.example"}},
+		{"url": "https://api.example/upload", "fileRef": "request_file:x", "jsonField": ""},
+		{"url": "https://api.example/upload", "fileRef": "request_file:x", "jsonField": true},
+		{"url": "https://api.example/upload", "fileRef": "request_file:x", "jsonField": "bad\nfield"},
+		{"url": "https://api.example/upload", "fileRef": "request_file:x", "jsonField": strings.Repeat("x", 65)},
 	} {
 		_, err := engine.Call(jsplugin.WithFileUploader(t.Context(), func(context.Context, jsplugin.FetchRequest) (jsplugin.FetchResponse, error) {
 			t.Fatal("invalid upload reached the transport")

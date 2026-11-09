@@ -886,7 +886,7 @@ func (a *TaskAdaptor) hookFileUploader(c *gin.Context, baseURL, proxy string) pl
 		if request.Method != http.MethodPost || c == nil || c.Request == nil || !strings.Contains(c.GetHeader("Content-Type"), "multipart/form-data") {
 			return pluginruntime.FetchResponse{}, fmt.Errorf("file uploads require the submitting multipart request")
 		}
-		cacheKey := request.URL + "\x00" + request.FileRef
+		cacheKey := request.URL + "\x00" + request.FileRef + "\x00" + request.JSONField
 		if response, ok := uploaded[cacheKey]; ok {
 			return response, nil
 		}
@@ -909,23 +909,42 @@ func (a *TaskAdaptor) hookFileUploader(c *gin.Context, baseURL, proxy string) pl
 			return pluginruntime.FetchResponse{}, err
 		}
 		defer file.Close()
-		var envelope bytes.Buffer
-		writer := multipart.NewWriter(&envelope)
-		header := make(textproto.MIMEHeader)
-		header.Set("Content-Disposition", mime.FormatMediaType("form-data", map[string]string{"name": "file", "filename": fileHeader.Filename}))
-		mimeType := fileHeader.Header.Get("Content-Type")
-		if mimeType == "" {
-			mimeType = "application/octet-stream"
+		var body io.Reader
+		var contentType string
+		var contentLength int64
+		if request.JSONField != "" {
+			data, readErr := io.ReadAll(io.LimitReader(file, limit+1))
+			if readErr != nil {
+				return pluginruntime.FetchResponse{}, readErr
+			}
+			if int64(len(data)) > limit || totalBytes > limit-int64(len(data)) {
+				return pluginruntime.FetchResponse{}, fmt.Errorf("uploaded files exceed the %d byte limit", limit)
+			}
+			encoded, marshalErr := common.Marshal(map[string]string{request.JSONField: base64.StdEncoding.EncodeToString(data)})
+			if marshalErr != nil {
+				return pluginruntime.FetchResponse{}, marshalErr
+			}
+			body, contentType, contentLength = bytes.NewReader(encoded), "application/json", int64(len(encoded))
+		} else {
+			var envelope bytes.Buffer
+			writer := multipart.NewWriter(&envelope)
+			header := make(textproto.MIMEHeader)
+			header.Set("Content-Disposition", mime.FormatMediaType("form-data", map[string]string{"name": "file", "filename": fileHeader.Filename}))
+			mimeType := fileHeader.Header.Get("Content-Type")
+			if mimeType == "" {
+				mimeType = "application/octet-stream"
+			}
+			header.Set("Content-Type", mimeType)
+			if _, err = writer.CreatePart(header); err != nil {
+				return pluginruntime.FetchResponse{}, err
+			}
+			prefixLength := envelope.Len()
+			if err = writer.Close(); err != nil {
+				return pluginruntime.FetchResponse{}, err
+			}
+			body = io.MultiReader(bytes.NewReader(envelope.Bytes()[:prefixLength]), io.LimitReader(file, fileHeader.Size), bytes.NewReader(envelope.Bytes()[prefixLength:]))
+			contentType, contentLength = writer.FormDataContentType(), fileHeader.Size+int64(envelope.Len())
 		}
-		header.Set("Content-Type", mimeType)
-		if _, err = writer.CreatePart(header); err != nil {
-			return pluginruntime.FetchResponse{}, err
-		}
-		prefixLength := envelope.Len()
-		if err = writer.Close(); err != nil {
-			return pluginruntime.FetchResponse{}, err
-		}
-		body := io.MultiReader(bytes.NewReader(envelope.Bytes()[:prefixLength]), io.LimitReader(file, fileHeader.Size), bytes.NewReader(envelope.Bytes()[prefixLength:]))
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, request.URL, body)
 		if err != nil {
 			return pluginruntime.FetchResponse{}, err
@@ -933,8 +952,8 @@ func (a *TaskAdaptor) hookFileUploader(c *gin.Context, baseURL, proxy string) pl
 		for name, value := range request.Headers {
 			req.Header.Set(name, value)
 		}
-		req.Header.Set("Content-Type", writer.FormDataContentType())
-		req.ContentLength = fileHeader.Size + int64(envelope.Len())
+		req.Header.Set("Content-Type", contentType)
+		req.ContentLength = contentLength
 		client, err := service.GetHttpClientWithProxySettings(proxy, a.channelSetting())
 		if err != nil {
 			return pluginruntime.FetchResponse{}, err

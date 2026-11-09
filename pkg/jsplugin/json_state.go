@@ -18,6 +18,7 @@ const (
 	CapabilityDurationAuto   = "duration-auto@1"
 	CapabilitySubmitNoRetry  = "submit-no-retry@1"
 	CapabilityMediaDuration  = "media-duration@1"
+	CapabilityJSONFileUpload = "json-file-upload@1"
 	MaxJSONToolBytes         = 1 << 20
 	maxJSONToolDepth         = 32
 	maxJSONToolNodes         = 32768
@@ -26,7 +27,7 @@ const (
 
 // HasCapability describes host APIs independently of a plugin's mutable globals.
 func HasCapability(name string) bool {
-	return name == CapabilityJSONClone || name == CapabilitySubmitSSEDelta || name == CapabilityJSONOrder || name == CapabilityDurationAuto || name == CapabilitySubmitNoRetry || name == CapabilityMediaDuration
+	return name == CapabilityJSONClone || name == CapabilitySubmitSSEDelta || name == CapabilityJSONOrder || name == CapabilityDurationAuto || name == CapabilitySubmitNoRetry || name == CapabilityMediaDuration || name == CapabilityJSONFileUpload
 }
 
 // ValidateJSONPath checks a path into a JSON document by the rules of a JSON

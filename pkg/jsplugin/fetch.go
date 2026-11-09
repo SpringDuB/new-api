@@ -18,11 +18,12 @@ import (
 type Fetcher func(ctx context.Context, request FetchRequest) (FetchResponse, error)
 
 type FetchRequest struct {
-	Hook    string // the calling hook, filled by the engine for logs and errors
-	URL     string
-	Method  string
-	Headers map[string]string
-	FileRef string // utils.uploadFile only; bytes remain in the host request.
+	Hook      string // the calling hook, filled by the engine for logs and errors
+	URL       string
+	Method    string
+	Headers   map[string]string
+	FileRef   string // utils.uploadFile only; bytes remain in the host request.
+	JSONField string // utils.uploadFile only; optional Base64 JSON field instead of multipart.
 }
 
 type FetchResponse struct {
@@ -128,13 +129,26 @@ func (c *runtimeCall) uploadFile(r *moejs.Realm, argument moejs.Value) (moejs.Va
 		return moejs.Undefined(), r.TypeError("utils.uploadFile request must be an object")
 	}
 	for name := range members {
-		if name != "url" && name != "headers" && name != "fileRef" {
+		if name != "url" && name != "headers" && name != "fileRef" && name != "jsonField" {
 			return moejs.Undefined(), r.TypeError("utils.uploadFile request has unsupported member %q", name)
 		}
 	}
 	ref, _ := members["fileRef"].(string)
 	if _, _, valid := ParseFileReference(ref); !valid {
 		return moejs.Undefined(), r.TypeError("utils.uploadFile requires an uploaded file reference")
+	}
+	jsonField := ""
+	if value, exists := members["jsonField"]; exists {
+		var valid bool
+		jsonField, valid = value.(string)
+		if !valid || len(jsonField) == 0 || len(jsonField) > 64 {
+			return moejs.Undefined(), r.TypeError("utils.uploadFile jsonField must contain 1 to 64 ASCII letters, digits or underscores")
+		}
+		for _, char := range jsonField {
+			if char != '_' && (char < 'a' || char > 'z') && (char < 'A' || char > 'Z') && (char < '0' || char > '9') {
+				return moejs.Undefined(), r.TypeError("utils.uploadFile jsonField must contain 1 to 64 ASCII letters, digits or underscores")
+			}
+		}
 	}
 	// Reuse the ordinary URL/header validation without enabling writes in fetch.
 	validated, err := r.FromGo(map[string]any{"url": members["url"], "headers": members["headers"]})
@@ -149,7 +163,7 @@ func (c *runtimeCall) uploadFile(r *moejs.Realm, argument moejs.Value) (moejs.Va
 		return moejs.Undefined(), fmt.Errorf("utils.uploadFile allows at most 16 uploads per hook call")
 	}
 	c.uploads++
-	request.Method, request.FileRef = http.MethodPost, ref
+	request.Method, request.FileRef, request.JSONField = http.MethodPost, ref, jsonField
 	return c.performFetch(r, request, host, false, c.uploader, "utils.uploadFile")
 }
 

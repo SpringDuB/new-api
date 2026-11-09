@@ -1,6 +1,6 @@
 export type JSONValue = null | boolean | number | string | readonly JSONValue[] | {readonly [key: string]: JSONValue};
 /** json-clone@1, submit-sse-delta@1 and duration-auto@1 are accepted for earlier hosts; new plugins need none of them. */
-export type HostCapability = "json-clone@1" | "submit-sse-delta@1" | "json-order@1" | "duration-auto@1" | "submit-no-retry@1" | "media-duration@1";
+export type HostCapability = "json-clone@1" | "submit-sse-delta@1" | "json-order@1" | "duration-auto@1" | "submit-no-retry@1" | "media-duration@1" | "json-file-upload@1";
 /** Kinds of upstream a driver can address: the vendor API itself, or another New API gateway with the same plugin installed. */
 export type UpstreamKind = "vendor" | "new_api";
 /** Host-injected on every driver hook context. With "new_api" the driver uses its own native-route prefix and the host already set Bearer credentials. */
@@ -22,10 +22,10 @@ export interface HostUtils {
   fetch(request: FetchRequest): FetchResponse;
   /** Request-scoped measurement of an MP4/MOV video track, never client duration metadata. extractUsage/buildSubmitRequest only. */
   mediaDuration(source: {url: string} | {fileRef: string}): number;
-  /** buildSubmitRequest only: upload a request-scoped file as multipart field "file" to a trusted host. Does not start billable work. Shares fetch's time/body limits; at most 16 uploads per hook and MAX_FILE_DOWNLOAD_MB total file bytes. */
+  /** buildSubmitRequest only: upload a request-scoped file as multipart field "file", or Base64 in jsonField, to a trusted host. Does not start billable work. Shares fetch's time/body limits; at most 16 uploads per hook and MAX_FILE_DOWNLOAD_MB total file bytes. */
   uploadFile(request: FileUploadRequest): FetchResponse;
 }
-export interface FileUploadRequest {url: string; headers?: Record<string, string>; fileRef: string}
+export interface FileUploadRequest {url: string; headers?: Record<string, string>; fileRef: string; /** Require json-file-upload@1. POST { [jsonField]: Base64(file) } as application/json. */ jsonField?: string}
 export interface FetchRequest {url: string; method?: "GET" | "HEAD"; headers?: Record<string, string>; responseType?: "json" | "bytes"}
 /** headers holds the first value of each header under its canonical name; body is parsed JSON when the response parses, otherwise text, and "" for HEAD; with responseType "bytes" it is an ArrayBuffer of the response bytes. */
 export interface FetchResponse {status: number; headers: Record<string, string>; body: JSONValue | string | ArrayBuffer}
