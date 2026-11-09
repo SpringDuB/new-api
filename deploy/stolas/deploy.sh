@@ -13,7 +13,7 @@ case "$action" in
   *) printf 'Usage: bash deploy/stolas/deploy.sh [deploy|update|backup|status|logs]\n' >&2; exit 1 ;;
 esac
 
-for dependency in docker git openssl python3 curl getent ss; do
+for dependency in docker git openssl python3 curl; do
   if ! command -v "$dependency" >/dev/null 2>&1; then
     printf 'Required command is missing: %s\n' "$dependency" >&2
     exit 1
@@ -74,16 +74,16 @@ backup_database() {
 
 case "$action" in
   status) exec "${compose[@]}" ps ;;
-  logs) exec "${compose[@]}" logs --tail=100 -f new-api caddy ;;
+  logs) exec "${compose[@]}" logs --tail=100 -f new-api ;;
   backup) backup_database; exit 0 ;;
 esac
 
 "${compose[@]}" build new-api
 "${compose[@]}" up -d --wait --wait-timeout 180 postgres redis
 backup_database
-"${compose[@]}" up -d --wait --wait-timeout 300 new-api
+"${compose[@]}" up -d --wait --wait-timeout 300 --remove-orphans new-api
 
-# Keep the first administrator setup reachable only through the SSH tunnel.
+# Initialize the first administrator through SSH before adding the public reverse-proxy route.
 setup_status="$(curl --fail --silent --show-error --max-time 15 http://127.0.0.1:13000/api/setup)"
 initialized="$(python3 -c '
 import json, sys
@@ -93,7 +93,6 @@ if response.get("success") is not True or not isinstance(response.get("data"), d
 print("yes" if response["data"].get("status") is True else "no")
 ' <<< "$setup_status")"
 if [[ "$initialized" != yes ]]; then
-  "${compose[@]}" stop caddy
   printf '\nPrivate startup complete. Keep your SSH tunnel open and visit:\n'
   printf '  http://localhost:13000/setup\n'
   printf 'Create the administrator account, then run this command again:\n'
@@ -101,25 +100,7 @@ if [[ "$initialized" != yes ]]; then
   exit 0
 fi
 
-if ! getent ahostsv4 "$DOMAIN" >/dev/null; then
-  printf 'The server cannot resolve an IPv4 address for %s. Check its A record.\n' "$DOMAIN" >&2
-  exit 1
-fi
-caddy_id="$("${compose[@]}" ps -aq caddy)"
-if [[ -z "$caddy_id" && -n "$(ss -H -ltn '( sport = :80 or sport = :443 )')" ]]; then
-  printf 'Ports 80/443 are occupied. Configure the existing proxy before continuing.\n' >&2
-  exit 1
-fi
-"${compose[@]}" up -d --wait --wait-timeout 120 caddy
-
-for attempt in {1..24}; do
-  if curl --fail --silent --max-time 10 "https://$DOMAIN/api/status" >/dev/null; then
-    printf '\nHTTPS is responding: https://%s\n' "$DOMAIN"
-    "${compose[@]}" ps
-    exit 0
-  fi
-  sleep 5
-done
-printf 'Containers are running, but HTTPS verification failed. Check DNS, ports 80/443 and Caddy logs.\n' >&2
-printf '  bash deploy/stolas/deploy.sh logs\n' >&2
-exit 1
+printf '\nApplication is healthy: http://127.0.0.1:13000\n'
+printf 'Configure your existing HTTPS reverse proxy:\n'
+printf '  https://%s -> http://127.0.0.1:13000\n' "$DOMAIN"
+"${compose[@]}" ps

@@ -27,7 +27,7 @@ services:
       SESSION_COOKIE_SECURE: "true"
       SESSION_COOKIE_TRUSTED_URL: https://${DOMAIN:?Set DOMAIN in .env}
       FRONTEND_BASE_URL: https://${DOMAIN:?Set DOMAIN in .env}
-      TRUSTED_PROXIES: 172.30.89.2
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-172.30.89.1}
       TZ: Asia/Shanghai
       DEFAULT_LANGUAGE: zh-CN
       ERROR_LOG_ENABLED: "true"
@@ -87,37 +87,16 @@ services:
       - database
     logging: *logging
 
-  caddy:
-    image: caddy:2-alpine
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-    environment:
-      DOMAIN: ${DOMAIN:?Set DOMAIN in .env}
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
-    depends_on:
-      new-api:
-        condition: service_healthy
-    networks:
-      proxy:
-        ipv4_address: 172.30.89.2
-    logging: *logging
-
 volumes:
   app_data:
   app_logs:
   pg_data:
-  caddy_data:
-  caddy_config:
 
 networks:
   proxy:
     ipam:
       config:
         - subnet: 172.30.89.0/24
+          gateway: 172.30.89.1
   database:
     internal: true
