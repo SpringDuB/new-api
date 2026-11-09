@@ -1,0 +1,12 @@
+{$DOMAIN} {
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		-Server
+	}
+	@setup {
+		method POST
+		path /api/setup*
+	}
+	respond @setup 403
+	reverse_proxy new-api:3000
+}
