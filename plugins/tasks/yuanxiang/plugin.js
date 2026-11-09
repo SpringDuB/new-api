@@ -19,25 +19,31 @@ const IMAGE_MODELS = {
 const MODEL_MAPPING = Object.fromEntries(Object.keys(VIDEO_MODELS).concat(Object.keys(IMAGE_MODELS)).map((model) => [model + "-YX", model]));
 const VIDEO_NAMES = Object.keys(MODEL_MAPPING).filter((name) => Object.prototype.hasOwnProperty.call(VIDEO_MODELS, MODEL_MAPPING[name]));
 const IMAGE_NAMES = Object.keys(MODEL_MAPPING).filter((name) => Object.prototype.hasOwnProperty.call(IMAGE_MODELS, MODEL_MAPPING[name]));
-const CONDITIONS = {
-  resolution: { enum: ["720p"], allowCustom: true, description: { en: "Output resolution", zh: "输出分辨率" } },
-  quality: { enum: ["default"], allowCustom: true, description: { en: "Output quality", zh: "输出画质" } },
-  version: { enum: ["default"], allowCustom: true, description: { en: "Model version", zh: "模型版本" } },
-  channel: { enum: ["auto"], allowCustom: true, description: { en: "Upstream route", zh: "上游线路" } },
-};
+const DURATION_TIERS = ["5", "10", "15", "20", "30", "40", "50", "60"];
 const VIDEO_USAGE_SCHEMA = {
   requests: { type: "number", unit: "count", description: { en: "Video generation request unit price", zh: "视频生成按次单价" } },
   seconds: { type: "number", unit: "second", description: { en: "Video generation duration unit price", zh: "视频生成时长单价" } },
+  tokens: { type: "number", unit: "token", optional: true, description: { en: "Video generation token unit price", zh: "视频生成 Token 单价" } },
   reference_seconds: { type: "number", unit: "second", optional: true, description: { en: "Reference video unit price", zh: "参考视频单价" } },
-  ...CONDITIONS,
-  duration_tier: { enum: ["5", "10", "15", "20", "30", "40", "50", "60"], allowCustom: true, description: { en: "Requested video duration", zh: "请求视频时长档位" } },
-  has_reference_video: { type: "boolean", description: { en: "Reference video present", zh: "存在参考视频" } },
+  resolution: { enum: ["720p"], allowCustom: true, description: { en: "Output video resolution", zh: "输出视频分辨率" } },
+  // An expression can branch on resolution or duration_tier independently.
+  // Duration values are exact submitted seconds; multiply requests, rather
+  // than seconds, when each duration tier has a total per-video price.
+  duration_tier: {
+    enum: DURATION_TIERS,
+    allowCustom: true,
+    description: { en: "Requested video duration", zh: "请求视频时长档位" },
+    enumLabels: Object.fromEntries(DURATION_TIERS.map((seconds) => [seconds, { en: seconds + "s", zh: seconds + "秒" }])),
+  },
+  video_input: {
+    enum: ["none", "video"],
+    enumLabels: { none: { en: "No reference video", zh: "无参考视频" }, video: { en: "With reference video", zh: "有参考视频" } },
+    description: { en: "Reference video input", zh: "参考视频输入" },
+  },
 };
 const IMAGE_USAGE_SCHEMA = {
   image_count: { type: "number", unit: "count", unitLabel: { en: "image", zh: "张" }, description: { en: "Image generation unit price", zh: "图片生成单价" } },
-  ...CONDITIONS,
   resolution: { enum: ["1k", "2k", "4k"], allowCustom: true, description: { en: "Output image resolution", zh: "输出图片分辨率" } },
-  quality: { enum: ["low"], allowCustom: true, description: { en: "Output image quality", zh: "输出图片画质" } },
 };
 const CONTAINERS = ["values", "metadata", "extra", "parameters"];
 const IMAGE_FIELDS = ["image", "images", "image_url", "image_urls", "imageUrls", "image_refs", "image_references", "reference_images", "input_reference", "first_image", "last_image", "first_frame_url", "last_frame_url"];
@@ -51,7 +57,7 @@ export const meta = {
   name: "Yuanxiang AI",
   icon: "text:YX",
   description: { en: "Yuanxiang video and image generation with canvas parameter mapping and configurable reference video pricing", zh: "元象视频与图片生成，支持画布参数映射和可选参考视频计费" },
-  version: "1.0.0",
+  version: "1.0.4",
   author: { name: "QuantumNous" },
   website: "https://yuanxiangai.cc/api-docs",
   baseUrl: "https://yuanxiangai.cc",
@@ -60,6 +66,10 @@ export const meta = {
   requiredCapabilities: ["submit-no-retry@1", "media-duration@1", "json-file-upload@1"],
   models: Object.keys(MODEL_MAPPING),
   usageSchema: VIDEO_USAGE_SCHEMA,
+  usageExamples: [
+    { label: "720p · 10s", facts: { requests: 1, seconds: 10, tokens: estimateVideoTokens(10, "720p"), reference_seconds: 0, resolution: "720p", duration_tier: "10", video_input: "none" } },
+    { label: "1080p · 20s", facts: { requests: 1, seconds: 20, tokens: estimateVideoTokens(20, "1080p"), reference_seconds: 0, resolution: "1080p", duration_tier: "20", video_input: "none" } },
+  ],
   usageProfiles: [{ models: IMAGE_NAMES, schema: IMAGE_USAGE_SCHEMA }],
   protocols: [{ name: "openai_video", models: VIDEO_NAMES }, { name: "openai_image", models: IMAGE_NAMES }],
   routes: [
@@ -86,7 +96,10 @@ function secondsValue(value) {
 }
 
 function conditionValue(value, field) {
-  if (typeof value !== "string" || !value.trim() || /[\u0000-\u001f\u007f]/.test(value) || value.length > 64) throw new Error(field + " must be a short non-empty string");
+  if (typeof value !== "string" || !value.trim() || value.length > 64 || Array.from(value).some((character) => {
+    const code = character.charCodeAt(0);
+    return code < 32 || code === 127;
+  })) throw new Error(field + " must be a short non-empty string");
   return value.trim();
 }
 
@@ -222,7 +235,7 @@ function submission(ctx) {
   }
   if (profile.model === "Muse · 特价按次 ·【原生】" && references.videos.length) body.duration = 20;
   if (Object.keys(options).length) body.options = options;
-  return { body: body, profile: profile, references: references, quality: values.quality || "default", version: values.version || "default" };
+  return { body: body, profile: profile, references: references };
 }
 
 function apiRoot(ctx) {
@@ -329,11 +342,34 @@ class InlineVideo {
   }
 }
 
+// Match the existing video-token estimate used by the Doubao plugin: output
+// seconds × pixels × 24 fps / 1024. This is a fallback estimate, not a vendor
+// usage claim. Use the tier's maximum 16:9 canvas regardless of aspect ratio.
+// Submission bounds duration to 1..60 and resolution to at most 9999p / 8k.
+function estimateVideoTokens(seconds, resolution) {
+  let width, height;
+  if (resolution.endsWith("p")) {
+    height = Number(resolution.slice(0, -1));
+    width = Math.ceil(height * 16 / 9);
+  } else if (resolution === "4k" || resolution === "8k") {
+    height = Number(resolution.slice(0, -1)) * 540;
+    width = height * 16 / 9;
+  } else {
+    width = Number(resolution.slice(0, -1)) * 1024;
+    height = Math.ceil(width * 9 / 16);
+  }
+  return seconds * width * height * 24 / 1024;
+}
+
 export function extractUsage(ctx) {
   const request = submission(ctx);
   if (ctx.usagePurpose === "billing_ratios") return request.profile.kind === "image" ? { image_count: 1 } : { requests: 1 };
-  const facts = { resolution: request.body.resolution.toLowerCase(), quality: request.quality, version: request.version, channel: request.body.channel || "auto" };
-  if (request.profile.kind === "image") return { ...facts, image_count: 1 };
+  // Retired conditions keep their first declared values for stored expressions.
+  // Vendor options still pass through in the submission body. Resolution and
+  // duration remain independent facts so each model's expression can select
+  // one or more conditions without changing the client request.
+  const facts = { resolution: request.body.resolution.toLowerCase(), quality: "default", version: "default", channel: "auto" };
+  if (request.profile.kind === "image") return { ...facts, quality: "low", image_count: 1 };
   let referenceSeconds = 0;
   if ((ctx.usageKeys || []).includes("reference_seconds")) {
     for (const reference of request.references.videos) {
@@ -343,7 +379,7 @@ export function extractUsage(ctx) {
       if (referenceSeconds > 3600) throw new Error("reference video duration total must not exceed 3600 seconds");
     }
   }
-  return { ...facts, requests: 1, seconds: request.body.duration, duration_tier: String(request.body.duration), reference_seconds: referenceSeconds, has_reference_video: request.references.videos.length > 0 };
+  return { ...facts, requests: 1, seconds: request.body.duration, tokens: estimateVideoTokens(request.body.duration, request.body.resolution), duration_tier: String(request.body.duration), video_input: request.references.videos.length ? "video" : "none", reference_seconds: referenceSeconds, has_reference_video: false };
 }
 
 function responseObject(body) {
@@ -387,7 +423,21 @@ export function buildQueryRequest(ctx) {
 }
 
 export function extractUsageOnComplete(ctx, result, body) {
-  if (result.status !== "SUCCESS" || modelDetails(ctx).kind !== "image") return {};
+  if (result.status !== "SUCCESS") return {};
+  if (modelDetails(ctx).kind === "video") {
+    const usage = body && body.usage;
+    if (!usage || typeof usage !== "object" || Array.isArray(usage)) return {};
+    // Follow Doubao's video billing: prefer completion tokens, then total
+    // tokens. Explicit zero is real usage; missing or malformed counters leave
+    // the frozen local estimate in place.
+    for (const field of ["completion_tokens", "total_tokens", "output_tokens"]) {
+      const value = usage[field];
+      if (typeof value !== "number" && (typeof value !== "string" || !/^\d+$/.test(value))) continue;
+      const tokens = Number(value);
+      if (Number.isSafeInteger(tokens) && tokens >= 0) return { tokens: tokens };
+    }
+    return {};
+  }
   const entries = imageEntries(body);
   const count = Math.max(entries.filter((entry) => typeof entry.url === "string" && entry.url.trim()).length, entries.filter((entry) => typeof entry.b64_json === "string" && entry.b64_json.trim()).length);
   return count > 0 && count <= 128 ? { image_count: count } : {};
@@ -425,7 +475,7 @@ function decodeRequest(ctx, kind) {
       const media = IMAGE_FIELDS.concat(VIDEO_FIELDS, AUDIO_FIELDS, ["image_ids", "image_b64s", "video_b64s", "audio_b64s"]).includes(name);
       if (values.length !== 1 && !media) throw new Error(name + " must be provided once");
       let value = values.length === 1 ? values[0] : values;
-      if (typeof value === "string" && (media || CONTAINERS.includes(name) || name === "options") && /^[\[{]/.test(value.trim())) {
+      if (typeof value === "string" && (media || CONTAINERS.includes(name) || name === "options") && /^[[{]/.test(value.trim())) {
         try { value = JSON.parse(value); } catch { throw new Error(name + " must contain valid JSON"); }
       }
       Object.defineProperty(body, name, { value: value, enumerable: true });

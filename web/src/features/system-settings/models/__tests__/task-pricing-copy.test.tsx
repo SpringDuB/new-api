@@ -22,6 +22,13 @@ import i18next from 'i18next'
 import { useState } from 'react'
 import { afterEach, expect, it, vi } from 'vitest'
 
+import {
+  evaluateTaskVisualConfig,
+  tryParseTaskVisualConfig,
+} from '@/features/pricing/lib/task-expr'
+import type { BillingUsageSchema } from '@/features/pricing/types'
+
+import { TaskPricingBranchDialog } from '../task-pricing-branch-dialog'
 import { TaskUsagePricingEditor } from '../task-usage-pricing-editor'
 
 function renderPricing(unitLabel?: Record<string, string>) {
@@ -56,6 +63,300 @@ function renderPricing(unitLabel?: Record<string, string>) {
 afterEach(async () => {
   await act(() => i18next.changeLanguage('en'))
 })
+
+const videoBranchSchema: BillingUsageSchema = {
+  resolution: {
+    enum: ['720p'],
+    allowCustom: true,
+    description: 'Resolution',
+  },
+  duration_tier: {
+    enum: ['10', '20'],
+    allowCustom: true,
+    description: 'Duration',
+  },
+  video_input: {
+    enum: ['none', 'video'],
+    enumLabels: {
+      none: { en: 'No reference video', zh: '无参考视频' },
+      video: { en: 'With reference video', zh: '有参考视频' },
+    },
+    description: { en: 'Reference video input', zh: '参考视频输入' },
+  },
+  requests: { type: 'number', unit: 'count', description: 'Video price' },
+}
+
+it.each([
+  { name: 'resolution only', combination: { resolution: '720p' } },
+  { name: 'duration only', combination: { duration_tier: '10' } },
+  {
+    name: 'resolution and duration',
+    combination: { resolution: '720p', duration_tier: '10' },
+  },
+  {
+    name: 'resolution and reference video',
+    combination: { resolution: '720p', video_input: 'video' },
+  },
+  {
+    name: 'duration and reference video',
+    combination: { duration_tier: '20', video_input: 'video' },
+  },
+  {
+    name: 'resolution, duration and reference video',
+    combination: {
+      resolution: '1080p',
+      duration_tier: '20',
+      video_input: 'video',
+    },
+  },
+])(
+  'adds a branch with $name without requiring other conditions',
+  async ({ combination }) => {
+    const onAdd = vi.fn()
+    const user = userEvent.setup()
+    render(
+      <TaskPricingBranchDialog
+        open
+        onOpenChange={vi.fn()}
+        schema={videoBranchSchema}
+        rows={[]}
+        onAdd={onAdd}
+      />
+    )
+    for (const [field, definition] of Object.entries(videoBranchSchema)) {
+      if (!definition.enum) continue
+      const label =
+        typeof definition.description === 'string'
+          ? definition.description
+          : (definition.description?.en ?? field)
+      const checkbox = screen.getByRole('checkbox', { name: label })
+      const value = combination[field as keyof typeof combination]
+      if (
+        (value !== undefined) !==
+        (checkbox.getAttribute('aria-checked') === 'true')
+      ) {
+        await user.click(checkbox)
+      }
+      if (value === undefined) continue
+      if (definition.allowCustom) {
+        await user.type(
+          screen.getByRole('textbox', { name: `${label} value` }),
+          value
+        )
+      } else {
+        await user.click(
+          screen.getByRole('combobox', { name: `${label} value` })
+        )
+        await user.click(
+          screen.getByRole('option', { name: 'With reference video' })
+        )
+      }
+    }
+    await user.click(screen.getByRole('button', { name: 'Add tier' }))
+    expect(onAdd).toHaveBeenCalledExactlyOnceWith(combination)
+  }
+)
+
+it('removes unchecked values and rejects empty or whitespace-only conditions', async () => {
+  const onAdd = vi.fn()
+  const user = userEvent.setup()
+  render(
+    <TaskPricingBranchDialog
+      open
+      onOpenChange={vi.fn()}
+      schema={videoBranchSchema}
+      rows={[]}
+      onAdd={onAdd}
+    />
+  )
+  await user.type(
+    screen.getByRole('textbox', { name: 'Resolution value' }),
+    '720p'
+  )
+  await user.click(screen.getByRole('checkbox', { name: 'Resolution' }))
+  expect(
+    screen.queryByRole('textbox', { name: 'Resolution value' })
+  ).not.toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: 'Add tier' }))
+  expect(screen.getByRole('alert')).toHaveTextContent(
+    'Select at least one condition.'
+  )
+  expect(onAdd).not.toHaveBeenCalled()
+
+  screen.getByRole('checkbox', { name: 'Duration' }).focus()
+  await user.keyboard('[Space]')
+  expect(screen.getByRole('checkbox', { name: 'Duration' })).toBeChecked()
+  const duration = screen.getByRole('textbox', { name: 'Duration value' })
+  await user.type(duration, '   ')
+  await user.click(screen.getByRole('button', { name: 'Add tier' }))
+  expect(screen.getByRole('alert')).toHaveTextContent('Required')
+  expect(duration).toHaveAttribute('aria-invalid', 'true')
+  expect(onAdd).not.toHaveBeenCalled()
+  await user.clear(duration)
+  await user.type(duration, '20')
+  await user.click(screen.getByRole('button', { name: 'Add tier' }))
+  expect(onAdd).toHaveBeenCalledExactlyOnceWith({ duration_tier: '20' })
+})
+
+it.each<{
+  existing: Record<string, string>
+  duration: string | undefined
+  duplicate: boolean
+}>([
+  { existing: { resolution: '720p' }, duration: undefined, duplicate: true },
+  { existing: { resolution: '720p' }, duration: '10', duplicate: false },
+  {
+    existing: { resolution: '720p', duration_tier: '10' },
+    duration: undefined,
+    duplicate: false,
+  },
+  {
+    existing: { duration_tier: '10', resolution: '720p' },
+    duration: '10',
+    duplicate: true,
+  },
+])(
+  'compares exact condition sets for duplicates: $existing, duration $duration',
+  async ({ existing, duration, duplicate }) => {
+    const onAdd = vi.fn()
+    const user = userEvent.setup()
+    render(
+      <TaskPricingBranchDialog
+        open
+        onOpenChange={vi.fn()}
+        schema={videoBranchSchema}
+        rows={[
+          { combination: existing, constant: 0, unitPrices: { requests: 1 } },
+        ]}
+        onAdd={onAdd}
+      />
+    )
+    await user.type(
+      screen.getByRole('textbox', { name: 'Resolution value' }),
+      '720p'
+    )
+    if (duration) {
+      await user.click(screen.getByRole('checkbox', { name: 'Duration' }))
+      await user.type(
+        screen.getByRole('textbox', { name: 'Duration value' }),
+        duration
+      )
+    }
+    await user.click(screen.getByRole('button', { name: 'Add tier' }))
+    if (duplicate) {
+      expect(screen.getByRole('alert')).toHaveTextContent(
+        'A tier with these conditions already exists.'
+      )
+      expect(onAdd).not.toHaveBeenCalled()
+    } else {
+      expect(onAdd).toHaveBeenCalledExactlyOnceWith(
+        duration
+          ? { resolution: '720p', duration_tier: duration }
+          : { resolution: '720p' }
+      )
+    }
+  }
+)
+
+it('localizes reference video choices while submitting raw enum values', async () => {
+  await act(() => i18next.changeLanguage('zhCN'))
+  const onAdd = vi.fn()
+  const user = userEvent.setup()
+  render(
+    <TaskPricingBranchDialog
+      open
+      onOpenChange={vi.fn()}
+      schema={videoBranchSchema}
+      rows={[]}
+      onAdd={onAdd}
+    />
+  )
+  await user.click(screen.getByRole('checkbox', { name: 'Resolution' }))
+  await user.click(screen.getByRole('checkbox', { name: '参考视频输入' }))
+  await user.click(screen.getByRole('combobox'))
+  expect(screen.getByRole('option', { name: '无参考视频' })).toBeVisible()
+  await user.click(screen.getByRole('option', { name: '有参考视频' }))
+  await act(() => i18next.changeLanguage('en'))
+  expect(
+    screen.getByRole('combobox', { name: 'Reference video input value' })
+  ).toHaveValue('With reference video')
+  await user.click(screen.getByRole('button', { name: 'Add tier' }))
+  expect(onAdd).toHaveBeenCalledExactlyOnceWith({ video_input: 'video' })
+})
+
+it.each(['720p', '1080p', '4k'])(
+  'prices %s independently with and without reference video',
+  async (resolution) => {
+    const onChange = vi.fn()
+    const user = userEvent.setup()
+    render(
+      <TaskUsagePricingEditor
+        billingExpr='tier("base", u("requests") * 0.5)'
+        requestRuleExpr=''
+        usageSchema={videoBranchSchema}
+        onBillingExprChange={onChange}
+        onRequestRuleExprChange={vi.fn()}
+      />
+    )
+    for (const [videoInput, label, price] of [
+      ['none', 'No reference video', '1'],
+      ['video', 'With reference video', '2'],
+    ]) {
+      await user.click(
+        screen.getByRole('button', { name: 'Add pricing branch' })
+      )
+      const dialog = within(screen.getByRole('dialog'))
+      await user.type(
+        dialog.getByRole('textbox', { name: 'Resolution value' }),
+        resolution
+      )
+      await user.click(
+        dialog.getByRole('checkbox', { name: 'Reference video input' })
+      )
+      if (videoInput === 'video') {
+        await user.click(
+          dialog.getByRole('combobox', { name: 'Reference video input value' })
+        )
+        await user.click(screen.getByRole('option', { name: label }))
+      }
+      await user.click(dialog.getByRole('button', { name: 'Add tier' }))
+      const input = screen.getByRole('textbox', {
+        name: `Video price: Resolution: ${resolution} · ${label}`,
+      })
+      await user.clear(input)
+      await user.type(input, price)
+    }
+    const expression = onChange.mock.lastCall?.[0]
+    expect(expression).toContain(`u("resolution") == "${resolution}"`)
+    expect(expression).toContain('u("video_input") == "none"')
+    expect(expression).toContain('u("video_input") == "video"')
+    expect(expression).not.toContain('duration_tier')
+    const config = tryParseTaskVisualConfig(expression, videoBranchSchema)
+    expect(config).not.toBeNull()
+    if (!config) return
+    expect(
+      evaluateTaskVisualConfig(config, {
+        requests: 1,
+        resolution,
+        video_input: 'none',
+      })?.total
+    ).toBe(1)
+    expect(
+      evaluateTaskVisualConfig(config, {
+        requests: 1,
+        resolution,
+        video_input: 'video',
+      })?.total
+    ).toBe(2)
+    expect(
+      evaluateTaskVisualConfig(config, {
+        requests: 1,
+        resolution: '8k',
+        video_input: 'video',
+      })?.total
+    ).toBe(0.5)
+  }
+)
 
 it('reuses optional price controls for a plugin without resolution tiers', async () => {
   const onChange = vi.fn()

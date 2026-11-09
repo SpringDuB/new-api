@@ -24,15 +24,30 @@ import { z } from 'zod'
 
 import { Dialog } from '@/components/dialog'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Combobox } from '@/components/ui/combobox'
-import { Field, FieldLabel } from '@/components/ui/field'
+import {
+  Field,
+  FieldError,
+  FieldGroup,
+  FieldLabel,
+  FieldLegend,
+  FieldSet,
+} from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import type { TaskMatrixRow } from '@/features/pricing/lib/task-expr'
-import { taskPriceLabel } from '@/features/pricing/lib/task-price-display'
+import {
+  taskEnumLabel,
+  taskPriceLabel,
+} from '@/features/pricing/lib/task-price-display'
 import type { BillingUsageSchema } from '@/features/pricing/types'
 
 const branchSchema = z.object({
-  values: z.record(z.string(), z.string().trim().min(1).max(64)),
+  values: z
+    .record(z.string(), z.string().trim().min(1, 'Required').max(64))
+    .refine((values) => Object.keys(values).length > 0, {
+      message: 'Select at least one condition.',
+    }),
 })
 
 export function TaskPricingBranchDialog(props: {
@@ -51,18 +66,23 @@ export function TaskPricingBranchDialog(props: {
     resolver: zodResolver(branchSchema),
     defaultValues: {
       values: Object.fromEntries(
-        fields.map(([field, definition]) => [
-          field,
-          definition.allowCustom ? '' : (definition.enum?.[0] ?? ''),
-        ])
+        fields
+          .slice(0, 1)
+          .map(([field, definition]) => [
+            field,
+            definition.allowCustom ? '' : (definition.enum?.[0] ?? ''),
+          ])
       ),
     },
   })
   const submit = form.handleSubmit(({ values }) => {
     const combination = values
+    const entries = Object.entries(combination)
     if (
-      props.rows.some((row) =>
-        fields.every(([field]) => row.combination[field] === combination[field])
+      props.rows.some(
+        (row) =>
+          Object.keys(row.combination).length === entries.length &&
+          entries.every(([field, value]) => row.combination[field] === value)
       )
     ) {
       form.setError('root', {
@@ -79,6 +99,7 @@ export function TaskPricingBranchDialog(props: {
       open={props.open}
       onOpenChange={props.onOpenChange}
       title={t('Add pricing branch')}
+      description={t('Choose one or more conditions for this branch.')}
       contentClassName='sm:max-w-md'
       footer={
         <>
@@ -95,50 +116,113 @@ export function TaskPricingBranchDialog(props: {
         </>
       }
     >
-      <form id={id} onSubmit={submit} className='space-y-3'>
-        {fields.map(([field, definition]) => (
-          <Field key={field}>
-            <FieldLabel htmlFor={`${id}-${field}`}>
-              {taskPriceLabel(definition.description, field, i18n.language)}
-            </FieldLabel>
-            {definition.allowCustom ? (
-              <Input
-                id={`${id}-${field}`}
-                aria-label={t('{{field}} value', {
-                  field: taskPriceLabel(
-                    definition.description,
-                    field,
-                    i18n.language
-                  ),
-                })}
-                maxLength={64}
-                required
-                {...form.register(`values.${field}`)}
-              />
-            ) : (
-              <Controller
-                control={form.control}
-                name={`values.${field}`}
-                render={({ field: input }) => (
-                  <Combobox
-                    id={`${id}-${field}`}
-                    value={input.value}
-                    options={(definition.enum ?? []).map((value) => ({
-                      value,
-                      label: value,
-                    }))}
-                    onValueChange={input.onChange}
-                  />
-                )}
-              />
+      <form id={id} onSubmit={submit}>
+        <FieldGroup>
+          <Controller
+            control={form.control}
+            name='values'
+            render={({ field: input }) => (
+              <FieldSet>
+                <FieldLegend variant='label'>
+                  {t('Tier conditions')}
+                </FieldLegend>
+                <FieldGroup>
+                  {fields.map(([field, definition]) => {
+                    const label = taskPriceLabel(
+                      definition.description,
+                      field,
+                      i18n.language
+                    )
+                    const selected = Object.hasOwn(input.value, field)
+                    const error = form.formState.errors.values?.[field]
+                    const valueLabel = t('{{field}} value', { field: label })
+                    return (
+                      <Field key={field} data-invalid={Boolean(error)}>
+                        <Field orientation='horizontal'>
+                          <Checkbox
+                            id={`${id}-${field}-selected`}
+                            checked={selected}
+                            onCheckedChange={(checked) => {
+                              const values = { ...input.value }
+                              if (checked) {
+                                values[field] = definition.allowCustom
+                                  ? ''
+                                  : (definition.enum?.[0] ?? '')
+                              } else {
+                                delete values[field]
+                              }
+                              form.clearErrors()
+                              input.onChange(values)
+                            }}
+                          />
+                          <FieldLabel htmlFor={`${id}-${field}-selected`}>
+                            {label}
+                          </FieldLabel>
+                        </Field>
+                        {selected && (
+                          <>
+                            {definition.allowCustom ? (
+                              <Input
+                                id={`${id}-${field}`}
+                                aria-label={valueLabel}
+                                aria-invalid={Boolean(error)}
+                                aria-describedby={
+                                  error ? `${id}-${field}-error` : undefined
+                                }
+                                maxLength={64}
+                                required
+                                value={input.value[field]}
+                                onChange={(event) =>
+                                  input.onChange({
+                                    ...input.value,
+                                    [field]: event.target.value,
+                                  })
+                                }
+                              />
+                            ) : (
+                              <Combobox
+                                id={`${id}-${field}`}
+                                aria-label={valueLabel}
+                                value={input.value[field]}
+                                options={(definition.enum ?? []).map(
+                                  (value) => ({
+                                    value,
+                                    label: taskEnumLabel(
+                                      definition,
+                                      value,
+                                      i18n.language
+                                    ),
+                                  })
+                                )}
+                                onValueChange={(value) =>
+                                  input.onChange({
+                                    ...input.value,
+                                    [field]: value,
+                                  })
+                                }
+                              />
+                            )}
+                            {error?.message && (
+                              <FieldError id={`${id}-${field}-error`}>
+                                {t(error.message)}
+                              </FieldError>
+                            )}
+                          </>
+                        )}
+                      </Field>
+                    )
+                  })}
+                </FieldGroup>
+              </FieldSet>
             )}
-          </Field>
-        ))}
-        {form.formState.errors.root?.message && (
-          <p role='alert' className='text-destructive text-xs'>
-            {t(form.formState.errors.root.message)}
-          </p>
-        )}
+          />
+          {typeof form.formState.errors.values?.message === 'string' && (
+            <FieldError>{t(form.formState.errors.values.message)}</FieldError>
+          )}
+          {form.formState.errors.root?.message && (
+            <FieldError>{t(form.formState.errors.root.message)}</FieldError>
+          )}
+        </FieldGroup>
       </form>
     </Dialog>
   )
