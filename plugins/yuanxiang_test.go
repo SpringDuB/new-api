@@ -204,6 +204,59 @@ func TestYuanxiangRejectsConflictingAndUnboundedParameters(t *testing.T) {
 	assert.Equal(t, "Mini", body["options"].(map[string]any)["version"])
 }
 
+func TestYuanxiangImageSizeMapping(t *testing.T) {
+	plugin := loadYuanxiangPlugin(t)
+	for _, tc := range []struct {
+		name       string
+		fields     map[string]any
+		ratio      string
+		resolution string
+	}{
+		{"reported request", map[string]any{"size": "1824x1024", "resolution": "1k", "n": 1, "output_format": "png"}, "16:9", "1k"},
+		{"portrait", map[string]any{"size": "1024x1824", "resolution": "2k"}, "9:16", "2k"},
+		{"square default resolution", map[string]any{"size": "1024x1024"}, "1:1", "1k"},
+		{"landscape", map[string]any{"size": "1536x1024", "resolution_name": "4K"}, "3:2", "4k"},
+		{"uppercase separator", map[string]any{"size": " 1824X1024 "}, "16:9", "1k"},
+		{"matching explicit ratio", map[string]any{"size": "1824x1024", "ratio": "16:9"}, "16:9", "1k"},
+		{"explicit ratio takes precedence", map[string]any{"size": "1824x1024", "ratio": "9:16"}, "9:16", "1k"},
+		{"nested explicit ratio takes precedence", map[string]any{"size": "1824x1024", "metadata": map[string]any{"aspect_ratio": "9:16"}}, "9:16", "1k"},
+		{"nested dimensions", map[string]any{"resolution": "2k", "metadata": map[string]any{"parameters": map[string]any{"size": "1024x1824"}}}, "9:16", "2k"},
+		{"resolution label", map[string]any{"size": "2K"}, "", "2k"},
+		{"documented request", map[string]any{"ratio": "1:1"}, "1:1", "1k"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.fields["prompt"] = "A corgi wearing an astronaut helmet"
+			tc.fields["quality"] = "high"
+			ctx := yuanxiangContext("GT Image 2.5-YX", tc.fields)
+			body := yuanxiangHook(t, plugin, "buildSubmitRequest", ctx)["body"].(map[string]any)
+			assert.Equal(t, tc.resolution, body["resolution"])
+			assert.Equal(t, "high", body["quality"])
+			if tc.ratio == "" {
+				assert.NotContains(t, body, "ratio")
+			} else {
+				assert.Equal(t, tc.ratio, body["ratio"])
+			}
+			assert.NotContains(t, body, "size")
+			facts := yuanxiangHook(t, plugin, "extractUsage", ctx)
+			assert.Equal(t, tc.resolution, facts["resolution"])
+			assert.Equal(t, "low", facts["quality"], "retired quality conditions retain their value for stored expressions")
+			assert.Equal(t, float64(1), facts["image_count"])
+		})
+	}
+	for _, fields := range []map[string]any{
+		{"size": "0x1024"}, {"size": "1024x0"}, {"size": "-1024x1024"},
+		{"size": "1024.5x1024"}, {"size": "99999999999999999999x1024"},
+		{"size": "1824x1024", "metadata": map[string]any{"size": "1024x1824"}},
+		{"size": "1824x1024", "resolution": "1k", "metadata": map[string]any{"resolution_name": "4k"}},
+	} {
+		fields["prompt"] = "A corgi wearing an astronaut helmet"
+		for _, hook := range []string{"buildSubmitRequest", "extractUsage"} {
+			_, err := plugin.Engine.Call(t.Context(), hook, yuanxiangContext("GT Image 2.5-YX", fields))
+			require.Error(t, err, "%s: %v", hook, fields)
+		}
+	}
+}
+
 func TestYuanxiangReferenceBillingUsesMediaAndSkipsDisabledMeasurements(t *testing.T) {
 	plugin := loadYuanxiangPlugin(t)
 	video := base64.StdEncoding.EncodeToString(yueqiReferenceVideoFixture(t, 3.5))

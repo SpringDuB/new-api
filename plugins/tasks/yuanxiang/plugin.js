@@ -103,6 +103,22 @@ function conditionValue(value, field) {
   return value.trim();
 }
 
+function imageAspectRatio(size) {
+  const dimensions = /^([1-9]\d{0,4})x([1-9]\d{0,4})$/.exec(size);
+  if (!dimensions) throw new Error("size must contain positive pixel dimensions up to five digits per side");
+  const aspect = Number(dimensions[1]) / Number(dimensions[2]);
+  let closest = "1:1", nearest = Infinity;
+  for (const ratio of ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "4:5", "5:4", "21:9", "9:21"]) {
+    const sides = ratio.split(":");
+    const distance = Math.abs(Math.log(aspect) - Math.log(Number(sides[0]) / Number(sides[1])));
+    if (distance < nearest) {
+      nearest = distance;
+      closest = ratio;
+    }
+  }
+  return closest;
+}
+
 // Used by both building and metering. Flatten parameter containers, validate
 // conflicting aliases, and forward only the documented vendor body members.
 function submission(ctx) {
@@ -110,6 +126,7 @@ function submission(ctx) {
   const input = ctx.requestBody;
   if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("request body must be an object");
   const scopes = [input];
+  const imageSizes = [];
   const values = {};
   const options = {};
   const body = { model: profile.model, wait: false };
@@ -143,6 +160,10 @@ function submission(ctx) {
     for (const field of ["prompt", "seconds", "duration", "resolution", "resolution_name", "size", "aspect_ratio", "ratio", "quality", "version", "channel"]) {
       if (scope[field] === undefined) continue;
       let key = field, value = scope[field];
+      if (field === "size" && profile.kind === "image" && typeof value === "string" && /^\d+x\d+$/i.test(value.trim())) {
+        imageSizes.push(conditionValue(value, field).toLowerCase());
+        continue;
+      }
       if (["seconds", "duration"].includes(field)) {
         key = "duration";
         value = secondsValue(value);
@@ -169,6 +190,15 @@ function submission(ctx) {
     }
   }
   if (values.prompt === undefined) throw new Error("prompt is required");
+  // Pixel sizes select the layout only. An explicit ratio in any parameter
+  // container wins, and the resolution label stays independent for billing.
+  if (values.ratio === undefined) {
+    for (const size of imageSizes) {
+      const ratio = imageAspectRatio(size);
+      if (values.ratio !== undefined && values.ratio !== ratio) throw new Error("conflicting image size parameters");
+      values.ratio = ratio;
+    }
+  }
   body.prompt = values.prompt;
   if (values.ratio !== undefined) body.ratio = values.ratio;
   if (values.channel !== undefined) body.channel = values.channel;
