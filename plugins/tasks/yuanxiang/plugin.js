@@ -14,7 +14,7 @@ const VIDEO_MODELS = {
 const IMAGE_MODELS = {
   // The API currently accepts low only; the public docs also advertise higher
   // qualities which the authenticated API rejects before task creation.
-  "GT Image 2.5": { resolution: "1k", quality: "low", version: "flare" },
+  "GT Image 2.5": { resolution: "1k", quality: "low" },
 };
 const MODEL_MAPPING = Object.fromEntries(Object.keys(VIDEO_MODELS).concat(Object.keys(IMAGE_MODELS)).map((model) => [model + "-YX", model]));
 const VIDEO_NAMES = Object.keys(MODEL_MAPPING).filter((name) => Object.prototype.hasOwnProperty.call(VIDEO_MODELS, MODEL_MAPPING[name]));
@@ -57,7 +57,7 @@ export const meta = {
   name: "Yuanxiang AI",
   icon: "text:YX",
   description: { en: "Yuanxiang video and image generation with canvas parameter mapping and configurable reference video pricing", zh: "元象视频与图片生成，支持画布参数映射和可选参考视频计费" },
-  version: "1.0.4",
+  version: "1.0.5",
   author: { name: "QuantumNous" },
   website: "https://yuanxiangai.cc/api-docs",
   baseUrl: "https://yuanxiangai.cc",

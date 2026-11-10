@@ -100,13 +100,13 @@ func TestYuanxiangModelFamiliesAndImageProtocol(t *testing.T) {
 	}
 	for _, model := range []string{"GT Image 2.5"} {
 		t.Run(model, func(t *testing.T) {
-			ctx := yuanxiangContext(model+"-YX", map[string]any{"prompt": "A boat", "n": 1, "size": "16:9", "resolution_name": "4K", "quality": "high", "options": map[string]any{"web_search": false, "version": "flare"}})
+			ctx := yuanxiangContext(model+"-YX", map[string]any{"prompt": "A boat", "n": 1, "size": "16:9", "resolution_name": "4K", "quality": "high"})
 			submit := yuanxiangHook(t, plugin, "buildSubmitRequest", ctx)
 			assert.Equal(t, "https://yuanxiang.example/v1/images/generations", submit["url"])
 			body := submit["body"].(map[string]any)
 			assert.Equal(t, model, body["model"])
 			assert.Equal(t, "16:9", body["ratio"])
-			assert.Equal(t, false, body["options"].(map[string]any)["web_search"])
+			assert.NotContains(t, body, "options", "GT Image 2.5 requests must not inject model options")
 			facts := yuanxiangHook(t, plugin, "extractUsage", ctx)
 			assert.Equal(t, float64(1), facts["image_count"])
 			assert.Equal(t, "4k", facts["resolution"])
@@ -237,6 +237,7 @@ func TestYuanxiangImageSizeMapping(t *testing.T) {
 				assert.Equal(t, tc.ratio, body["ratio"])
 			}
 			assert.NotContains(t, body, "size")
+			assert.NotContains(t, body, "options", "image size conversion must not inject model options")
 			facts := yuanxiangHook(t, plugin, "extractUsage", ctx)
 			assert.Equal(t, tc.resolution, facts["resolution"])
 			assert.Equal(t, "low", facts["quality"], "retired quality conditions retain their value for stored expressions")
