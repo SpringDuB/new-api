@@ -68,18 +68,27 @@ func TestYueqiVideoModelsAndMetering(t *testing.T) {
 	models := map[string]struct {
 		defaultResolution string
 	}{
-		"BD Seedance2.5":          {"720p"},
-		"kling-4.0":               {"720p"},
-		"sd2.5新":                  {"720p"},
-		"seedance-2.0-fast-通用":    {"720p"},
-		"seedance2.5无限并发版":        {"720p"},
-		"vidu-q4":                 {"720p"},
-		"vidu-q4-nopeak":          {"720p"},
-		"w3-c1":                   {"720p"},
-		"wan3.0-vedio-deal":       {"480p"},
-		"wan3.0-video-nsfw":       {"480p"},
-		"wan3.0-video-prime-deal": {"720p"},
-		"新seedance2.0-933":        {"720p"},
+		"BD Seedance2.5":                {"720p"},
+		"MINIMAXH3-2.0采样":               {"720p"},
+		"kling-4.0":                     {"720p"},
+		"mi-seedance2.5":                {"720p"},
+		"sd2.5新":                        {"720p"},
+		"seedance-2.0":                  {"720p"},
+		"seedance-2.0-fast-通用":          {"720p"},
+		"seedance-2.5-standard-seconds": {"720p"},
+		"seedance-2.5-standard-video":   {"720p"},
+		"seedance2.5无限并发版":              {"720p"},
+		"shot-enhanced-2":               {"720p"},
+		"vidu-q4":                       {"720p"},
+		"vidu-q4-nopeak":                {"720p"},
+		"w3-c1":                         {"720p"},
+		"wan-3.0":                       {"720p"},
+		"wan-3.0-pro":                   {"720p"},
+		"wan3.0-video-prime-deal":       {"720p"},
+		"不卡脸seedance-2.0":               {"720p"},
+		"新seedance2.0-933":              {"720p"},
+		"新满-seedance-933":               {"720p"},
+		"特惠版2.5 满血 480p":                {"720p"},
 	}
 	for modelName := range models {
 		assert.Contains(t, plugin.Meta.Models, modelName)
@@ -133,14 +142,22 @@ func TestYueqiVideoModelsAndMetering(t *testing.T) {
 		})
 	}
 
-	ctx := yueqiContext("wan3.0-video-nsfw", map[string]any{"prompt": "boat"})
-	ctx["model"] = "local-wan-alias"
+	for _, modelName := range []string{"wan3.0-vedio-deal", "wan3.0-video-nsfw", "wan3.0-vedio-deal-per"} {
+		assert.NotContains(t, plugin.Meta.Models, modelName)
+		for _, hook := range []string{"buildSubmitRequest", "extractUsage"} {
+			_, err := plugin.Engine.Call(t.Context(), hook, yueqiContext(modelName, map[string]any{"prompt": "boat"}))
+			require.ErrorContains(t, err, "unsupported Yueqi video model", "unlisted models must fail before billable submission")
+		}
+	}
+
+	ctx := yueqiContext("mi-seedance2.5", map[string]any{"prompt": "boat"})
+	ctx["model"] = "local-seedance-alias"
 	submit := yueqiHook(t, plugin, "buildSubmitRequest", ctx)
-	assert.Equal(t, "wan3.0-video-nsfw", submit["body"].(map[string]any)["model"])
-	assert.Equal(t, map[string]any{"requests": float64(1), "seconds": float64(5), "resolution": "480p", "reference_seconds": float64(0)}, yueqiHook(t, plugin, "extractUsage", ctx))
+	assert.Equal(t, "mi-seedance2.5", submit["body"].(map[string]any)["model"])
+	assert.Equal(t, map[string]any{"requests": float64(1), "seconds": float64(5), "resolution": "720p", "reference_seconds": float64(0)}, yueqiHook(t, plugin, "extractUsage", ctx))
 	assert.NotContains(t, submit, "model", "the driver must not rewrite the host's pinned alias")
-	ctx["requestBody"] = map[string]any{"prompt": "boat", "resolution": "720p"}
-	assert.Equal(t, "720p", yueqiHook(t, plugin, "buildSubmitRequest", ctx)["body"].(map[string]any)["resolution"], "upstream capabilities no longer restrict administrator pricing branches")
+	ctx["requestBody"] = map[string]any{"prompt": "boat", "resolution": "480p"}
+	assert.Equal(t, "480p", yueqiHook(t, plugin, "buildSubmitRequest", ctx)["body"].(map[string]any)["resolution"], "upstream capabilities no longer restrict administrator pricing branches")
 }
 
 func TestYueqiPublicModelNamesBindVideoProtocolAndPreserveBillingIdentity(t *testing.T) {
@@ -155,7 +172,6 @@ func TestYueqiPublicModelNamesBindVideoProtocolAndPreserveBillingIdentity(t *tes
 		"seedance2.5":           "seedance2.5无限并发版",
 		"seedance2.0-9:16-per":  "新seedance2.0-933",
 		"vidu-q4-per":           "vidu-q4",
-		"wan3.0-vedio-deal-per": "wan3.0-vedio-deal",
 		"wan3.0-video-prime":    "wan3.0-video-prime-deal",
 		"new-seedance2.5-per":   "sd2.5新",
 		"wan3-c1-per":           "w3-c1",
@@ -180,10 +196,10 @@ func TestYueqiPublicModelNamesBindVideoProtocolAndPreserveBillingIdentity(t *tes
 			assert.Equal(t, resolution, yueqiHook(t, plugin, "extractUsageOnComplete", ctx, map[string]any{"status": "SUCCESS"}, map[string]any{"resolution": resolution})["resolution"])
 		})
 	}
-	ctx := yueqiContext("seedance-2.0-fast-per", map[string]any{"prompt": "boat"})
-	ctx["upstreamModel"] = "wan3.0-video-nsfw"
+	ctx := yueqiContext("seedance-2.0-fast-per", map[string]any{"prompt": "boat", "resolution": "480p"})
+	ctx["upstreamModel"] = "mi-seedance2.5"
 	submit := yueqiHook(t, plugin, "buildSubmitRequest", ctx)
-	assert.Equal(t, "wan3.0-video-nsfw", submit["body"].(map[string]any)["model"], "an explicit channel mapping overrides the plugin's alias default")
+	assert.Equal(t, "mi-seedance2.5", submit["body"].(map[string]any)["model"], "an explicit channel mapping overrides the plugin's alias default")
 	assert.Equal(t, "480p", yueqiHook(t, plugin, "extractUsage", ctx)["resolution"])
 }
 
@@ -427,7 +443,7 @@ func TestYueqiResolutionAndAspectRatioAliases(t *testing.T) {
 			body := maps.Clone(tc.body)
 			body["prompt"] = "boat"
 			for _, hook := range []string{"buildSubmitRequest", "extractUsage"} {
-				for _, modelName := range []string{"seedance-2.0-fast-per", "wan3.0-video-nsfw"} {
+				for _, modelName := range []string{"seedance-2.0-fast-per", "mi-seedance2.5"} {
 					_, err := plugin.Engine.Call(t.Context(), hook, yueqiContext(modelName, body))
 					require.Error(t, err, "invalid/conflicting aliases must fail before sending or reserving a price tier")
 				}
@@ -444,8 +460,8 @@ func TestYueqiResolutionAndAspectRatioAliases(t *testing.T) {
 	require.ErrorContains(t, err, "conflicting video resolution parameters")
 
 	for _, tc := range []struct{ model, kind string }{
-		{"wan3.0-video-nsfw", "json"},
-		{"wan3.0-video-nsfw", "multipart"},
+		{"mi-seedance2.5", "json"},
+		{"mi-seedance2.5", "multipart"},
 		{"seedance-2.0-fast-per", "multipart"},
 	} {
 		t.Run(tc.model+" client "+tc.kind, func(t *testing.T) {

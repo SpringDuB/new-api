@@ -1,19 +1,30 @@
-// Model names and default resolutions come from Yueqi's /v1/models.
+// Model names and supported resolutions come from Yueqi's /v1/models.
+// Prefer 720p by default, which every listed model advertises.
 // Its descriptions and request_spec disagree about reference capabilities, so
 // preserve media fields and let the upstream validate each model's inputs.
 const MODELS = {
   "BD Seedance2.5": { defaultResolution: "720p" },
+  "MINIMAXH3-2.0采样": { defaultResolution: "720p" },
   "kling-4.0": { defaultResolution: "720p" },
+  "mi-seedance2.5": { defaultResolution: "720p" },
   "sd2.5新": { defaultResolution: "720p" },
+  "seedance-2.0": { defaultResolution: "720p" },
   "seedance-2.0-fast-通用": { defaultResolution: "720p" },
+  "seedance-2.5-standard-seconds": { defaultResolution: "720p" },
+  "seedance-2.5-standard-video": { defaultResolution: "720p" },
   "seedance2.5无限并发版": { defaultResolution: "720p" },
+  "shot-enhanced-2": { defaultResolution: "720p" },
   "vidu-q4": { defaultResolution: "720p" },
   "vidu-q4-nopeak": { defaultResolution: "720p" },
   "w3-c1": { defaultResolution: "720p" },
-  "wan3.0-vedio-deal": { defaultResolution: "480p" },
-  "wan3.0-video-nsfw": { defaultResolution: "480p" },
+  "wan-3.0": { defaultResolution: "720p" },
+  "wan-3.0-pro": { defaultResolution: "720p" },
   "wan3.0-video-prime-deal": { defaultResolution: "720p" },
+  "不卡脸seedance-2.0": { defaultResolution: "720p" },
   "新seedance2.0-933": { defaultResolution: "720p" },
+  "新满-seedance-933": { defaultResolution: "720p" },
+  // The upstream advertises only 720p despite the model name.
+  "特惠版2.5 满血 480p": { defaultResolution: "720p" },
 };
 // Explicit public model names are video protocol bindings as well as driver
 // aliases. This keeps routing independent of cross-channel alias inference,
@@ -25,7 +36,6 @@ const MODEL_ALIASES = {
   "seedance2.5": "seedance2.5无限并发版",
   "seedance2.0-9:16-per": "新seedance2.0-933",
   "vidu-q4-per": "vidu-q4",
-  "wan3.0-vedio-deal-per": "wan3.0-vedio-deal",
   "wan3.0-video-prime": "wan3.0-video-prime-deal",
   "new-seedance2.5-per": "sd2.5新",
   "wan3-c1-per": "w3-c1",
@@ -108,10 +118,10 @@ export const meta = {
   name: "Yueqi Video",
   icon: "text:YQ",
   description: {
-    en: "Seedance, Wan, Kling, and Vidu video generation through Yueqi with frame and media references",
-    zh: "通过 Yueqi 调用 Seedance、Wan、Kling 和 Vidu 视频模型，支持首尾帧和参考素材",
+    en: "Seedance, Wan, Kling, Vidu, and MiniMax video generation through Yueqi with frame and media references",
+    zh: "通过 Yueqi 调用 Seedance、Wan、Kling、Vidu 和 MiniMax 视频模型，支持首尾帧和参考素材",
   },
-  version: "1.1.2",
+  version: "1.2.0",
   author: { name: "QuantumNous" },
   website: "https://yueqi.icu/docs",
   baseUrl: "https://yueqi.icu",
