@@ -57,6 +57,7 @@ type Model struct {
 	MatchedCount  int      `json:"matched_count,omitempty" gorm:"-"`
 
 	HasMetadata            bool             `json:"has_metadata" gorm:"-"`
+	VendorName             string           `json:"vendor_name,omitempty" gorm:"-"`
 	ConfiguredChannelCount int              `json:"configured_channel_count" gorm:"-"`
 	SquareState            ModelSquareState `json:"square_state" gorm:"-"`
 }
@@ -77,7 +78,7 @@ func (mi *Model) MatchesName(name string) bool {
 
 // resolveModelMetadata preserves catalog precedence: exact, prefix, suffix,
 // then contains. The first matching record within a rule type wins.
-func resolveModelMetadata(records []Model, names []string) map[string]*Model {
+func resolveModelMetadata(records []Model, names []string, vendors map[int]*Vendor) map[string]*Model {
 	resolved := make(map[string]*Model)
 	for i := range records {
 		if records[i].NameRule == NameRuleExact {
@@ -118,7 +119,11 @@ func resolveModelMetadata(records []Model, names []string) map[string]*Model {
 		if description == "" {
 			description = defaults.Description["en"]
 		}
-		resolved[name] = &Model{ModelName: name, Description: description, Icon: defaults.Icon,
+		vendorID := 0
+		if vendors != nil && defaults.Vendor != "" {
+			vendorID = getDisplayVendor(defaults.Vendor, vendors)
+		}
+		resolved[name] = &Model{ModelName: name, Description: description, Icon: defaults.Icon, VendorID: vendorID, VendorName: defaults.Vendor,
 			Tags: strings.Join(defaults.Tags, ","), Status: 1, NameRule: NameRuleExact}
 	}
 	return resolved
@@ -163,7 +168,7 @@ func FillModelSquareStates(rows []*Model, configured map[string][]int, connectio
 	for name := range nameSet {
 		names = append(names, name)
 	}
-	resolved := resolveModelMetadata(metadata, names)
+	resolved := resolveModelMetadata(metadata, names, nil)
 	available := make(map[string]bool)
 	for _, connection := range connections {
 		available[connection.Model] = true
@@ -240,7 +245,7 @@ func SearchModelsWithChannels(keyword, vendor, status, syncOfficial string, offs
 	}
 	_, filterStatus := parseModelStatusFilter(status)
 	_, filterSync := parseModelSyncFilter(syncOfficial)
-	if !filterStatus && !filterSync && (vendor == "" || vendor == "0") {
+	if !filterStatus && !filterSync {
 		configured, err := GetConfiguredModelChannels()
 		if err != nil {
 			return nil, 0, err
@@ -261,15 +266,37 @@ func SearchModelsWithChannels(keyword, vendor, status, syncOfficial string, offs
 			}
 		}
 		sort.Strings(names)
-		defaults := resolveModelMetadata(metadata, names)
+		var vendors []Vendor
+		if err := DB.Find(&vendors).Error; err != nil {
+			return nil, 0, err
+		}
+		vendorMap := make(map[int]*Vendor, len(vendors))
+		for i := range vendors {
+			vendorMap[vendors[i].Id] = &vendors[i]
+		}
+		defaults := resolveModelMetadata(metadata, names, vendorMap)
 		for _, name := range names {
+			synthetic := Model{ModelName: name, NameRule: NameRuleExact}
 			if metadata := defaults[name]; metadata != nil {
-				synthetic := *metadata
+				synthetic = *metadata
 				synthetic.Id, synthetic.ModelName, synthetic.NameRule = 0, name, NameRuleExact
-				records = append(records, &synthetic)
-			} else {
-				records = append(records, &Model{ModelName: name, NameRule: NameRuleExact})
 			}
+			if vendor != "" {
+				if vendorID, err := strconv.Atoi(vendor); err == nil {
+					if synthetic.VendorID != vendorID {
+						continue
+					}
+				} else {
+					vendorName := synthetic.VendorName
+					if matched := vendorMap[synthetic.VendorID]; matched != nil {
+						vendorName = matched.Name
+					}
+					if !strings.Contains(strings.ToLower(vendorName), strings.ToLower(vendor)) {
+						continue
+					}
+				}
+			}
+			records = append(records, &synthetic)
 		}
 	}
 	total := len(records)

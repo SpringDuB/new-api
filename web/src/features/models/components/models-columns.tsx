@@ -128,10 +128,16 @@ export function useModelsColumns(
                   />
                 </div>
                 <div className='text-muted-foreground mt-1 flex min-w-0 items-center gap-2 text-xs'>
-                  <span className='truncate' title={vendor?.name}>
-                    {model.id > 0
-                      ? (vendor?.name ?? t('No vendor'))
-                      : t('Missing metadata')}
+                  <span
+                    className='truncate'
+                    title={
+                      vendor?.name || model.vendor_name || model.description
+                    }
+                  >
+                    {vendor?.name ||
+                      model.vendor_name ||
+                      model.description ||
+                      (model.id > 0 ? t('No vendor') : t('Missing metadata'))}
                   </span>
                   {model.name_rule !== 0 && (
                     <span className='shrink-0'>
@@ -140,6 +146,12 @@ export function useModelsColumns(
                     </span>
                   )}
                 </div>
+                {model.description && (vendor || model.vendor_name) && (
+                  <DescriptionCell
+                    modelName={model.model_name}
+                    description={model.description}
+                  />
+                )}
               </div>
             </div>
           )

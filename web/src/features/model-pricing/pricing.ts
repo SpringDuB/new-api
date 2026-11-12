@@ -80,6 +80,21 @@ export function modelPricingDisplay(
     id: 0,
     model_name: entry.model_name,
     enable_groups: [],
+    billing_plugin_variants: entry.plugin_variants
+      ?.filter((variant) => !variant.stale)
+      .map((variant) => ({
+        plugin_key: variant.plugin_key,
+        plugin_name: variant.plugin_name,
+        icon: variant.icon,
+        billing_mode:
+          variant.effective ||
+          values['billing_setting.billing_mode'] === 'tiered_expr'
+            ? 'tiered_expr'
+            : 'ratio',
+        billing_expr: variant.compatible ? variant.effective : '',
+        billing_usage_schema: variant.usage_schema,
+        billing_usage_examples: variant.usage_examples,
+      })),
     quota_type:
       values.ModelPrice !== undefined &&
       values['billing_setting.billing_mode'] !== 'tiered_expr'

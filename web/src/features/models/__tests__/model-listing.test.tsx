@@ -199,6 +199,90 @@ beforeEach(() => {
   i18n.addResourceBundle('zhCN', 'translation', zhCN.translation, true, true)
 })
 
+it('shows plugin metadata and default pricing on an unsaved channel model and keeps its metadata in the drawer', async () => {
+  const pluginModel = {
+    ...channel,
+    model_name: 'aj-wan-3-0',
+    description:
+      'Video requirements: HTTPS references and 480p, 720p or 1080p output',
+    vendor_name: 'Wan',
+    icon: 'AlibabaCloud.Color',
+    tags: 'video',
+  }
+  const post = vi.spyOn(api, 'post')
+  await renderList([pluginModel], {
+    pricing: [
+      {
+        model_name: pluginModel.model_name,
+        version: 'empty',
+        configured: {},
+        effective: {},
+        usage_schema: { seconds: { type: 'number', unit: 'second' } },
+        plugin_variants: [
+          {
+            plugin_key: 'lecapi',
+            plugin_name: 'LecAPI',
+            configured: '',
+            effective: 'tier("video", u("seconds") * 0.384)',
+            default_expr: 'tier("video", u("seconds") * 0.384)',
+            compatible: true,
+            usage_schema: { seconds: { type: 'number', unit: 'second' } },
+          },
+        ],
+      },
+    ],
+  })
+  expect(
+    within(
+      screen.getByRole('button', { name: 'View pricing for aj-wan-3-0' })
+    ).getByText('0.384/s')
+  ).toBeVisible()
+  expect(screen.queryByText('Missing metadata')).not.toBeInTheDocument()
+  expect(screen.getByText('Wan')).toBeVisible()
+  expect(screen.getByText(pluginModel.description)).toBeVisible()
+  await userEvent
+    .setup()
+    .click(screen.getByRole('button', { name: pluginModel.model_name }))
+  expect(screen.getByRole('textbox', { name: 'Description' })).toHaveValue(
+    pluginModel.description
+  )
+  expect(post).not.toHaveBeenCalled()
+})
+
+it('shows unconfigured pricing when a plugin model has no published default price', async () => {
+  const usageSchema = {
+    seconds: { type: 'number' as const, unit: 'second' as const },
+  }
+  await renderList([channel], {
+    pricing: [
+      {
+        model_name: channel.model_name,
+        version: 'empty',
+        configured: {},
+        effective: {},
+        usage_schema: usageSchema,
+        plugin_variants: [
+          {
+            plugin_key: 'lecapi',
+            plugin_name: 'LecAPI',
+            configured: '',
+            effective: '',
+            compatible: false,
+            usage_schema: usageSchema,
+          },
+        ],
+      },
+    ],
+  })
+  expect(
+    within(
+      screen.getByRole('button', {
+        name: `View pricing for ${channel.model_name}`,
+      })
+    ).getByText('Not configured')
+  ).toBeVisible()
+})
+
 afterEach(async () => {
   cleanup()
   clients.splice(0).forEach((client) => client.clear())

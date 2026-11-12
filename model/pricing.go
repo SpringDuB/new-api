@@ -203,8 +203,6 @@ func updatePricing() {
 	for _, ability := range enableAbilities {
 		names = append(names, ability.Model)
 	}
-	metaMap := resolveModelMetadata(allMeta, names)
-
 	// 预加载供应商
 	var vendors []Vendor
 	_ = DB.Find(&vendors).Error
@@ -212,6 +210,7 @@ func updatePricing() {
 	for i := range vendors {
 		vendorMap[vendors[i].Id] = &vendors[i]
 	}
+	metaMap := resolveModelMetadata(allMeta, names, vendorMap)
 
 	// 初始化默认供应商映射
 	initDefaultVendorMapping(metaMap, vendorMap, enableAbilities)

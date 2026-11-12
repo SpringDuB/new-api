@@ -119,6 +119,7 @@ type Meta struct {
 // one declared model. Administrator configuration takes precedence.
 type ModelDefaults struct {
 	DisplayName string        `json:"displayName,omitempty"`
+	Vendor      string        `json:"vendor,omitempty"`
 	Description LocalizedText `json:"description,omitempty"`
 	Icon        string        `json:"icon,omitempty"`
 	Tags        []string      `json:"tags,omitempty"`
@@ -1528,6 +1529,10 @@ func normalizeV1Meta(meta *Meta) error {
 			return fmt.Errorf("plugin meta modelDefaults model %q is not declared in plugin meta models", model)
 		}
 		defaults.DisplayName = strings.TrimSpace(defaults.DisplayName)
+		defaults.Vendor = strings.TrimSpace(defaults.Vendor)
+		if utf8.RuneCountInString(defaults.Vendor) > 128 || strings.ContainsFunc(defaults.Vendor, unicode.IsControl) {
+			return fmt.Errorf("plugin meta modelDefaults model %q vendor must be at most 128 characters without control characters", model)
+		}
 		if utf8.RuneCountInString(defaults.DisplayName) > 128 || strings.ContainsFunc(defaults.DisplayName, unicode.IsControl) {
 			return fmt.Errorf("plugin meta modelDefaults model %q displayName must be at most 128 characters without control characters", model)
 		}
@@ -1581,13 +1586,16 @@ func decodeModelDefaults(value any) (map[string]ModelDefaults, error) {
 		}
 		for name := range entry {
 			switch name {
-			case "displayName", "description", "icon", "tags", "billingExpr":
+			case "displayName", "vendor", "description", "icon", "tags", "billingExpr":
 			default:
 				return nil, fmt.Errorf("plugin meta modelDefaults model %q has unknown field %q", model, name)
 			}
 		}
 		var item ModelDefaults
 		var err error
+		if item.Vendor, err = stringMetaField(entry, "vendor"); err != nil {
+			return nil, fmt.Errorf("plugin meta modelDefaults model %q: %w", model, err)
+		}
 		if item.DisplayName, err = stringMetaField(entry, "displayName"); err != nil {
 			return nil, fmt.Errorf("plugin meta modelDefaults model %q: %w", model, err)
 		}

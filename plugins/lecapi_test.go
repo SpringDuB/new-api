@@ -72,6 +72,20 @@ func TestLecAPIBindsCatalogModelsToTheirMediaProtocol(t *testing.T) {
 		}
 	}
 	assert.Equal(t, 69, priced)
+	for _, tc := range []struct{ name, vendor string }{
+		{"aj-wan-3-0", "Wan"}, {"ms-minimax-h3", "Minimax"}, {"ac-image-2", "OpenAI"},
+		{"ac-seedream-5-0-lite", "ByteDance"}, {"gt-seedance-2-5-720p", "ByteDance"},
+		{"nano-banana-2", "Google"}, {"sl-midjourney", "Midjourney"}, {"mf-video-upscale", ""},
+	} {
+		assert.Equal(t, tc.vendor, plugin.Meta.ModelDefaults[tc.name].Vendor, tc.name)
+	}
+	schema, _ := plugin.Meta.UsageForModel("aj-wan-3-0")
+	assert.ElementsMatch(t, []string{"480p", "720p", "1080p"}, schema["resolution"].Enum)
+	for _, name := range []string{"image2", "nano-banana-2"} {
+		facts := lecAPIHook(t, plugin, "extractUsage", lecAPIContext(name, map[string]any{"prompt": "boat"}))
+		schema, _ := plugin.Meta.UsageForModel(name)
+		assert.Contains(t, schema["resolution"].Enum, facts["resolution"], "omitting an optional resolution must remain valid for %s", name)
+	}
 	assert.Contains(t, plugin.Meta.Models, "MiniMax-H3")
 	for _, spelling := range []string{"MiniMax-H3", "minimax-h3"} {
 		canonical, found := registry.Generation().CanonicalModel(spelling)

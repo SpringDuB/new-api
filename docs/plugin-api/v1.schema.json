@@ -31,6 +31,7 @@
       "additionalProperties": false,
       "properties": {
         "displayName": {"type": "string", "maxLength": 128},
+        "vendor": {"type": "string", "maxLength": 128, "description": "Model manufacturer name. Matches existing vendors case-insensitively; does not create database records or replace administrator model metadata."},
         "description": {"allOf": [{"$ref": "#/$defs/localizedText"}, {"if": {"type": "string"}, "then": {"maxLength": 4096}, "else": {"additionalProperties": {"maxLength": 4096}}}]},
         "icon": {"type": "string", "maxLength": 128},
         "tags": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 64}, "description": "Trimmed, unique, control-free tags. The host limits their comma-joined UTF-8 encoding to 255 bytes."},

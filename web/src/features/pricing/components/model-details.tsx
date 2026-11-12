@@ -742,6 +742,49 @@ function PriceSection(props: {
       )
     }
 
+    const variants = props.model.billing_plugin_variants
+    if (
+      dynamicSummary.tierCount > 1 &&
+      variants?.length &&
+      variants.every(
+        (variant) =>
+          variant.billing_mode !== 'ratio' && variant.billing_usage_schema
+      )
+    ) {
+      return (
+        <section aria-label={t('Base Price')}>
+          <SectionTitle>{t('Base Price')}</SectionTitle>
+          <div className='space-y-3'>
+            {variants.map((variant) => (
+              <div key={variant.plugin_key}>
+                {variants.length > 1 && (
+                  <p className='text-muted-foreground mb-2 text-xs'>
+                    {variant.plugin_name}
+                  </p>
+                )}
+                {variant.billing_expr ? (
+                  <DynamicPricingBreakdown
+                    billingExpr={variant.billing_expr}
+                    usageSchema={variant.billing_usage_schema}
+                    compact
+                    taskPriceOptions={{
+                      showRechargePrice: props.showRechargePrice,
+                      priceRate: props.priceRate,
+                      usdExchangeRate: props.usdExchangeRate,
+                    }}
+                  />
+                ) : (
+                  <UnconfiguredTaskPricingNotice
+                    model={withPluginPricing(props.model, variant)}
+                  />
+                )}
+              </div>
+            ))}
+          </div>
+        </section>
+      )
+    }
+
     return (
       <section>
         <SectionTitle>{t('Base Price')}</SectionTitle>

@@ -261,6 +261,9 @@ afterEach(async () => {
   clients.forEach((client) => client.clear())
   clients.length = 0
   vi.restoreAllMocks()
+  useSystemConfigStore
+    .getState()
+    .setConfig({ currency: DEFAULT_CURRENCY_CONFIG })
   await i18next.changeLanguage('en')
 })
 
@@ -427,6 +430,113 @@ const videoSchema: BillingUsageSchema = {
 }
 const videoExpression =
   'u("video_input") == "none" ? tier("none", u("tokens") * 10 / 1000000) : tier("video", u("tokens") * 6 / 1000000)'
+
+it('identifies every same-priced resolution on a card instead of naming only the fallback tier', () => {
+  render(
+    <ModelCard
+      onClick={vi.fn()}
+      model={{
+        ...imageModel,
+        model_name: 'ac-seedream-5-0-lite',
+        billing_expr:
+          'u("resolution") == "1K" ? tier("1K", u("image_count") * 0.12) : u("resolution") == "2K" ? tier("2K", u("image_count") * 0.12) : tier("4K", u("image_count") * 0.12)',
+        billing_usage_schema: {
+          ...imageModel.billing_usage_schema,
+          resolution: { enum: ['1K', '2K', '4K'] },
+        },
+      }}
+    />
+  )
+  expect(screen.getByText('3 tiers')).toBeVisible()
+  expect(screen.queryByText('(4K)')).not.toBeInTheDocument()
+})
+
+it.each([
+  {
+    modelName: 'aj-wan-3-0',
+    expression:
+      'u("resolution") == "1080p" ? tier("1080p", u("seconds") * 0.732) : u("resolution") == "480p" ? tier("480p", u("seconds") * 0.216) : tier("720p", u("seconds") * 0.384)',
+    basePrices: ['¥0.216/s', '¥0.384/s', '¥0.732/s'],
+    groupPrices: ['¥0.432', '¥0.768', '¥1.464'],
+  },
+  {
+    modelName: 'ap-seedance-2-5-yz',
+    expression:
+      'u("resolution") == "1080p" ? tier("1080p", u("seconds") * 2.1) : u("resolution") == "480p" ? tier("480p", u("seconds") * 0.384) : tier("720p", u("seconds") * 0.54)',
+    basePrices: ['¥0.384/s', '¥0.54/s', '¥2.1/s'],
+    groupPrices: ['¥0.768', '¥1.08', '¥4.2'],
+  },
+  {
+    modelName: 'free-video-tiers',
+    expression:
+      'u("resolution") == "1080p" ? tier("1080p", u("seconds") * 0) : u("resolution") == "480p" ? tier("480p", u("seconds") * 0) : tier("720p", u("seconds") * 0)',
+    basePrices: ['¥0/s', '¥0/s', '¥0/s'],
+    groupPrices: ['¥0', '¥0', '¥0'],
+  },
+])('lists every base and group resolution price for $modelName', (testCase) => {
+  useSystemConfigStore.getState().setConfig({
+    currency: {
+      ...DEFAULT_CURRENCY_CONFIG,
+      quotaDisplayType: 'CNY',
+      usdExchangeRate: 1,
+    },
+  })
+  vi.spyOn(api, 'get').mockResolvedValue({ data: { data: { groups: [] } } })
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  clients.push(client)
+  render(
+    <QueryClientProvider client={client}>
+      <ModelDetailsContent
+        model={{
+          ...model,
+          model_name: testCase.modelName,
+          billing_mode: 'ratio',
+          billing_expr: undefined,
+          billing_plugin_variants: [
+            {
+              plugin_key: 'lecapi',
+              plugin_name: 'LecAPI',
+              billing_mode: 'tiered_expr',
+              billing_expr: testCase.expression,
+              billing_usage_schema: {
+                seconds: { type: 'number', unit: 'second' },
+                resolution: {
+                  enum: ['480p', '720p', '1080p'],
+                  description: 'Output resolution',
+                },
+              },
+            },
+          ],
+        }}
+        groupRatio={{ default: 2 }}
+        usableGroup={{ default: { desc: '', ratio: 2 } }}
+        endpointMap={{}}
+        autoGroups={[]}
+        priceRate={1}
+        usdExchangeRate={1}
+        tokenUnit='M'
+      />
+    </QueryClientProvider>
+  )
+  const basePrices = within(
+    screen.getByRole('region', { name: 'Base Price' })
+  ).getByRole('table')
+  const table = within(
+    screen.getByRole('tabpanel', { name: 'LecAPI' })
+  ).getByRole('table')
+  for (const [index, resolution] of ['480p', '720p', '1080p'].entries()) {
+    const name = new RegExp(`Output resolution: ${resolution}`)
+    const baseRow = within(basePrices).getByRole('row', { name })
+    expect(within(baseRow).getByText(testCase.basePrices[index])).toBeVisible()
+    const groupRow = within(table).getByRole('row', { name })
+    expect(
+      within(groupRow).getByText(testCase.groupPrices[index])
+    ).toBeVisible()
+  }
+  expect(within(table).getByText('Output resolution: 720p')).toBeVisible()
+})
 
 it('uses plugin option labels and infers a unique fallback without expanding unrelated fields', async () => {
   render(

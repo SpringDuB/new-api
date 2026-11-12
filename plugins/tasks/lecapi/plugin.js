@@ -1477,6 +1477,12 @@ function modelDescription(profile) {
 const MODEL_DEFAULTS = Object.fromEntries(
   Object.entries(MODELS).map(([name, profile]) => {
     const defaults = { displayName: profile.name, description: modelDescription(profile), icon: profile.icon, tags: [...new Set(profile.tags)] };
+    if (/seedance|seedream|face-processing/.test(name)) defaults.vendor = "ByteDance";
+    else if (/minimax|h3video/.test(name)) defaults.vendor = "Minimax";
+    else if (/wan-/.test(name)) defaults.vendor = "Wan";
+    else if (/banana|gemini|omni/.test(name)) defaults.vendor = "Google";
+    else if (/midjourney/.test(name)) defaults.vendor = "Midjourney";
+    else if (/image-2|^image2$/.test(name)) defaults.vendor = "OpenAI";
     const expression = defaultExpression(profile);
     if (expression) defaults.billingExpr = expression;
     return [PUBLIC_MODEL_NAMES[name], defaults];
@@ -1488,7 +1494,7 @@ export const meta = {
   key: "lecapi",
   name: "LecAPI",
   icon: "text:LE",
-  version: "1.0.0",
+  version: "1.0.1",
   author: { name: "QuantumNous" },
   website: "https://api.lecapi.net/docs",
   baseUrl: "https://api.lecapi.net",
@@ -1502,7 +1508,13 @@ export const meta = {
   models: Object.keys(MODEL_MAPPING),
   modelDefaults: MODEL_DEFAULTS,
   usageSchema: VIDEO_USAGE_SCHEMA,
-  usageProfiles: [{ models: IMAGE_NAMES, schema: IMAGE_USAGE_SCHEMA }],
+  usageProfiles: Object.entries(MODELS).map(([name, profile]) => {
+    const schema = { ...(profile.kind === "image" ? IMAGE_USAGE_SCHEMA : VIDEO_USAGE_SCHEMA) };
+    const resolution = profile.parameters.resolution;
+    const resolutions = resolution?.values || [];
+    schema.resolution = { ...schema.resolution, enum: resolution?.default ? resolutions : ["unspecified", ...resolutions] };
+    return { models: [PUBLIC_MODEL_NAMES[name]], schema };
+  }),
   protocols: [
     { name: "openai_video", models: VIDEO_NAMES },
     { name: "openai_image", models: IMAGE_NAMES },

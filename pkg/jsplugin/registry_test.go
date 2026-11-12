@@ -1104,7 +1104,7 @@ func TestRegistryModelDefaultsContract(t *testing.T) {
 		usageProfiles: [{models: ["image"], schema: {images: {type: "number", unit: "count"}}}],
 		modelDefaults: {
 			video: {displayName: " Video Model ", description: {EN: " Video generation ", "zh-tw": " 影片生成 "}, icon: " Sora.Color ", tags: [" video ", "generation"], billingExpr: " tier(\"base\", u(\"seconds\") * 0.4) "},
-			image: {description: "Image generation", billingExpr: "u(\"images\") * 0.02"},
+			image: {vendor: " OpenAI ", description: "Image generation", billingExpr: "u(\"images\") * 0.02"},
 		},`, "")
 	plugin, err := CompilePlugin(source, Options{})
 	require.NoError(t, err)
@@ -1117,7 +1117,7 @@ func TestRegistryModelDefaultsContract(t *testing.T) {
 			"displayName": "Video Model", "description": map[string]any{"en": "Video generation", "zh-TW": "影片生成"},
 			"icon": "Sora.Color", "tags": []any{"video", "generation"}, "billingExpr": `tier("base", u("seconds") * 0.4)`,
 		},
-		"image": map[string]any{"description": map[string]any{"en": "Image generation"}, "billingExpr": `u("images") * 0.02`},
+		"image": map[string]any{"vendor": "OpenAI", "description": map[string]any{"en": "Image generation"}, "billingExpr": `u("images") * 0.02`},
 	}, metadata["modelDefaults"])
 
 	for _, declaration := range []string{"", "modelDefaults: {},", "modelDefaults: {video: {}},"} {
@@ -1146,6 +1146,8 @@ func TestRegistryRejectsInvalidModelDefaults(t *testing.T) {
 		{"missing English", `{video: {description: {zh: "影片生成"}}}`, `must include a non-empty "en" value`},
 		{"long description", `{video: {description: "` + strings.Repeat("界", 4097) + `"}}`, "must not exceed 4096 characters"},
 		{"null icon", `{video: {icon: null}}`, "icon must be a string"},
+		{"null vendor", `{video: {vendor: null}}`, "vendor must be a string"},
+		{"vendor control", `{video: {vendor: "Byte\u0000Dance"}}`, "vendor must be at most 128 characters"},
 		{"remote icon", `{video: {icon: "https://example.com/icon.png"}}`, "icon must be a LobeHub icon name or text"},
 		{"inline icon", `{video: {icon: "data:image/svg+xml;base64,PHN2Zy8+"}}`, "icon must be a LobeHub icon name or text"},
 		{"null tags", `{video: {tags: null}}`, "tags must be an array of strings"},

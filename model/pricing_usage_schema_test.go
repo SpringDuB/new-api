@@ -109,8 +109,8 @@ export const meta = {
  usageSchema:{seconds:{type:"number",unit:"second"}},
  usageProfiles:[{models:["portable-image"],schema:{image_count:{type:"number",unit:"count"}}}],
  modelDefaults:{
-  "portable-video":{displayName:"Portable video",description:{en:"Video reference requirements",zh:"视频参考素材要求"},icon:"Doubao.Color",tags:["Video"],billingExpr:'tier("video", u("seconds") * 0.6)'},
-  "portable-image":{description:{en:"Image requirements",zh:"图片素材要求"},icon:"OpenAI.Color",tags:["Image"],billingExpr:'tier("image", u("image_count") * 0.12)'}
+  "portable-video":{vendor:"bytedance",displayName:"Portable video",description:{en:"Video reference requirements",zh:"视频参考素材要求"},icon:"Doubao.Color",tags:["Video"],billingExpr:'tier("video", u("seconds") * 0.6)'},
+  "portable-image":{vendor:"google",description:{en:"Image requirements",zh:"图片素材要求"},icon:"OpenAI.Color",tags:["Image"],billingExpr:'tier("image", u("image_count") * 0.12)'}
  }
 };
 export function buildSubmitRequest(){return {};}
@@ -120,6 +120,8 @@ export function parseTaskResult(){return {};}
 `
 			_, err = jsplugin.DefaultRegistry.Register(source, jsplugin.Options{})
 			require.NoError(t, err)
+			vendor := Vendor{Name: "ByteDance", Status: 1}
+			require.NoError(t, db.Create(&vendor).Error)
 			mapping := `{"portable-alias":"portable-video"}`
 			channel := &Channel{Type: constant.ChannelTypeTaskPlugin, Status: 1, Name: "portable-defaults", Models: "portable-video,portable-image,portable-alias", ModelMapping: &mapping}
 			channel.SetSetting(dto.ChannelSettings{TaskPluginKey: "portable-defaults"})
@@ -132,6 +134,8 @@ export function parseTaskResult(){return {};}
 			prices := pricingByModel(GetPricing())
 			assert.Equal(t, "视频参考素材要求", prices["portable-video"].Description)
 			assert.Equal(t, "Doubao.Color", prices["portable-video"].Icon)
+			assert.Equal(t, vendor.Id, prices["portable-video"].VendorID)
+			assert.Negative(t, prices["portable-image"].VendorID, "a missing vendor is presentation data only")
 			assert.Equal(t, "Video", prices["portable-video"].Tags)
 			assert.Equal(t, "视频参考素材要求", prices["portable-alias"].Description)
 			for _, name := range []string{"portable-video", "portable-alias"} {
@@ -146,6 +150,10 @@ export function parseTaskResult(){return {};}
 			require.NoError(t, err)
 			require.Len(t, rows, 1)
 			assert.Equal(t, "视频参考素材要求", rows[0].Description)
+			assert.Equal(t, vendor.Id, rows[0].VendorID)
+			filteredRows, _, err := SearchModelsWithChannels("portable-video", fmt.Sprint(vendor.Id), "", "", 0, 20)
+			require.NoError(t, err)
+			require.Len(t, filteredRows, 1, "plugin vendor assignments participate in model filtering")
 			assert.Zero(t, rows[0].Id, "plugin metadata is an unsaved fallback")
 			snapshot, err := GetModelPricingSnapshot(nil)
 			require.NoError(t, err)
@@ -171,6 +179,9 @@ export function parseTaskResult(){return {};}
 			require.NoError(t, db.Model(&Option{}).Count(&optionRows).Error)
 			assert.Zero(t, modelRows)
 			assert.Zero(t, optionRows)
+			var vendorRows int64
+			require.NoError(t, db.Model(&Vendor{}).Count(&vendorRows).Error)
+			assert.EqualValues(t, 1, vendorRows, "plugin metadata reads never create vendors")
 			secondSource := strings.ReplaceAll(strings.ReplaceAll(source, "portable-defaults", "portable-second"), `* 0.6`, `* 2`)
 			secondSource = strings.ReplaceAll(secondSource, "seconds", "credits")
 			_, err = jsplugin.DefaultRegistry.Register(secondSource, jsplugin.Options{})
@@ -204,6 +215,7 @@ export function parseTaskResult(){return {};}
 			require.NoError(t, db.Create(&Model{ModelName: "portable-video", Description: "Administrator description", Status: 1}).Error)
 			InvalidatePricingCache()
 			assert.Equal(t, "Administrator description", pricingByModel(GetPricing())["portable-video"].Description)
+			assert.Zero(t, pricingByModel(GetPricing())["portable-video"].VendorID, "an administrator's explicit no-vendor setting wins")
 			require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(`{"portable-video":0}`))
 			_, exists = billing_setting.ResolveTaskBillingExpr("portable-defaults", "portable-video", "")
 			assert.False(t, exists, "explicit free per-call pricing overrides the plugin default")
