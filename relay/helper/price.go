@@ -285,11 +285,30 @@ func HasModelBillingConfig(modelName string) bool {
 	if _, ok, _ := ratio_setting.GetModelRatio(modelName); ok {
 		return true
 	}
-	if billing_setting.GetBillingMode(modelName) != billing_setting.BillingModeTieredExpr {
-		return false
+	if billing_setting.GetBillingMode(modelName) == billing_setting.BillingModeTieredExpr {
+		if expr, ok := billing_setting.GetBillingExpr(modelName); ok && strings.TrimSpace(expr) != "" {
+			return true
+		}
 	}
-	expr, ok := billing_setting.GetBillingExpr(modelName)
-	return ok && strings.TrimSpace(expr) != ""
+	// Task prices can belong only to a plugin, without any model-level price.
+	// Use runtime resolution so administrator overrides and schema checks apply.
+	generation := jsplugin.DefaultRegistry.Generation()
+	usageModel := modelName
+	providers := generation.PluginsByModel(modelName)
+	if len(providers) == 0 {
+		if target, ok := model.ResolveTaskModelAlias(generation, modelName); ok && target.Declared != "" {
+			usageModel = target.Declared
+			providers = generation.PluginsByModel(usageModel)
+		}
+	}
+	for _, provider := range providers {
+		expression, ok := billing_setting.ResolveTaskBillingExpr(provider.Meta.Key, modelName, usageModel)
+		schema, _ := provider.Meta.UsageForModel(usageModel)
+		if ok && billing_setting.TaskExprCompatible(expression, schema) {
+			return true
+		}
+	}
+	return false
 }
 
 // HasPriceOrRatioEntry reports whether name has a configured price, ratio, or

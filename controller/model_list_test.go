@@ -11,6 +11,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/config"
@@ -319,6 +320,98 @@ func TestListModelsIncludesTieredBillingModel(t *testing.T) {
 	require.True(t, ok)
 	require.Empty(t, missingExprPricing.BillingMode)
 	require.Empty(t, missingExprPricing.BillingExpr)
+}
+
+func TestListModelsIncludesPluginDefaultPricesDatabaseMatrix(t *testing.T) {
+	withSelfUseModeDisabled(t)
+	for _, dialect := range []struct{ kind, env string }{{"sqlite", ""}, {"mysql", "TEST_MYSQL_DSN"}, {"postgres", "TEST_POSTGRES_DSN"}} {
+		t.Run(dialect.kind, func(t *testing.T) {
+			if dialect.env != "" && os.Getenv(dialect.env) == "" {
+				t.Skip("set " + dialect.env + " to run this database")
+			}
+			db := modelManagementDB(t, dialect.kind, os.Getenv(dialect.env))
+			_, err := jsplugin.DefaultRegistry.Register(`
+export const meta = {
+ apiVersion:1,key:"model-list-defaults",name:"Model list defaults",version:"1.0.0",author:{name:"Test"},
+ models:["zz-bundled-video","zz-bundled-free","zz-bundled-image","zz-bundled-unpriced","zz-bundled-override","zz-bundled-blocked","zz-bundled-invalid","zz-bundled-other-group"],
+ fetchMode:"per_task",usageSchema:{seconds:{type:"number",unit:"second"}},
+ usageProfiles:[{models:["zz-bundled-image"],schema:{image_count:{type:"number",unit:"count"}}}],
+ modelDefaults:{
+  "zz-bundled-video":{billingExpr:'tier("video", u("seconds") * 0.384)'},
+  "zz-bundled-free":{billingExpr:'tier("free", u("seconds") * 0)'},
+  "zz-bundled-image":{billingExpr:'tier("image", u("image_count") * 0.12)'},
+  "zz-bundled-blocked":{billingExpr:'tier("video", u("seconds") * 1)'},
+  "zz-bundled-invalid":{billingExpr:'tier("video", u("seconds") * 1)'},
+  "zz-bundled-other-group":{billingExpr:'tier("video", u("seconds") * 1)'}
+ }
+};
+export function buildSubmitRequest(){return {};}
+export function parseSubmitResponse(){return {};}
+export function buildQueryRequest(){return {};}
+export function parseTaskResult(){return {};}
+`, jsplugin.Options{})
+			require.NoError(t, err)
+			t.Cleanup(func() {
+				if _, exists := jsplugin.DefaultRegistry.Get("model-list-defaults"); exists {
+					require.NoError(t, jsplugin.DefaultRegistry.Unregister("model-list-defaults"))
+				}
+				model.InvalidatePricingCache()
+			})
+			require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{
+				"billing_setting.billing_mode":        `{"zz-bundled-blocked":"tiered_expr"}`,
+				"billing_setting.billing_expr":        `{"zz-bundled-blocked":""}`,
+				"billing_setting.plugin_billing_expr": `{"model-list-defaults::zz-bundled-override":"tier(\"override\", u(\"seconds\") * 0.5)","model-list-defaults::zz-bundled-invalid":"u(\"undeclared\")"}`,
+			}))
+			mapping := `{"zz-bundled-alias":"zz-bundled-video"}`
+			channel := model.Channel{
+				Name: "Bundled prices", Type: constant.ChannelTypeTaskPlugin, Status: common.ChannelStatusEnabled,
+				Group: "media", Models: "zz-bundled-video,zz-bundled-free,zz-bundled-image,zz-bundled-unpriced,zz-bundled-override,zz-bundled-blocked,zz-bundled-invalid,zz-bundled-alias", ModelMapping: &mapping,
+			}
+			channel.SetSetting(dto.ChannelSettings{TaskPluginKey: "model-list-defaults"})
+			require.NoError(t, db.Create(&channel).Error)
+			require.NoError(t, channel.UpdateAbilities(db))
+			otherChannel := model.Channel{
+				Name: "Other group", Type: constant.ChannelTypeTaskPlugin, Status: common.ChannelStatusEnabled,
+				Group: "other", Models: "zz-bundled-other-group",
+			}
+			otherChannel.SetSetting(dto.ChannelSettings{TaskPluginKey: "model-list-defaults"})
+			require.NoError(t, db.Create(&otherChannel).Error)
+			require.NoError(t, otherChannel.UpdateAbilities(db))
+			model.InitChannelCache()
+
+			for _, tc := range []struct {
+				name    string
+				limits  map[string]bool
+				disable bool
+				want    []string
+			}{
+				{name: "bundled prices and provider overrides", want: []string{"zz-bundled-video", "zz-bundled-free", "zz-bundled-image", "zz-bundled-override", "zz-bundled-alias"}},
+				{name: "token limits", limits: map[string]bool{"zz-bundled-video": true, "zz-bundled-unpriced": true, "zz-bundled-other-group": true}, want: []string{"zz-bundled-video"}},
+				{name: "disabled plugin", disable: true, want: []string{}},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					if tc.disable {
+						require.NoError(t, jsplugin.DefaultRegistry.Unregister("model-list-defaults"))
+					}
+					recorder := httptest.NewRecorder()
+					ctx, _ := gin.CreateTestContext(recorder)
+					ctx.Request = httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+					common.SetContextKey(ctx, constant.ContextKeyUserGroup, "default")
+					common.SetContextKey(ctx, constant.ContextKeyTokenGroup, "media")
+					if tc.limits != nil {
+						common.SetContextKey(ctx, constant.ContextKeyTokenModelLimitEnabled, true)
+						common.SetContextKey(ctx, constant.ContextKeyTokenModelLimit, tc.limits)
+					}
+					ListModels(ctx, constant.ChannelTypeOpenAI)
+					ids := make([]string, 0)
+					for name := range decodeListModelsResponse(t, recorder) {
+						ids = append(ids, name)
+					}
+					assert.ElementsMatch(t, tc.want, ids)
+				})
+			}
+		})
+	}
 }
 
 func TestListModelsUsesAdvancedCustomEndpointTypesFromPricingCache(t *testing.T) {
