@@ -128,6 +128,60 @@ func TestYuanxiangModelFamiliesAndImageProtocol(t *testing.T) {
 	assert.Len(t, plugin.Meta.Models, 10)
 }
 
+func TestYuanxiangSD25PerItemStableRoute(t *testing.T) {
+	plugin := loadYuanxiangPlugin(t)
+	const model = "SD 2.5 · 特价按次-YX"
+	t.Run("defaults to the stable route and meters its resolution", func(t *testing.T) {
+		ctx := yuanxiangContext(model, map[string]any{"prompt": "boat"})
+		body := yuanxiangHook(t, plugin, "buildSubmitRequest", ctx)["body"].(map[string]any)
+		assert.Equal(t, "SD 2.5 · 特价按次", body["model"])
+		assert.Equal(t, "route:stable", body["channel"])
+		assert.Equal(t, "720p", body["resolution"])
+		assert.Equal(t, float64(5), body["duration"])
+		facts := yuanxiangHook(t, plugin, "extractUsage", ctx)
+		assert.Equal(t, "720p", facts["resolution"])
+		assert.Equal(t, float64(1), facts["requests"])
+	})
+	t.Run("accepts 30 seconds and 10 reference images", func(t *testing.T) {
+		images := make([]string, 10)
+		for i := range images {
+			images[i] = fmt.Sprintf("image-%d", i)
+		}
+		ctx := yuanxiangContext(model, map[string]any{"prompt": "boat", "seconds": "30", "image_ids": images})
+		body := yuanxiangHook(t, plugin, "buildSubmitRequest", ctx)["body"].(map[string]any)
+		assert.Equal(t, "route:stable", body["channel"])
+		assert.Equal(t, float64(30), body["duration"])
+		assert.Len(t, body["image_ids"], 10)
+		assert.Equal(t, "30", yuanxiangHook(t, plugin, "extractUsage", ctx)["duration_tier"])
+	})
+	t.Run("preserves an explicitly selected 1080p route", func(t *testing.T) {
+		ctx := yuanxiangContext(model, map[string]any{"prompt": "boat", "metadata": map[string]any{"channel": "route:tejia-y", "duration": 12}})
+		body := yuanxiangHook(t, plugin, "buildSubmitRequest", ctx)["body"].(map[string]any)
+		assert.Equal(t, "route:tejia-y", body["channel"])
+		assert.Equal(t, "1080p", body["resolution"])
+		assert.Equal(t, float64(12), body["duration"])
+	})
+	for _, tc := range []struct {
+		name string
+		body map[string]any
+	}{
+		{"unsupported duration", map[string]any{"metadata": map[string]any{"duration": 12}}},
+		{"unsupported resolution", map[string]any{"channel": "Sd 2.5-720p-30s（10图稳定）", "resolution": "1080p"}},
+		{"too many images", map[string]any{"image_ids": slices.Repeat([]string{"image"}, 11)}},
+		{"reference audio", map[string]any{"audio_b64s": []string{"YXVkaW8="}}},
+		{"reference video", map[string]any{"video_b64s": []string{"dmlkZW8="}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.body["prompt"] = "boat"
+			ctx := yuanxiangContext(model, tc.body)
+			for _, hook := range []string{"extractUsage", "buildSubmitRequest"} {
+				_, err := plugin.Engine.Call(t.Context(), hook, ctx)
+				require.ErrorContains(t, err, "route:stable", hook)
+			}
+		})
+	}
+}
+
 func TestYuanxiangResolutionBranchesRemainIndependent(t *testing.T) {
 	plugin := loadYuanxiangPlugin(t)
 	for _, tc := range []struct {
@@ -440,9 +494,17 @@ func TestYuanxiangDurationBranchesIndependentlyForEveryVideoModel(t *testing.T) 
 				tier    string
 			}{{10, 2, "10s"}, {20, 3, "20s"}, {12, 1, "other"}} {
 				for _, resolution := range []string{"720p", "1080p"} {
+					metadata := map[string]any{"duration": tc.seconds, "resolution_name": strings.ToUpper(resolution)}
+					if modelName == "SD 2.5 · 特价按次-YX" {
+						if resolution == "1080p" {
+							metadata["channel"] = "route:tejia-y"
+						} else if tc.seconds != 10 {
+							continue // These durations are unavailable on the model's 720p line.
+						}
+					}
 					ctx := yuanxiangContext(modelName, map[string]any{
 						"prompt":   "boat",
-						"metadata": map[string]any{"duration": tc.seconds, "resolution_name": strings.ToUpper(resolution)},
+						"metadata": metadata,
 					})
 					ctx["model"] = "local-alias"
 					facts := yuanxiangHook(t, plugin, "extractUsage", ctx)
@@ -510,8 +572,18 @@ func TestYuanxiangTokenEstimatesMatchDoubao(t *testing.T) {
 				{"1080p", 20, 972000},
 				{"4k", 5, 972000},
 			} {
+				metadata := map[string]any{"duration": tc.seconds, "resolution_name": strings.ToUpper(tc.resolution)}
+				if modelName == "SD 2.5 · 特价按次-YX" {
+					switch tc.resolution {
+					case "720p":
+					case "1080p":
+						metadata["channel"] = "route:tejia-y"
+					default:
+						continue
+					}
+				}
 				ctx := yuanxiangContext(modelName, map[string]any{
-					"prompt": "boat", "metadata": map[string]any{"duration": tc.seconds, "resolution_name": strings.ToUpper(tc.resolution)},
+					"prompt": "boat", "metadata": metadata,
 					"tokens": 0, "usage": map[string]any{"completion_tokens": 0},
 				})
 				ctx["model"] = "mapped-client-name"

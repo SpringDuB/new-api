@@ -70,6 +70,7 @@ func TestYueqiVideoModelsAndMetering(t *testing.T) {
 	}{
 		"BD Seedance2.5":                {"720p"},
 		"MINIMAXH3-2.0采样":               {"720p"},
+		"h3-2k":                         {"2k"},
 		"kling-4.0":                     {"720p"},
 		"mi-seedance2.5":                {"720p"},
 		"sd2.5新":                        {"720p"},
@@ -89,6 +90,8 @@ func TestYueqiVideoModelsAndMetering(t *testing.T) {
 		"新seedance2.0-933":              {"720p"},
 		"新满-seedance-933":               {"720p"},
 		"特惠版2.5 满血 480p":                {"720p"},
+		"特惠版 Seedance 2.5 满血 720p":      {"720p"},
+		"特惠版 Wan 3 快速版":                 {"480p"},
 	}
 	for modelName := range models {
 		assert.Contains(t, plugin.Meta.Models, modelName)
@@ -167,14 +170,24 @@ func TestYueqiPublicModelNamesBindVideoProtocolAndPreserveBillingIdentity(t *tes
 	plugin, err := registry.RegisterFactory(source, jsplugin.Options{Key: "yueqi"})
 	require.NoError(t, err)
 	aliases := map[string]string{
-		"seedance2.5-per":       "BD Seedance2.5",
-		"seedance-2.0-fast-per": "seedance-2.0-fast-通用",
-		"seedance2.5":           "seedance2.5无限并发版",
-		"seedance2.0-9:16-per":  "新seedance2.0-933",
-		"vidu-q4-per":           "vidu-q4",
-		"wan3.0-video-prime":    "wan3.0-video-prime-deal",
-		"new-seedance2.5-per":   "sd2.5新",
-		"wan3-c1-per":           "w3-c1",
+		"MINIMAXH3-2.0采样":               "MINIMAXH3-2.0采样",
+		"h3-2k":                         "h3-2k",
+		"seedance-2.5-standard-seconds": "seedance-2.5-standard-seconds",
+		"seedance-2.5-standard-video":   "seedance-2.5-standard-video",
+		"shot-enhanced-2":               "shot-enhanced-2",
+		"wan-3.0":                       "wan-3.0",
+		"wan-3.0-pro":                   "wan-3.0-pro",
+		"新满-seedance-933":               "新满-seedance-933",
+		"特惠版 Seedance 2.5 满血 720p":      "特惠版 Seedance 2.5 满血 720p",
+		"特惠版 Wan 3 快速版":                 "特惠版 Wan 3 快速版",
+		"seedance2.5-per":               "BD Seedance2.5",
+		"seedance-2.0-fast-per":         "seedance-2.0-fast-通用",
+		"seedance2.5":                   "seedance2.5无限并发版",
+		"seedance2.0-9:16-per":          "新seedance2.0-933",
+		"vidu-q4-per":                   "vidu-q4",
+		"wan3.0-video-prime":            "wan3.0-video-prime-deal",
+		"new-seedance2.5-per":           "sd2.5新",
+		"wan3-c1-per":                   "w3-c1",
 	}
 	for alias, upstream := range aliases {
 		t.Run(alias, func(t *testing.T) {
@@ -201,6 +214,15 @@ func TestYueqiPublicModelNamesBindVideoProtocolAndPreserveBillingIdentity(t *tes
 	submit := yueqiHook(t, plugin, "buildSubmitRequest", ctx)
 	assert.Equal(t, "mi-seedance2.5", submit["body"].(map[string]any)["model"], "an explicit channel mapping overrides the plugin's alias default")
 	assert.Equal(t, "480p", yueqiHook(t, plugin, "extractUsage", ctx)["resolution"])
+
+	for _, modelName := range []string{"MINIMAXH3-2.0采样", "h3-2k", "seedance-2.5-standard-seconds", "seedance-2.5-standard-video", "shot-enhanced-2", "wan-3.0", "wan-3.0-pro", "新满-seedance-933", "特惠版 Seedance 2.5 满血 720p", "特惠版 Wan 3 快速版"} {
+		ctx := yueqiContext("local-video-alias", map[string]any{"prompt": "boat", "seconds": 6})
+		ctx["upstreamModel"] = modelName
+		submit := yueqiHook(t, plugin, "buildSubmitRequest", ctx)
+		assert.Equal(t, modelName, submit["body"].(map[string]any)["model"])
+		assert.NotContains(t, submit, "model", "channel aliases keep their billing identity")
+		assert.Equal(t, "local-video-alias", ctx["model"])
+	}
 }
 
 func TestYueqiPreservesFrameAndReferenceSemantics(t *testing.T) {
@@ -384,6 +406,27 @@ func TestYueqiRejectsInvalidBillingBeforeSubmission(t *testing.T) {
 
 func TestYueqiResolutionAndAspectRatioAliases(t *testing.T) {
 	plugin := loadYueqiPlugin(t)
+	for _, tc := range []struct {
+		name       string
+		parameters map[string]any
+	}{
+		{"2k default", map[string]any{}},
+		{"2k resolution", map[string]any{"resolution": " 2K "}},
+		{"2k size", map[string]any{"size": "2K"}},
+		{"2k resolution name", map[string]any{"resolution_name": "2K"}},
+		{"2k nested parameters", map[string]any{"parameters": map[string]any{"resolution_name": "2K"}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := maps.Clone(tc.parameters)
+			body["prompt"] = "boat"
+			ctx := yueqiContext("h3-2k", body)
+			submit := yueqiHook(t, plugin, "buildSubmitRequest", ctx)
+			assert.Equal(t, "2k", submit["body"].(map[string]any)["resolution"])
+			assert.Equal(t, "2k", yueqiHook(t, plugin, "extractUsage", ctx)["resolution"], "reservation must use the forwarded resolution tier")
+		})
+	}
+	assert.Equal(t, map[string]any{"resolution": "2k"}, yueqiHook(t, plugin, "extractUsageOnComplete", map[string]any{"model": "h3-2k"}, map[string]any{"status": "SUCCESS"}, map[string]any{"resolution": " 2K "}))
+
 	for _, modelName := range plugin.Meta.Models {
 		t.Run(modelName, func(t *testing.T) {
 			for _, tc := range []struct {
@@ -434,9 +477,11 @@ func TestYueqiResolutionAndAspectRatioAliases(t *testing.T) {
 	}{
 		{"resolution conflict", map[string]any{"resolution": "720p", "resolution_name": "480P"}},
 		{"nested resolution conflict", map[string]any{"resolution": "720p", "metadata": map[string]any{"resolution_name": "480P"}}},
+		{"2k resolution conflict", map[string]any{"resolution": "720p", "metadata": map[string]any{"resolution_name": "2K"}}},
 		{"ratio conflict", map[string]any{"resolution_name": "720P", "size": "16:9", "aspect_ratio": "9:16"}},
 		{"invalid ratio", map[string]any{"resolution_name": "720P", "size": "0:16"}},
 		{"invalid resolution", map[string]any{"resolution_name": "ultra", "size": "16:9"}},
+		{"invalid k resolution", map[string]any{"resolution": "999k"}},
 		{"invalid resolution type", map[string]any{"resolution_name": 720}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

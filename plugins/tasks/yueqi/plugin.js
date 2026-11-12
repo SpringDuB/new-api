@@ -1,10 +1,11 @@
-// Model names and supported resolutions come from Yueqi's /v1/models.
-// Prefer 720p by default, which every listed model advertises.
+// Model names come from Yueqi's /v1/models and public /api/pricing catalogs.
+// Existing defaults are retained; new models use a supported request_spec resolution.
 // Its descriptions and request_spec disagree about reference capabilities, so
 // preserve media fields and let the upstream validate each model's inputs.
 const MODELS = {
   "BD Seedance2.5": { defaultResolution: "720p" },
   "MINIMAXH3-2.0采样": { defaultResolution: "720p" },
+  "h3-2k": { defaultResolution: "2k" },
   "kling-4.0": { defaultResolution: "720p" },
   "mi-seedance2.5": { defaultResolution: "720p" },
   "sd2.5新": { defaultResolution: "720p" },
@@ -25,6 +26,8 @@ const MODELS = {
   "新满-seedance-933": { defaultResolution: "720p" },
   // The upstream advertises only 720p despite the model name.
   "特惠版2.5 满血 480p": { defaultResolution: "720p" },
+  "特惠版 Seedance 2.5 满血 720p": { defaultResolution: "720p" },
+  "特惠版 Wan 3 快速版": { defaultResolution: "480p" },
 };
 // Explicit public model names are video protocol bindings as well as driver
 // aliases. This keeps routing independent of cross-channel alias inference,
@@ -182,7 +185,7 @@ function videoSubmission(ctx) {
       if (scope[field] === undefined) continue;
       if (field === "size" && sizeIsRatio) continue;
       const value = typeof scope[field] === "string" ? scope[field].trim().toLowerCase() : scope[field];
-      if (typeof value !== "string" || !/^[1-9]\d{1,3}p$/.test(value)) throw new Error("resolution must be a label such as 480p, 720p or 1080p");
+      if (typeof value !== "string" || !/^(?:[1-9]\d{1,3}p|2k)$/.test(value)) throw new Error("resolution must be a label such as 480p, 720p, 1080p or 2k");
       if (resolution !== undefined && resolution !== value) throw new Error("conflicting video resolution parameters");
       scopeResolution = resolution = value;
     }
@@ -402,7 +405,7 @@ export function extractUsageOnComplete(ctx, result, response) {
   else if (body.duration !== undefined) facts.seconds = secondsValue(body.duration);
   let resolution = body.resolution || body.resolution_name || body.size;
   if (typeof resolution === "string") resolution = resolution.trim().toLowerCase();
-  if (typeof resolution === "string" && /^[1-9]\d{1,3}p$/.test(resolution)) facts.resolution = resolution;
+  if (typeof resolution === "string" && /^(?:[1-9]\d{1,3}p|2k)$/.test(resolution)) facts.resolution = resolution;
   return facts;
 }
 

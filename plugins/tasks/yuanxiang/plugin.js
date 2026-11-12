@@ -1,9 +1,10 @@
 // Yuanxiang's authenticated /v1/models catalog, checked 2026-11-09.
 // Defaults are sent explicitly so upstream defaults cannot change the facts.
+const SD25_STABLE_CHANNEL = "route:stable";
 const VIDEO_MODELS = {
   "SD 2.5 · 官方直连（满血版）按秒": { seconds: 5, resolution: "720p" },
   "SD 2.0 满血版 按秒": { seconds: 5, resolution: "720p", version: "标准" },
-  "SD 2.5 · 特价按次": { seconds: 5, resolution: "1080p" },
+  "SD 2.5 · 特价按次": { seconds: 5, resolution: "1080p", channel: SD25_STABLE_CHANNEL },
   "Sd 2.0 · 特价按次 · 漫剧短剧专线": { seconds: 5, resolution: "720p" },
   "SD 2.0 · 特价按次 · 电商专线": { seconds: 5, resolution: "720p", quality: "真人模特" },
   "Muse · 特价按次 ·【原生】": { seconds: 10, resolution: "720p" },
@@ -57,7 +58,7 @@ export const meta = {
   name: "Yuanxiang AI",
   icon: "text:YX",
   description: { en: "Yuanxiang video and image generation with canvas parameter mapping and configurable reference video pricing", zh: "元象视频与图片生成，支持画布参数映射和可选参考视频计费" },
-  version: "1.0.5",
+  version: "1.0.7",
   author: { name: "QuantumNous" },
   website: "https://yuanxiangai.cc/api-docs",
   baseUrl: "https://yuanxiangai.cc",
@@ -201,9 +202,12 @@ function submission(ctx) {
   }
   body.prompt = values.prompt;
   if (values.ratio !== undefined) body.ratio = values.ratio;
-  if (values.channel !== undefined) body.channel = values.channel;
-  const resolution = values.resolution || profile.defaults.resolution.toLowerCase();
-  body.resolution = resolution;
+  const channel = values.channel ?? profile.defaults.channel;
+  // The 720p line is opt-in upstream, even though it is our default for this model.
+  const stableSD25 = profile.defaults.channel === SD25_STABLE_CHANNEL &&
+    (channel === SD25_STABLE_CHANNEL || channel === "Sd 2.5-720p-30s（10图稳定）");
+  if (channel !== undefined) body.channel = stableSD25 ? SD25_STABLE_CHANNEL : channel;
+  body.resolution = values.resolution ?? (stableSD25 ? "720p" : profile.defaults.resolution);
   for (const field of ["quality", "version"]) {
     if (options[field] !== undefined) {
       const value = conditionValue(options[field], field);
@@ -232,6 +236,12 @@ function submission(ctx) {
     if (!kind) throw new Error("unsupported reference file field: " + file.field);
     if (!Number.isSafeInteger(file.size) || file.size <= 0) throw new Error("reference files must not be empty");
     references[kind].push({ fileRef: file.ref });
+  }
+  if (stableSD25) {
+    if (body.resolution !== "720p") throw new Error("route:stable requires 720p resolution");
+    if (![5, 10, 15, 30].includes(body.duration)) throw new Error("route:stable requires a duration of 5, 10, 15 or 30 seconds");
+    if (references.images.length > 10) throw new Error("route:stable accepts at most 10 reference images");
+    if (references.videos.length || references.audios.length) throw new Error("route:stable does not accept reference video or audio");
   }
   for (const kind of ["images", "videos", "audios"]) {
     if (references[kind].length > (kind === "images" ? 30 : 10)) throw new Error("too many reference " + kind);
