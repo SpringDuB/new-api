@@ -117,6 +117,17 @@ func GetPluginDefaultBillingExpr(pluginKey string, models ...string) (string, bo
 // ResolveTaskBillingExpr prefers administrator prices to the executing plugin's
 // defaults, retaining alias fallback and explicit legacy modes, including free.
 func ResolveTaskBillingExpr(pluginKey, model, mappedModel string) (string, bool) {
+	meta := jsplugin.Meta{Key: pluginKey}
+	if plugin, exists := jsplugin.DefaultRegistry.Get(pluginKey); exists {
+		meta = plugin.Meta
+	}
+	return ResolveTaskBillingExprForPlugin(meta, model, mappedModel)
+}
+
+// ResolveTaskBillingExprForPlugin keeps defaults with the executing plugin
+// version, even if the live registry changes before this request is priced.
+func ResolveTaskBillingExprForPlugin(meta jsplugin.Meta, model, mappedModel string) (string, bool) {
+	pluginKey := meta.Key
 	if pluginKey != "" {
 		if expr, ok := GetPluginBillingExpr(pluginKey, model); ok {
 			return expr, true
@@ -145,7 +156,8 @@ func ResolveTaskBillingExpr(pluginKey, model, mappedModel string) (string, bool)
 	if _, configured := ratio_setting.GetModelPrice(model, false); configured {
 		return "", false
 	}
-	return GetPluginDefaultBillingExpr(pluginKey, mappedModel, model)
+	defaults, exists := meta.DefaultsForModel(mappedModel, model)
+	return defaults.BillingExpr, exists && strings.TrimSpace(defaults.BillingExpr) != ""
 }
 
 // TaskExprCompatible checks the schema contract even for usage references in

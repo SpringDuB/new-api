@@ -467,6 +467,7 @@ const MODELS = {
     icon: "Gemini.Color",
     tags: ["image", "per_request"],
     parameters: {
+      aspect_ratio: { type: "enum", values: ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"] },
       images: {
         type: "array",
         constraints: {
@@ -1259,7 +1260,7 @@ const MODELS = {
     parameters: {
       prompt: { type: "string", required: true },
       images: { type: "array", constraints: { url_schemes: ["https"] } },
-      size: { type: "string", default: "1024x1024" },
+      aspect_ratio: { type: "enum", default: "1:1", values: ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"] },
       resolution: { type: "enum", values: ["1K", "2K", "4K"] },
       quality: { type: "enum", values: ["standard", "thinking"], default: "standard" },
       response_format: { type: "enum", values: ["url"], default: "url" },
@@ -1275,7 +1276,6 @@ const MODELS = {
       prompt: { type: "string", required: true },
       images: { type: "array", constraints: { url_schemes: ["https"] } },
       aspect_ratio: { type: "enum", values: ["16:9", "9:16", "1:1", "2:3", "3:2"] },
-      size: { type: "string" },
       resolution: { type: "enum", values: ["1K", "2K", "4K"] },
       response_format: { type: "enum", values: ["url"], default: "url" },
     },
@@ -1494,7 +1494,7 @@ export const meta = {
   key: "lecapi",
   name: "LecAPI",
   icon: "text:LE",
-  version: "1.0.1",
+  version: "1.0.3",
   author: { name: "QuantumNous" },
   website: "https://api.lecapi.net/docs",
   baseUrl: "https://api.lecapi.net",
@@ -1620,6 +1620,17 @@ function parameterValue(value, parameter, field) {
   return value;
 }
 
+function reducedAspectRatio(width, height) {
+  let divisor = width,
+    remainder = height;
+  while (remainder) {
+    const next = divisor % remainder;
+    divisor = remainder;
+    remainder = next;
+  }
+  return width / divisor + ":" + height / divisor;
+}
+
 function materialValue(value, parameter, field) {
   if (value && typeof value === "object" && !Array.isArray(value)) {
     value = value.url || value.image_url || value.video_url || value.audio_url;
@@ -1668,7 +1679,7 @@ function submission(ctx) {
   };
   for (const scope of parameterScopes(ctx.requestBody)) {
     for (const field of Object.keys(scope)) {
-      const value = scope[field];
+      let value = scope[field];
       if (CONTAINERS.includes(field)) continue;
       if (field === "model") {
         if (
@@ -1690,9 +1701,26 @@ function submission(ctx) {
       }
       let target = field === "audio" && !profile.parameters.audio ? "audios" : aliases[field] || field;
       if (["first_frame", "last_frame"].includes(target) && !profile.parameters[target]) target = "images";
-      if (target === "size" && !profile.parameters.size) {
-        if (typeof value === "string" && /^\d+:\d+$/.test(value)) target = "aspect_ratio";
-        else if (typeof value === "string" && /^(?:\d+p|[124]k)$/i.test(value)) target = "resolution";
+      if (target === "size" && !profile.parameters.size && typeof value === "string") {
+        value = value.trim();
+        if (/^\d+:\d+$/.test(value)) target = "aspect_ratio";
+        else if (/^(?:\d+p|[124]k)$/i.test(value)) target = "resolution";
+        else if (profile.kind === "image" && profile.parameters.aspect_ratio) {
+          const dimensions = /^(\d+)\s*[x×]\s*(\d+)$/i.exec(value);
+          if (!dimensions) throw new Error("size must contain pixel dimensions, a supported aspect ratio or a resolution");
+          const width = Number(dimensions[1]),
+            height = Number(dimensions[2]);
+          if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) || width <= 0 || height <= 0)
+            throw new Error("size must contain positive safe integer pixel dimensions");
+          // Reduce exactly; never approximate an unsupported canvas shape or infer a billing resolution.
+          const ratio = reducedAspectRatio(width, height);
+          value =
+            profile.parameters.aspect_ratio.values.find((candidate) => {
+              const [numerator, denominator] = candidate.split(":").map(Number);
+              return reducedAspectRatio(numerator, denominator) === ratio;
+            }) || ratio;
+          target = "aspect_ratio";
+        }
       }
       const parameter = profile.parameters[target];
       if (!parameter) throw new Error(field + " is not supported by " + profile.publicModel);
@@ -1719,6 +1747,11 @@ function submission(ctx) {
     const reference = { __fileRef: file.ref, encoding: "dataUrl", maxBytes: constraints.max_bytes || 67108864 };
     (media[target] || (media[target] = [])).push(reference);
     files.push({ field: target, ref: file.ref });
+  }
+  if (["lec-sl-midjourney", "lec-sl-midjourney-niji"].includes(profile.vendorModel) && body.action === undefined) {
+    // Infer the canvas action from every reference alias and nested parameter scope.
+    const referenceCount = media.images?.length || 0;
+    body.action = referenceCount === 0 ? "imagine" : referenceCount === 1 ? "edits" : "blend";
   }
   for (const [field, parameter] of Object.entries(profile.parameters)) {
     if (MEDIA_FIELDS.includes(field)) {

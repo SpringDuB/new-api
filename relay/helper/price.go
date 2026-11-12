@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
+	hostdto "github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
@@ -290,22 +292,45 @@ func HasModelBillingConfig(modelName string) bool {
 			return true
 		}
 	}
-	// Task prices can belong only to a plugin, without any model-level price.
-	// Use runtime resolution so administrator overrides and schema checks apply.
+	return false
+}
+
+// HasTaskModelBillingConfig only admits plugin prices through enabled channels
+// accessible to the caller; an installed plugin alone is not a usable route.
+func HasTaskModelBillingConfig(modelName string, channels []*model.Channel) bool {
 	generation := jsplugin.DefaultRegistry.Generation()
-	usageModel := modelName
-	providers := generation.PluginsByModel(modelName)
-	if len(providers) == 0 {
-		if target, ok := model.ResolveTaskModelAlias(generation, modelName); ok && target.Declared != "" {
-			usageModel = target.Declared
-			providers = generation.PluginsByModel(usageModel)
+	for _, channel := range channels {
+		if channel == nil || channel.Status != common.ChannelStatusEnabled {
+			continue
 		}
-	}
-	for _, provider := range providers {
-		expression, ok := billing_setting.ResolveTaskBillingExpr(provider.Meta.Key, modelName, usageModel)
-		schema, _ := provider.Meta.UsageForModel(usageModel)
-		if ok && billing_setting.TaskExprCompatible(expression, schema) {
-			return true
+		mappedModel := modelName
+		if raw := channel.GetModelMapping(); raw != "" && raw != "{}" {
+			var mapping map[string]string
+			if err := common.UnmarshalJsonStr(raw, &mapping); err != nil {
+				continue
+			}
+			var cycle bool
+			mappedModel, cycle = model.FollowChannelModelMapping(mapping, modelName)
+			if cycle {
+				continue
+			}
+		}
+		providers := generation.PluginsByModel(modelName)
+		if len(providers) == 0 {
+			providers = generation.PluginsByModel(mappedModel)
+		}
+		for _, provider := range providers {
+			matches, _ := model.ChannelSatisfiesFilters(channel, modelName, []hostdto.ChannelFilter{{
+				Kind: hostdto.FilterTaskPluginIdentity, TaskPluginKey: provider.Meta.Key, TaskPluginChannelTypes: provider.Meta.ChannelTypes,
+			}})
+			if !matches || (channel.Type == constant.ChannelTypeNewAPI && !provider.Meta.SupportsUpstream(jsplugin.UpstreamKindNewAPI)) {
+				continue
+			}
+			expression, ok := billing_setting.ResolveTaskBillingExprForPlugin(provider.Meta, modelName, mappedModel)
+			schema, _ := provider.Meta.UsageForModels(mappedModel, modelName)
+			if ok && billing_setting.TaskExprCompatible(expression, schema) {
+				return true
+			}
 		}
 	}
 	return false

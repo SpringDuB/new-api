@@ -333,7 +333,8 @@ func TestListModelsIncludesPluginDefaultPricesDatabaseMatrix(t *testing.T) {
 			_, err := jsplugin.DefaultRegistry.Register(`
 export const meta = {
  apiVersion:1,key:"model-list-defaults",name:"Model list defaults",version:"1.0.0",author:{name:"Test"},
- models:["zz-bundled-video","zz-bundled-free","zz-bundled-image","zz-bundled-unpriced","zz-bundled-override","zz-bundled-blocked","zz-bundled-invalid","zz-bundled-other-group"],
+ models:["zz-bundled-video","zz-bundled-free","zz-bundled-image","zz-bundled-unpriced","zz-bundled-override","zz-bundled-blocked","zz-bundled-invalid","zz-bundled-other-group","zz-bundled-ordinary","zz-bundled-wrong-plugin","zz-bundled-disabled-channel","zz-bundled-new-api","zz-bundled-legacy"],
+ channelTypes:[99001],upstreams:["new_api"],
  fetchMode:"per_task",usageSchema:{seconds:{type:"number",unit:"second"}},
  usageProfiles:[{models:["zz-bundled-image"],schema:{image_count:{type:"number",unit:"count"}}}],
  modelDefaults:{
@@ -342,7 +343,12 @@ export const meta = {
   "zz-bundled-image":{billingExpr:'tier("image", u("image_count") * 0.12)'},
   "zz-bundled-blocked":{billingExpr:'tier("video", u("seconds") * 1)'},
   "zz-bundled-invalid":{billingExpr:'tier("video", u("seconds") * 1)'},
-  "zz-bundled-other-group":{billingExpr:'tier("video", u("seconds") * 1)'}
+  "zz-bundled-other-group":{billingExpr:'tier("video", u("seconds") * 1)'},
+  "zz-bundled-ordinary":{billingExpr:'tier("video", u("seconds") * 1)'},
+  "zz-bundled-wrong-plugin":{billingExpr:'tier("video", u("seconds") * 1)'},
+  "zz-bundled-disabled-channel":{billingExpr:'tier("video", u("seconds") * 1)'},
+  "zz-bundled-new-api":{billingExpr:'tier("video", u("seconds") * 1)'},
+  "zz-bundled-legacy":{billingExpr:'tier("video", u("seconds") * 1)'}
  }
 };
 export function buildSubmitRequest(){return {};}
@@ -355,59 +361,103 @@ export function parseTaskResult(){return {};}
 				if _, exists := jsplugin.DefaultRegistry.Get("model-list-defaults"); exists {
 					require.NoError(t, jsplugin.DefaultRegistry.Unregister("model-list-defaults"))
 				}
+				require.NoError(t, jsplugin.DefaultRegistry.Unregister("model-list-unpriced"))
 				model.InvalidatePricingCache()
 			})
+			_, err = jsplugin.DefaultRegistry.Register(`
+export const meta = {
+ apiVersion:1,key:"model-list-unpriced",name:"Unpriced provider",version:"1.0.0",author:{name:"Test"},
+ models:["zz-bundled-wrong-plugin"],fetchMode:"per_task",usageSchema:{credits:{type:"number",unit:"credit"}}
+};
+export function buildSubmitRequest(){return {};}
+export function parseSubmitResponse(){return {};}
+export function buildQueryRequest(){return {};}
+export function parseTaskResult(){return {};}
+`, jsplugin.Options{})
+			require.NoError(t, err)
 			require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{
 				"billing_setting.billing_mode":        `{"zz-bundled-blocked":"tiered_expr"}`,
 				"billing_setting.billing_expr":        `{"zz-bundled-blocked":""}`,
 				"billing_setting.plugin_billing_expr": `{"model-list-defaults::zz-bundled-override":"tier(\"override\", u(\"seconds\") * 0.5)","model-list-defaults::zz-bundled-invalid":"u(\"undeclared\")"}`,
 			}))
-			mapping := `{"zz-bundled-alias":"zz-bundled-video"}`
+			mapping := `{"zz-bundled-alias":"zz-bundled-video","zz-bundled-group-alias":"zz-bundled-video"}`
 			channel := model.Channel{
 				Name: "Bundled prices", Type: constant.ChannelTypeTaskPlugin, Status: common.ChannelStatusEnabled,
-				Group: "media", Models: "zz-bundled-video,zz-bundled-free,zz-bundled-image,zz-bundled-unpriced,zz-bundled-override,zz-bundled-blocked,zz-bundled-invalid,zz-bundled-alias", ModelMapping: &mapping,
+				Group: "media", Models: "zz-bundled-video,zz-bundled-free,zz-bundled-image,zz-bundled-unpriced,zz-bundled-override,zz-bundled-blocked,zz-bundled-invalid,zz-bundled-alias,zz-bundled-group-alias", ModelMapping: &mapping,
 			}
 			channel.SetSetting(dto.ChannelSettings{TaskPluginKey: "model-list-defaults"})
 			require.NoError(t, db.Create(&channel).Error)
 			require.NoError(t, channel.UpdateAbilities(db))
+			otherMapping := `{"zz-bundled-group-alias":"zz-bundled-unpriced"}`
 			otherChannel := model.Channel{
 				Name: "Other group", Type: constant.ChannelTypeTaskPlugin, Status: common.ChannelStatusEnabled,
-				Group: "other", Models: "zz-bundled-other-group",
+				Group: "other", Models: "zz-bundled-other-group,zz-bundled-group-alias", ModelMapping: &otherMapping,
 			}
 			otherChannel.SetSetting(dto.ChannelSettings{TaskPluginKey: "model-list-defaults"})
 			require.NoError(t, db.Create(&otherChannel).Error)
 			require.NoError(t, otherChannel.UpdateAbilities(db))
+			for _, channel := range []model.Channel{
+				{Name: "Ordinary only", Type: constant.ChannelTypeOpenAI, Status: common.ChannelStatusEnabled, Group: "media", Models: "zz-bundled-ordinary,zz-bundled-other-group,zz-bundled-disabled-channel"},
+				{Name: "Gateway without plugin binding", Type: constant.ChannelTypeNewAPI, Status: common.ChannelStatusEnabled, Group: "media", Models: "zz-bundled-ordinary"},
+				{Name: "Wrong plugin", Type: constant.ChannelTypeTaskPlugin, Status: common.ChannelStatusEnabled, Group: "media", Models: "zz-bundled-wrong-plugin"},
+				{Name: "Disabled plugin channel", Type: constant.ChannelTypeTaskPlugin, Status: common.ChannelStatusManuallyDisabled, Group: "media", Models: "zz-bundled-disabled-channel"},
+				{Name: "Extended gateway", Type: constant.ChannelTypeNewAPI, Status: common.ChannelStatusEnabled, Group: "media", Models: "zz-bundled-new-api"},
+				{Name: "Legacy plugin channel", Type: 99001, Status: common.ChannelStatusEnabled, Group: "media", Models: "zz-bundled-legacy"},
+			} {
+				pluginKey := "model-list-defaults"
+				if channel.Name == "Wrong plugin" {
+					pluginKey = "model-list-unpriced"
+				}
+				if channel.Type == constant.ChannelTypeTaskPlugin {
+					channel.SetSetting(dto.ChannelSettings{TaskPluginKey: pluginKey})
+				}
+				if channel.Name == "Extended gateway" {
+					channel.SetSetting(dto.ChannelSettings{TaskExtendPluginKeys: []string{pluginKey}})
+				}
+				require.NoError(t, db.Create(&channel).Error)
+				require.NoError(t, channel.UpdateAbilities(db))
+			}
 			model.InitChannelCache()
 
 			for _, tc := range []struct {
 				name    string
+				group   string
 				limits  map[string]bool
 				disable bool
 				want    []string
 			}{
-				{name: "bundled prices and provider overrides", want: []string{"zz-bundled-video", "zz-bundled-free", "zz-bundled-image", "zz-bundled-override", "zz-bundled-alias"}},
+				{name: "bundled prices and provider overrides", want: []string{"zz-bundled-video", "zz-bundled-free", "zz-bundled-image", "zz-bundled-override", "zz-bundled-alias", "zz-bundled-group-alias", "zz-bundled-new-api", "zz-bundled-legacy"}},
 				{name: "token limits", limits: map[string]bool{"zz-bundled-video": true, "zz-bundled-unpriced": true, "zz-bundled-other-group": true}, want: []string{"zz-bundled-video"}},
+				{name: "another token group uses its own mapped prices", group: "other", want: []string{"zz-bundled-other-group"}},
 				{name: "disabled plugin", disable: true, want: []string{}},
 			} {
 				t.Run(tc.name, func(t *testing.T) {
 					if tc.disable {
 						require.NoError(t, jsplugin.DefaultRegistry.Unregister("model-list-defaults"))
 					}
-					recorder := httptest.NewRecorder()
-					ctx, _ := gin.CreateTestContext(recorder)
-					ctx.Request = httptest.NewRequest(http.MethodGet, "/v1/models", nil)
-					common.SetContextKey(ctx, constant.ContextKeyUserGroup, "default")
-					common.SetContextKey(ctx, constant.ContextKeyTokenGroup, "media")
-					if tc.limits != nil {
-						common.SetContextKey(ctx, constant.ContextKeyTokenModelLimitEnabled, true)
-						common.SetContextKey(ctx, constant.ContextKeyTokenModelLimit, tc.limits)
+					for _, memoryCache := range []bool{false, true} {
+						common.MemoryCacheEnabled = memoryCache
+						model.InitChannelCache()
+						recorder := httptest.NewRecorder()
+						ctx, _ := gin.CreateTestContext(recorder)
+						ctx.Request = httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+						common.SetContextKey(ctx, constant.ContextKeyUserGroup, "default")
+						group := tc.group
+						if group == "" {
+							group = "media"
+						}
+						common.SetContextKey(ctx, constant.ContextKeyTokenGroup, group)
+						if tc.limits != nil {
+							common.SetContextKey(ctx, constant.ContextKeyTokenModelLimitEnabled, true)
+							common.SetContextKey(ctx, constant.ContextKeyTokenModelLimit, tc.limits)
+						}
+						ListModels(ctx, constant.ChannelTypeOpenAI)
+						ids := make([]string, 0)
+						for name := range decodeListModelsResponse(t, recorder) {
+							ids = append(ids, name)
+						}
+						assert.ElementsMatch(t, tc.want, ids, "memory cache: %v", memoryCache)
 					}
-					ListModels(ctx, constant.ChannelTypeOpenAI)
-					ids := make([]string, 0)
-					for name := range decodeListModelsResponse(t, recorder) {
-						ids = append(ids, name)
-					}
-					assert.ElementsMatch(t, tc.want, ids)
 				})
 			}
 		})

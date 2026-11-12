@@ -182,6 +182,105 @@ func TestLecAPIBuildsAndMetersTheFinalMappedBody(t *testing.T) {
 	}
 }
 
+func TestLecAPIConvertsImageSizesWithoutChangingGenerationSettings(t *testing.T) {
+	plugin := loadLecAPIPlugin(t)
+	for _, protocol := range plugin.Meta.Protocols {
+		if protocol.Name != jsplugin.ProtocolOpenAIImage {
+			continue
+		}
+		require.NotEmpty(t, protocol.Models)
+		for _, name := range protocol.Models {
+			t.Run(name, func(t *testing.T) {
+				ctx := lecAPIContext(name, map[string]any{"prompt": "boat", "size": "3840x2160"})
+				body := lecAPIHook(t, plugin, "buildSubmitRequest", ctx)["body"].(map[string]any)
+				assert.Equal(t, "16:9", body["aspect_ratio"])
+				assert.NotContains(t, body, "size")
+				facts := lecAPIHook(t, plugin, "extractUsage", ctx)
+				if resolution, ok := body["resolution"]; ok {
+					assert.Equal(t, resolution, facts["resolution"])
+				}
+				assert.Equal(t, float64(1), facts["image_count"])
+			})
+		}
+	}
+	for _, tc := range []struct{ size, ratio string }{
+		{"1024x1024", "1:1"}, {"3840x2160", "16:9"}, {"2160x3840", "9:16"},
+		{"2048x1536", "4:3"}, {"1536x2048", "3:4"}, {"1536x1024", "3:2"}, {"1024x1536", "2:3"},
+		{" 3840 X 2160 ", "16:9"}, {"3840×2160", "16:9"}, {"16:9", "16:9"},
+	} {
+		t.Run(tc.size, func(t *testing.T) {
+			ctx := lecAPIContext("tinysnow-image-2-5-flare", map[string]any{"prompt": "boat", "size": tc.size, "resolution": "4k", "quality": "high", "n": 2})
+			body := lecAPIHook(t, plugin, "buildSubmitRequest", ctx)["body"].(map[string]any)
+			assert.Equal(t, "lec-tinysnow-image-2-5-flare", body["model"])
+			assert.Equal(t, tc.ratio, body["aspect_ratio"])
+			assert.Equal(t, "4K", body["resolution"])
+			assert.Equal(t, "high", body["quality"])
+			assert.Equal(t, float64(2), body["n"])
+			assert.NotContains(t, body, "size")
+			facts := lecAPIHook(t, plugin, "extractUsage", ctx)
+			assert.Equal(t, body["resolution"], facts["resolution"])
+			assert.Equal(t, body["n"], facts["image_count"])
+		})
+	}
+	for _, name := range []string{"tinysnow-image-2", "tinysnow-image-2-5-sunburst"} {
+		ctx := lecAPIContext(name, map[string]any{"prompt": "boat", "ratio": "16:9", "metadata": map[string]any{
+			"size": "1920x1080", "extra": map[string]any{"parameters": map[string]any{"resolution_name": "2k", "quality": "HIGH", "n": 10}},
+		}})
+		ctx["model"] = "canvas-alias"
+		body := lecAPIHook(t, plugin, "buildSubmitRequest", ctx)["body"].(map[string]any)
+		assert.Equal(t, "16:9", body["aspect_ratio"])
+		assert.Equal(t, "2K", body["resolution"])
+		assert.Equal(t, "high", body["quality"])
+		assert.NotContains(t, body, "size")
+		assert.Equal(t, float64(10), lecAPIHook(t, plugin, "extractUsage", ctx)["image_count"])
+		ctx["upstream"] = map[string]any{"kind": "new_api"}
+		assert.Equal(t, name, lecAPIHook(t, plugin, "buildSubmitRequest", ctx)["body"].(map[string]any)["model"])
+	}
+	for _, tc := range []struct{ model, size, resolution string }{
+		{"tinysnow-image-2", "4k", "4K"}, {"tinysnow-image-2", "1536x1024", "1K"},
+		{"image2", "3840x2160", "4K"}, {"nano-banana-2", "3840x2160", "4K"},
+		{"aj-wan-3-0", "1080p", "1080p"},
+	} {
+		request := map[string]any{"prompt": "boat", "size": tc.size}
+		if tc.model == "image2" || tc.model == "nano-banana-2" {
+			request["resolution"] = "4k"
+		}
+		ctx := lecAPIContext(tc.model, request)
+		body := lecAPIHook(t, plugin, "buildSubmitRequest", ctx)["body"].(map[string]any)
+		assert.Equal(t, tc.resolution, body["resolution"], "%s must retain its resolution rules", tc.model)
+		assert.Equal(t, tc.resolution, lecAPIHook(t, plugin, "extractUsage", ctx)["resolution"])
+		if tc.model == "image2" || tc.model == "nano-banana-2" {
+			assert.Equal(t, "16:9", body["aspect_ratio"])
+			assert.NotContains(t, body, "size")
+		}
+	}
+	video := lecAPIHook(t, plugin, "buildSubmitRequest", lecAPIContext("omni-video-redraw", map[string]any{"prompt": "boat", "size": "1280x720"}))["body"].(map[string]any)
+	assert.Equal(t, "1280x720", video["size"])
+	assert.NotContains(t, video, "aspect_ratio")
+	for _, tc := range []struct{ size, ratio string }{{"2520x1080", "21:9"}, {"1792x768", "21:9"}, {"1024x1280", "4:5"}} {
+		body := lecAPIHook(t, plugin, "buildSubmitRequest", lecAPIContext("sl-midjourney", map[string]any{"prompt": "boat", "size": tc.size}))["body"].(map[string]any)
+		assert.Equal(t, tc.ratio, body["aspect_ratio"], "equivalent aspect ratios must retain the model's declared spelling")
+	}
+	for _, hook := range []string{"buildSubmitRequest", "extractUsage"} {
+		_, err := plugin.Engine.Call(t.Context(), hook, lecAPIContext("ty-seedream-5-pro", map[string]any{"prompt": "boat", "size": "1536x1024"}))
+		require.ErrorContains(t, err, "aspect_ratio must be one of", "conversion must enforce the selected model's narrower aspect ratios")
+	}
+	for _, invalid := range []map[string]any{
+		{"size": "0x2160"}, {"size": "3840x-2160"}, {"size": "9007199254740992x9007199254740992"},
+		{"size": "1792x1024"}, {"size": "auto"}, {"size": "3840x2160", "aspect_ratio": "1:1"},
+		{"size": "3840x2160", "metadata": map[string]any{"ratio": "9:16"}},
+		{"size": "4k", "resolution": "2K"}, {"size": "3840x2160", "quality": "ultra"},
+		{"size": "3840x2160", "resolution": "8K"}, {"size": "3840x2160", "metadata": map[string]any{"n": 11}},
+	} {
+		request := maps.Clone(invalid)
+		request["prompt"] = "boat"
+		for _, hook := range []string{"buildSubmitRequest", "extractUsage"} {
+			_, err := plugin.Engine.Call(t.Context(), hook, lecAPIContext("tinysnow-image-2", request))
+			require.Error(t, err, "%s must reject invalid or conflicting settings: %v", hook, invalid)
+		}
+	}
+}
+
 func TestLecAPIEnforcesModelSpecificMaterialsAndOptions(t *testing.T) {
 	plugin := loadLecAPIPlugin(t)
 	for _, tc := range []struct {
@@ -206,6 +305,72 @@ func TestLecAPIEnforcesModelSpecificMaterialsAndOptions(t *testing.T) {
 	assert.Equal(t, float64(0), body["stylize"])
 	assert.Equal(t, false, body["style"])
 	assert.Equal(t, false, body["hd"])
+}
+
+func TestLecAPIMidjourneySelectsAndBillsActionsFromReferenceImages(t *testing.T) {
+	plugin := loadLecAPIPlugin(t)
+	for _, name := range []string{"sl-midjourney", "sl-midjourney-niji"} {
+		for _, tc := range []struct {
+			name   string
+			body   map[string]any
+			action string
+			images int
+			price  float64
+		}{
+			{"prompt only", map[string]any{}, "imagine", 0, 0.54},
+			{"empty references", map[string]any{"images": []any{}}, "imagine", 0, 0.54},
+			{"single reference", map[string]any{"images": []any{"https://media.example/a.png"}}, "edits", 1, 0.576},
+			{"single image alias", map[string]any{"image": map[string]any{"url": "https://media.example/a.png"}}, "edits", 1, 0.576},
+			{"multiple references", map[string]any{"images": []any{"https://media.example/a.png", "https://media.example/b.png"}}, "blend", 2, 0.576},
+			{"nested references", map[string]any{"image_url": "https://media.example/a.png", "metadata": map[string]any{"extra": map[string]any{"image_urls": []any{"https://media.example/b.png"}}}}, "blend", 2, 0.576},
+			{"explicit imagine", map[string]any{"action": "imagine", "images": []any{"https://media.example/a.png"}}, "imagine", 1, 0.54},
+			{"explicit nested edits", map[string]any{"images": []any{"https://media.example/a.png", "https://media.example/b.png"}, "parameters": map[string]any{"action": "edits"}}, "edits", 2, 0.576},
+		} {
+			t.Run(name+"/"+tc.name, func(t *testing.T) {
+				request := maps.Clone(tc.body)
+				request["prompt"], request["size"] = "A red boat", "3840x2160"
+				ctx := lecAPIContext(name, request)
+				ctx["model"] = "canvas-mj-alias"
+				submit := lecAPIHook(t, plugin, "buildSubmitRequest", ctx)
+				body := submit["body"].(map[string]any)
+				assert.Equal(t, "https://lec.example/v1/images/generations", submit["url"])
+				assert.Equal(t, tc.action, submit["action"])
+				assert.Equal(t, tc.action, body["action"])
+				assert.Equal(t, "16:9", body["aspect_ratio"])
+				if tc.images > 0 {
+					assert.Len(t, body["images"], tc.images)
+				} else {
+					assert.NotContains(t, body, "images")
+				}
+				facts := lecAPIHook(t, plugin, "extractUsage", ctx)
+				assert.Equal(t, tc.action, facts["action"])
+				assert.Equal(t, float64(1), facts["requests"])
+				defaults, ok := plugin.Meta.DefaultsForModel(name)
+				require.True(t, ok)
+				cost, trace, err := billingexpr.RunExprWithRequest(defaults.BillingExpr, billingexpr.TokenParams{}, billingexpr.RequestInput{Usage: facts})
+				require.NoError(t, err)
+				assert.Equal(t, tc.action, trace.MatchedTier)
+				assert.InDelta(t, tc.price, cost, 1e-12)
+				ctx["upstream"] = map[string]any{"kind": "new_api"}
+				chained := lecAPIHook(t, plugin, "buildSubmitRequest", ctx)
+				assert.Equal(t, "https://lec.example/lecapi/v1/images/tasks", chained["url"])
+				assert.Equal(t, tc.action, chained["body"].(map[string]any)["action"])
+			})
+		}
+		references := make([]any, 10)
+		for i := range references {
+			references[i] = "https://media.example/reference.png"
+		}
+		ctx := lecAPIContext(name, map[string]any{"prompt": "boat", "images": references})
+		assert.Equal(t, "blend", lecAPIHook(t, plugin, "buildSubmitRequest", ctx)["action"])
+		ctx = lecAPIContext(name, map[string]any{"prompt": "boat", "images": append(references, "https://media.example/extra.png")})
+		for _, hook := range []string{"buildSubmitRequest", "extractUsage"} {
+			_, err := plugin.Engine.Call(t.Context(), hook, ctx)
+			require.ErrorContains(t, err, "unsupported number of items")
+			_, err = plugin.Engine.Call(t.Context(), hook, lecAPIContext(name, map[string]any{"images": []any{"https://media.example/a.png"}}))
+			require.ErrorContains(t, err, "prompt is required")
+		}
+	}
 }
 
 func TestLecAPIImageSettlementCountsPayloads(t *testing.T) {
@@ -295,6 +460,9 @@ func TestLecAPIChargesThePublishedBillingUnit(t *testing.T) {
 		{"wan-3-0-h2", map[string]any{"prompt": "boat", "duration": 12, "resolution": "720p"}, 3.6},
 		{"aj-wan-3-0", map[string]any{"prompt": "boat", "duration": 7, "resolution": "1080p"}, 5.124},
 		{"tinysnow-image-2", map[string]any{"prompt": "boat", "n": 3}, 0.18},
+		{"ac-image-2-5-flare", map[string]any{"prompt": "boat", "size": "3840x2160", "resolution": "4k"}, 0.12},
+		{"ac-image-2-5-flare", map[string]any{"prompt": "boat", "size": "3840x2160"}, 0.06},
+		{"nw-image-2", map[string]any{"prompt": "boat", "size": "1920x1080", "resolution": "2k", "quality": "high"}, 0.036},
 		{"vp-seedance-2-5-301010-49", map[string]any{"prompt": "boat", "duration": 7}, 6.6},
 		{"ms-minimax-h3", map[string]any{"prompt": "boat", "duration": 16, "resolution": "480p"}, 2.688},
 		{"ms-minimax-h3", map[string]any{"prompt": "boat", "duration": 16, "resolution": "768P"}, 3.84},
@@ -439,6 +607,8 @@ func (transport lecAPIFixtureTransport) RoundTrip(request *http.Request) (*http.
 func TestLecAPIHostReservesAndSettlesDefaultPricesWithoutSavedConfiguration(t *testing.T) {
 	plugin, found := jsplugin.DefaultRegistry.Get("lecapi")
 	require.True(t, found)
+	source, err := builtinplugins.Source("lecapi")
+	require.NoError(t, err)
 	require.NoError(t, i18n.Init())
 	saved := map[string]string{}
 	require.NoError(t, config.GlobalConfig.SaveToDB(func(key, value string) error { saved[key] = value; return nil }))
@@ -450,34 +620,75 @@ func TestLecAPIHostReservesAndSettlesDefaultPricesWithoutSavedConfiguration(t *t
 	client := service.GetHttpClient()
 	previousTransport := client.Transport
 	t.Cleanup(func() { client.Transport = previousTransport })
-	calls := 0
-	// The fixture transport never opens a socket or calls a vendor endpoint.
-	client.Transport = lecAPIFixtureTransport(func(request *http.Request) (*http.Response, error) {
-		calls++
-		assert.Equal(t, "https://lecapi-fixture.invalid/v1/images/generations", request.URL.String())
-		assert.Equal(t, "Bearer test-key", request.Header.Get("Authorization"))
-		var body map[string]any
-		require.NoError(t, common.DecodeJson(request.Body, &body))
-		assert.Equal(t, "lec-tinysnow-image-2", body["model"])
-		assert.Equal(t, float64(3), body["n"])
-		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"data":[{"url":"https://media.example/a.png"},{"url":"https://media.example/b.png"},{"revised_prompt":"two pictures"}]}`)), Request: request}, nil
-	})
-	c, _ := gin.CreateTestContext(httptest.NewRecorder())
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", nil)
-	c.Set("task_request", map[string]any{"model": "local-lecapi-alias", "prompt": "boat", "n": 3})
-	c.Set("model_mapping", `{"local-lecapi-alias":"tinysnow-image-2"}`)
-	c.Set(jsplugin.ContextKeyPinnedPlugin, jsplugin.PinnedPlugin{Plugin: plugin, Generation: jsplugin.DefaultRegistry.Generation()})
-	common.SetContextKey(c, constant.ContextKeyChannelType, constant.ChannelTypeTaskPlugin)
-	common.SetContextKey(c, constant.ContextKeyChannelBaseUrl, "https://lecapi-fixture.invalid")
-	common.SetContextKey(c, constant.ContextKeyChannelKey, "test-key")
-	reservation := &xogpuReservation{}
-	info := &relaycommon.RelayInfo{OriginModelName: "local-lecapi-alias", UserGroup: "default", UsingGroup: "default", Billing: reservation, TaskRelayInfo: &relaycommon.TaskRelayInfo{}}
-	result, taskErr := relay.RelayTaskSubmit(c, info)
-	require.Nil(t, taskErr, "%+v", taskErr)
-	require.NotNil(t, result)
-	assert.Equal(t, 1, calls)
-	assert.Equal(t, common.QuotaRound(0.18*common.QuotaPerUnit), reservation.held)
-	assert.Equal(t, common.QuotaRound(0.12*common.QuotaPerUnit), result.Quota)
-	assert.Equal(t, float64(2), info.TieredBillingSnapshot.UsageFacts["image_count"])
-	assert.Equal(t, "local-lecapi-alias", info.OriginModelName)
+	for _, tc := range []struct {
+		name      string
+		update    bool
+		current   bool
+		disable   bool
+		free      bool
+		unitPrice float64
+	}{
+		{name: "active version", unitPrice: 0.06},
+		{name: "updated after pinning", update: true, unitPrice: 0.06},
+		{name: "new request after update", update: true, current: true, unitPrice: 0.12},
+		{name: "disabled after pinning", disable: true, unitPrice: 0.06},
+		{name: "explicit free override after update", update: true, free: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pinned := jsplugin.PinnedPlugin{Plugin: plugin, Generation: jsplugin.DefaultRegistry.Generation()}
+			if tc.update {
+				updated := strings.Replace(source, "price * 1.2", "price * 2.4", 1)
+				updated = strings.Replace(updated, `version: "1.0.3"`, `version: "1.0.4"`, 1)
+				newPlugin, err := jsplugin.DefaultRegistry.Register(updated, jsplugin.Options{Key: "lecapi"})
+				require.NoError(t, err)
+				t.Cleanup(func() { require.NoError(t, jsplugin.DefaultRegistry.Unregister("lecapi")) })
+				if tc.current {
+					pinned = jsplugin.PinnedPlugin{Plugin: newPlugin, Generation: jsplugin.DefaultRegistry.Generation()}
+				}
+			}
+			if tc.disable {
+				enabled := jsplugin.DefaultRegistry.Enabled()
+				jsplugin.DefaultRegistry.SetEnabled(false)
+				t.Cleanup(func() { jsplugin.DefaultRegistry.SetEnabled(enabled) })
+			}
+			if tc.free {
+				require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{
+					"billing_setting.plugin_billing_expr": `{"lecapi::local-lecapi-alias":"tier(\"free\", u(\"image_count\") * 0)"}`,
+				}))
+				t.Cleanup(func() {
+					require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{"billing_setting.plugin_billing_expr": `{}`}))
+				})
+			}
+			calls := 0
+			// The fixture transport never opens a socket or calls a vendor endpoint.
+			client.Transport = lecAPIFixtureTransport(func(request *http.Request) (*http.Response, error) {
+				calls++
+				assert.Equal(t, "https://lecapi-fixture.invalid/v1/images/generations", request.URL.String())
+				assert.Equal(t, "Bearer test-key", request.Header.Get("Authorization"))
+				var body map[string]any
+				require.NoError(t, common.DecodeJson(request.Body, &body))
+				assert.Equal(t, "lec-tinysnow-image-2", body["model"])
+				assert.Equal(t, float64(3), body["n"])
+				return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"data":[{"url":"https://media.example/a.png"},{"url":"https://media.example/b.png"},{"revised_prompt":"two pictures"}]}`)), Request: request}, nil
+			})
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", nil)
+			c.Set("task_request", map[string]any{"model": "local-lecapi-alias", "prompt": "boat", "n": 3})
+			c.Set("model_mapping", `{"local-lecapi-alias":"tinysnow-image-2"}`)
+			c.Set(jsplugin.ContextKeyPinnedPlugin, pinned)
+			common.SetContextKey(c, constant.ContextKeyChannelType, constant.ChannelTypeTaskPlugin)
+			common.SetContextKey(c, constant.ContextKeyChannelBaseUrl, "https://lecapi-fixture.invalid")
+			common.SetContextKey(c, constant.ContextKeyChannelKey, "test-key")
+			reservation := &xogpuReservation{}
+			info := &relaycommon.RelayInfo{OriginModelName: "local-lecapi-alias", UserGroup: "default", UsingGroup: "default", Billing: reservation, TaskRelayInfo: &relaycommon.TaskRelayInfo{}}
+			result, taskErr := relay.RelayTaskSubmit(c, info)
+			require.Nil(t, taskErr, "%+v", taskErr)
+			require.NotNil(t, result)
+			assert.Equal(t, 1, calls)
+			assert.Equal(t, common.QuotaRound(tc.unitPrice*3*common.QuotaPerUnit), reservation.held)
+			assert.Equal(t, common.QuotaRound(tc.unitPrice*2*common.QuotaPerUnit), result.Quota)
+			assert.Equal(t, float64(2), info.TieredBillingSnapshot.UsageFacts["image_count"])
+			assert.Equal(t, "local-lecapi-alias", info.OriginModelName)
+		})
+	}
 }

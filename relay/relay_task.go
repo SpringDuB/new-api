@@ -259,7 +259,13 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (_ *TaskSubmit
 	if pinnedPlugin.Plugin != nil {
 		pluginKey = pinnedPlugin.Plugin.Meta.Key
 	}
-	exprStr, exists := billing_setting.ResolveTaskBillingExpr(pluginKey, modelName, info.UpstreamModelName)
+	var exprStr string
+	var exists bool
+	if provider, ok := adaptor.(channel.TaskBillingExpressionProvider); ok {
+		exprStr, exists = provider.ResolveBillingExpression(modelName, info.UpstreamModelName)
+	} else {
+		exprStr, exists = billing_setting.ResolveTaskBillingExpr(pluginKey, modelName, info.UpstreamModelName)
+	}
 	useTiered := exists || billing_setting.GetBillingMode(modelName) == billing_setting.BillingModeTieredExpr
 	if useTiered {
 		provider, supported := adaptor.(channel.TaskUsageFactsProvider)

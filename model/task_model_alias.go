@@ -148,7 +148,7 @@ func buildTaskAliasView(generation *jsplugin.RoutingGeneration) *taskAliasView {
 			if _, declared := generation.CanonicalModel(alias); declared {
 				continue
 			}
-			tail, cyclic := followChannelModelMapping(modelMap, alias)
+			tail, cyclic := FollowChannelModelMapping(modelMap, alias)
 			if cyclic {
 				common.SysError(common.LogText("task alias mapping cycle dropped: channel=%d key=%q", channel.Id, alias))
 				continue
@@ -210,10 +210,10 @@ func buildTaskAliasView(generation *jsplugin.RoutingGeneration) *taskAliasView {
 	return view
 }
 
-// followChannelModelMapping walks one channel's mapping the same way
+// FollowChannelModelMapping walks one channel's mapping the same way
 // ModelMappedHelper does: visited-set cycle detection, self-map stops at
 // the current hop, a non-self cycle is reported to the caller.
-func followChannelModelMapping(modelMap map[string]string, start string) (string, bool) {
+func FollowChannelModelMapping(modelMap map[string]string, start string) (string, bool) {
 	current := start
 	visited := map[string]bool{current: true}
 	for {
