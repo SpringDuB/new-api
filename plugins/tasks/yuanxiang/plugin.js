@@ -3,7 +3,7 @@
 const SD25_STABLE_CHANNEL = "route:stable";
 const VIDEO_MODELS = {
   "SD 2.5 · 官方直连（满血版）按秒": { seconds: 5, resolution: "720p" },
-  "SD 2.0 满血版 按秒": { seconds: 5, resolution: "720p", version: "标准" },
+  "SD 2.0 满血版 按秒": { seconds: 5, resolution: "720p" },
   "SD 2.5 · 特价按次": { seconds: 5, resolution: "1080p", channel: SD25_STABLE_CHANNEL },
   "Sd 2.0 · 特价按次 · 漫剧短剧专线": { seconds: 5, resolution: "720p" },
   "SD 2.0 · 特价按次 · 电商专线": { seconds: 5, resolution: "720p", quality: "真人模特" },
@@ -58,7 +58,7 @@ export const meta = {
   name: "Yuanxiang AI",
   icon: "text:YX",
   description: { en: "Yuanxiang video and image generation with canvas parameter mapping and configurable reference video pricing", zh: "元象视频与图片生成，支持画布参数映射和可选参考视频计费" },
-  version: "1.0.7",
+  version: "1.0.8",
   author: { name: "QuantumNous" },
   website: "https://yuanxiangai.cc/api-docs",
   baseUrl: "https://yuanxiangai.cc",

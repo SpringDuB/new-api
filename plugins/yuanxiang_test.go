@@ -93,7 +93,18 @@ func TestYuanxiangModelFamiliesAndImageProtocol(t *testing.T) {
 	for _, model := range videoModels {
 		t.Run(model, func(t *testing.T) {
 			ctx := yuanxiangContext(model+"-YX", map[string]any{"prompt": "A boat"})
-			assert.Equal(t, model, yuanxiangHook(t, plugin, "buildSubmitRequest", ctx)["body"].(map[string]any)["model"])
+			for _, upstream := range []string{"vendor", "new_api"} {
+				ctx["upstream"] = map[string]any{"kind": upstream}
+				body := yuanxiangHook(t, plugin, "buildSubmitRequest", ctx)["body"].(map[string]any)
+				wantModel := model
+				if upstream == "new_api" {
+					wantModel += "-YX"
+				}
+				assert.Equal(t, wantModel, body["model"])
+				options, _ := body["options"].(map[string]any)
+				assert.NotContains(t, options, "version", "use the platform's default model version on %s", upstream)
+				assert.NotContains(t, body, "version")
+			}
 			schema, _ := plugin.Meta.UsageForModels(model + "-YX")
 			assert.Equal(t, []string{"duration_tier", "reference_seconds", "requests", "resolution", "seconds", "tokens", "video_input"}, slices.Sorted(maps.Keys(schema)))
 		})
