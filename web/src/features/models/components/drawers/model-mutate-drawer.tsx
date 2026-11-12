@@ -168,9 +168,10 @@ export function ModelMutateDrawer(props: {
       ? `metadata:${currentRow.id}`
       : `channel:${currentRow?.model_name ?? ''}`
     if (loadedKey.current === key || (isEditing && !modelQuery.data)) return
+    const metadata = isEditing ? modelQuery.data : currentRow
     form.reset(
-      isEditing && modelQuery.data
-        ? transformModelToFormDefaults(modelQuery.data)
+      metadata
+        ? transformModelToFormDefaults(metadata)
         : {
             ...MODEL_FORM_DEFAULT_VALUES,
             model_name: currentRow?.model_name ?? '',

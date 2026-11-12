@@ -99,6 +99,7 @@ import {
   createInitialLaneState,
   createModelPricingSchema,
   hasValue,
+  inheritedTaskPricing,
   laneConfigs,
   ratioFieldByLane,
   toNumberOrNull,
@@ -226,6 +227,7 @@ export const ModelPricingEditorPanel = forwardRef<
     ...EMPTY_LANE_ENABLED,
   })
   const [billingExpr, setBillingExpr] = useState(DEFAULT_TOKEN_BILLING_EXPR)
+  const [modelPricingEdited, setModelPricingEdited] = useState(false)
   const [conversionReason, setConversionReason] = useState('')
   const [wasConverted, setWasConverted] = useState(false)
   const conversionGeneration = useRef(0)
@@ -258,12 +260,32 @@ export const ModelPricingEditorPanel = forwardRef<
       editData.audioCompletionRatio,
     ].some(hasValue)
   let initialPricingMode: PricingMode = 'tiered_expr'
-  if (editData?.billingMode !== 'tiered_expr' && hasLegacyPricing) {
+  if (
+    editData?.billingMode !== 'tiered_expr' &&
+    (hasLegacyPricing || editData?.inheritModelPricing === false)
+  ) {
     initialPricingMode = hasValue(editData?.price) ? 'per-request' : 'per-token'
   }
+  const hasPluginInheritedPricing = Boolean(
+    pluginVariants?.some(
+      (variant) =>
+        !variant.stale &&
+        (variant.default_expr ||
+          variant.mapped_provider_expr ||
+          variant.mapped_model_expr)
+    )
+  )
+  const initiallyInheritsPluginPricing =
+    hasPluginInheritedPricing &&
+    (editData?.inheritModelPricing ??
+      (editData?.billingMode !== 'tiered_expr' &&
+        !editData?.billingExpr?.trim() &&
+        !hasLegacyPricing))
   const initialBillingExpr =
     editData?.billingExpr ||
-    (initialPricingMode === 'tiered_expr' ? DEFAULT_TOKEN_BILLING_EXPR : '')
+    (initialPricingMode === 'tiered_expr' && !initiallyInheritsPluginPricing
+      ? DEFAULT_TOKEN_BILLING_EXPR
+      : '')
   const { models: pricingModels } = usePricingData()
 
   const form = useForm<ModelPricingFormValues>({
@@ -338,26 +360,46 @@ export const ModelPricingEditorPanel = forwardRef<
   const usesTaskPricing =
     ordinaryPricingModel !== watchedValues.name &&
     usesTaskModelPricing(editData, taskUsageSchema, pluginVariants)
+  const firstPluginVariant = pluginVariants?.find((variant) => !variant.stale)
+  const inheritedTaskDefault = firstPluginVariant
+    ? inheritedTaskPricing(firstPluginVariant, undefined, '')
+    : undefined
   const defaultTaskBillingExpr = useMemo(
     () =>
-      taskUsageSchema
+      inheritedTaskDefault?.expression ||
+      (taskUsageSchema
         ? generateTaskExprFromConfig(
             createDefaultTaskVisualConfig(taskUsageSchema),
             taskUsageSchema
           )
-        : '',
-    [taskUsageSchema]
+        : ''),
+    [inheritedTaskDefault?.expression, taskUsageSchema]
   )
+  const inheritsPluginPricing =
+    initiallyInheritsPluginPricing &&
+    pricingMode === 'tiered_expr' &&
+    usesTaskPricing &&
+    !modelPricingEdited
+  let modelBillingMode: 'ratio' | 'tiered_expr' | undefined
+  if (!inheritsPluginPricing) {
+    modelBillingMode = pricingMode === 'tiered_expr' ? 'tiered_expr' : 'ratio'
+  }
   const resolvedBillingExpr =
     usesTaskPricing &&
     taskUsageSchema &&
-    (!billingExpr || billingExpr === DEFAULT_TOKEN_BILLING_EXPR)
+    (inheritsPluginPricing ||
+      (!hasPluginInheritedPricing &&
+        !modelPricingEdited &&
+        (!billingExpr ||
+          (billingExpr === DEFAULT_TOKEN_BILLING_EXPR &&
+            !editData?.billingExpr))))
       ? defaultTaskBillingExpr
       : billingExpr
 
   useEffect(() => {
     conversionGeneration.current += 1
     setConversionReason('')
+    setModelPricingEdited(false)
     setPluginExpressions(editData?.pluginBillingExpr ?? {})
     setOrdinaryPricingModel(null)
     setWasConverted(false)
@@ -392,7 +434,7 @@ export const ModelPricingEditorPanel = forwardRef<
         audioCompletionRatio: '',
       })
       setPricingMode('tiered_expr')
-      setBillingExpr(DEFAULT_TOKEN_BILLING_EXPR)
+      setBillingExpr(initialBillingExpr)
       setRequestRuleExpr('')
     }
 
@@ -406,6 +448,7 @@ export const ModelPricingEditorPanel = forwardRef<
   useEffect(() => {
     if (!editData) return
     if (editData.billingMode === 'tiered_expr') return
+    if (editData.inheritModelPricing === false) return
     if (editData.price || editData.ratio) return
 
     const schema = taskUsageSchema
@@ -419,6 +462,7 @@ export const ModelPricingEditorPanel = forwardRef<
   useEffect(() => {
     onDirtyChange?.(
       form.formState.isDirty ||
+        (initiallyInheritsPluginPricing && modelPricingEdited) ||
         pricingMode !== initialPricingMode ||
         billingExpr !== initialBillingExpr ||
         requestRuleExpr !== (editData?.requestRuleExpr ?? '') ||
@@ -434,7 +478,20 @@ export const ModelPricingEditorPanel = forwardRef<
     initialPricingMode,
     initialBillingExpr,
     pluginExpressions,
+    initiallyInheritsPluginPricing,
+    modelPricingEdited,
   ])
+
+  const handleBillingExprChange = useCallback((value: string) => {
+    setModelPricingEdited(true)
+    setBillingExpr(value)
+  }, [])
+
+  const handleRequestRuleExprChange = (value: string) => {
+    if (inheritsPluginPricing) setBillingExpr(resolvedBillingExpr)
+    setModelPricingEdited(true)
+    setRequestRuleExpr(value)
+  }
 
   const setFormValue = (field: keyof ModelPricingFormValues, value: string) => {
     form.setValue(field, value, {
@@ -549,6 +606,7 @@ export const ModelPricingEditorPanel = forwardRef<
   const handleModeChange = (value: string) => {
     conversionGeneration.current += 1
     setConversionReason('')
+    setModelPricingEdited(true)
     const nextMode = value as PricingMode
     setPricingMode(nextMode)
     if (nextMode === 'tiered_expr' && !billingExpr) {
@@ -693,6 +751,7 @@ export const ModelPricingEditorPanel = forwardRef<
         Object.keys(pluginExpressions).length
           ? { pluginBillingExpr: pluginExpressions }
           : {}),
+        ...(inheritsPluginPricing ? { inheritModelPricing: true } : {}),
         billingMode: pricingMode,
         price: values.price || '',
         ratio: values.ratio || '',
@@ -704,7 +763,7 @@ export const ModelPricingEditorPanel = forwardRef<
         audioCompletionRatio: values.audioCompletionRatio || '',
       }
 
-      if (pricingMode === 'tiered_expr') {
+      if (pricingMode === 'tiered_expr' && !inheritsPluginPricing) {
         data.billingExpr = resolvedBillingExpr
         data.requestRuleExpr = requestRuleExpr
       }
@@ -718,6 +777,7 @@ export const ModelPricingEditorPanel = forwardRef<
       pluginExpressions,
       editData,
       pluginVariants,
+      inheritsPluginPricing,
     ]
   )
 
@@ -824,12 +884,18 @@ export const ModelPricingEditorPanel = forwardRef<
       const next = { ...current }
       for (const variant of pluginVariants ?? []) {
         if (!variant.stale && !Object.hasOwn(next, variant.plugin_key)) {
-          next[variant.plugin_key] = inheritedExpression
+          const { expression } = inheritedTaskPricing(
+            variant,
+            modelBillingMode,
+            inheritedExpression
+          )
+          if (expression) next[variant.plugin_key] = expression
         }
       }
       return next
     })
     setOrdinaryPricingModel(watchedValues.name)
+    setModelPricingEdited(true)
     setPricingMode('tiered_expr')
     setBillingExpr(
       taskUsageSchema?.image_count?.unit === 'count'
@@ -849,8 +915,8 @@ export const ModelPricingEditorPanel = forwardRef<
         requestRuleExpr={requestRuleExpr}
         usageSchema={taskUsageSchema}
         usageExamples={taskUsageExamples}
-        onBillingExprChange={setBillingExpr}
-        onRequestRuleExprChange={setRequestRuleExpr}
+        onBillingExprChange={handleBillingExprChange}
+        onRequestRuleExprChange={handleRequestRuleExprChange}
       />
     ) : (
       <TieredPricingEditor
@@ -859,8 +925,8 @@ export const ModelPricingEditorPanel = forwardRef<
         modelName={watchedValues.name}
         billingExpr={billingExpr}
         requestRuleExpr={requestRuleExpr}
-        onBillingExprChange={setBillingExpr}
-        onRequestRuleExprChange={setRequestRuleExpr}
+        onBillingExprChange={handleBillingExprChange}
+        onRequestRuleExprChange={handleRequestRuleExprChange}
       />
     )
 
@@ -949,13 +1015,12 @@ export const ModelPricingEditorPanel = forwardRef<
                   variants={pluginVariants ?? []}
                   expressions={pluginExpressions}
                   onChange={setPluginExpressions}
-                  modelExpression={combineBillingExpr(
-                    resolvedBillingExpr,
-                    requestRuleExpr
-                  )}
-                  modelBillingMode={
-                    pricingMode === 'tiered_expr' ? 'tiered_expr' : 'ratio'
+                  modelExpression={
+                    inheritsPluginPricing
+                      ? ''
+                      : combineBillingExpr(resolvedBillingExpr, requestRuleExpr)
                   }
+                  modelBillingMode={modelBillingMode}
                   currency={currency}
                   ordinaryPricing={!usesTaskPricing}
                   onConfigureOrdinaryPricing={configureOrdinaryPricing}
@@ -1174,6 +1239,15 @@ export const ModelPricingEditorPanel = forwardRef<
 
                     <TabsContent value='tiered_expr' className='pt-0'>
                       <FieldGroup className='gap-5'>
+                        {inheritsPluginPricing && (
+                          <Alert>
+                            <AlertDescription>
+                              {inheritedTaskDefault?.source === 'plugin'
+                                ? t('Using plugin default pricing')
+                                : t('Use model-level expression')}
+                            </AlertDescription>
+                          </Alert>
+                        )}
                         {expressionEditor}
                       </FieldGroup>
                     </TabsContent>

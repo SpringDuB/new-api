@@ -67,6 +67,7 @@ import {
 import {
   buildModelSnapshots,
   getSnapshotSignature,
+  hasPricingValue,
   isBasePricingUnset,
   type ModelRow,
 } from './model-pricing-snapshots'
@@ -363,6 +364,10 @@ const ModelRatioVisualEditorComponent = forwardRef<
   const handleEdit = useCallback(
     (model: ModelRow) => {
       const editableModel = model.draft ?? model.saved ?? model
+      const billingModeMap = safeJsonParse<Record<string, string>>(
+        billingMode,
+        { fallback: {}, silent: true }
+      )
       let editBillingMode: PricingMode = 'per-token'
       if (editableModel.billingMode === 'tiered_expr') {
         editBillingMode = 'tiered_expr'
@@ -380,6 +385,10 @@ const ModelRatioVisualEditorComponent = forwardRef<
         audioRatio: editableModel.audioRatio,
         audioCompletionRatio: editableModel.audioCompletionRatio,
         billingMode: editBillingMode,
+        inheritModelPricing:
+          !Object.hasOwn(billingModeMap, editableModel.name) &&
+          !hasPricingValue(editableModel.price) &&
+          !hasPricingValue(editableModel.ratio),
         billingExpr: editableModel.billingExpr,
         pluginBillingExpr: editableModel.pluginBillingExpr,
         requestRuleExpr: editableModel.requestRuleExpr,
@@ -387,7 +396,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
       setEditorOpen(true)
       if (isMobile) setSheetOpen(true)
     },
-    [isMobile]
+    [billingMode, isMobile]
   )
 
   const handleAdd = useCallback(() => {

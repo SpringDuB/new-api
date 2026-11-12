@@ -393,8 +393,8 @@ export const TaskUsagePricingEditor = memo(function TaskUsagePricingEditor(
   const handleRawChange = (value: string) => {
     setRawExpr(value)
     const split = splitBillingExprAndRequestRules(value)
-    props.onBillingExprChange(split.billingExpr)
     props.onRequestRuleExprChange(split.requestRuleExpr)
+    props.onBillingExprChange(split.billingExpr)
   }
 
   const rawSplit = splitBillingExprAndRequestRules(rawExpr)
@@ -427,13 +427,13 @@ export const TaskUsagePricingEditor = memo(function TaskUsagePricingEditor(
         )
         .map(([field]) => field)
     )
+    props.onRequestRuleExprChange(rawMatrix ? rawSplit.requestRuleExpr : '')
     props.onBillingExprChange(
       generateTaskExprFromConfig(
         { tiers: taskMatrixToTiers({ rows: nextRows }, props.usageSchema) },
         props.usageSchema
       )
     )
-    props.onRequestRuleExprChange(rawMatrix ? rawSplit.requestRuleExpr : '')
     setConfirmVisualSwitch(false)
     setEditorMode('visual')
   }

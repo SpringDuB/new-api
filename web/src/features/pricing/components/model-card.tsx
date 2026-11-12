@@ -198,7 +198,7 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
               (entry) => entry.formattedRange
             ) && (
               <span className='text-muted-foreground col-span-full text-xs break-words'>
-                ({dynamicSummary.tier.label})
+                {t('{{count}} tiers', { count: dynamicSummary.tierCount })}
               </span>
             )}
         </>

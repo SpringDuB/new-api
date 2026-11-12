@@ -7030,6 +7030,7 @@
     "Users only see groups marked as user selectable. Non-selectable groups can still be assigned by administrators.": "Les utilisateurs ne voient que les groupes marqués comme sélectionnables. Les groupes non sélectionnables peuvent toujours être attribués par les administrateurs.",
     "uses": "utilisations",
     "Using built-in or default pricing": "Tarifs intégrés ou par défaut",
+    "Using plugin default pricing": "Tarification par défaut du plugin",
     "Using the complete global Auto order ({{count}} groups)": "Utilisation de l’ordre Auto global complet ({{count}} groupes)",
     "v{{installed}} is installed but this source does not list it. Installing replaces it with v{{target}}.": "La version v{{installed}} est installée mais absente de cette source. L’installation la remplacera par v{{target}}.",
     "Validity": "Validité",

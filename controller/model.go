@@ -249,6 +249,8 @@ func ListModels(c *gin.Context, modelType int) {
 		}
 	}
 	models := service.GetGroupsEnabledModels(ownerGroups)
+	var taskModelChannels map[string][]*model.Channel
+	taskChannelsLoaded := false
 	for _, modelName := range models {
 		if modelLimitEnable {
 			matchingName := ratio_setting.RoutingMatchModelName(modelName)
@@ -257,7 +259,16 @@ func ListModels(c *gin.Context, modelType int) {
 			}
 		}
 		if !acceptUnsetRatioModel && !helper.HasModelBillingConfig(modelName) {
-			continue
+			if !taskChannelsLoaded {
+				taskChannelsLoaded = true
+				taskModelChannels, err = model.GetEnabledModelChannels(ownerGroups, models)
+				if err != nil {
+					common.SysError(common.LogText("load task model channels: %s", err.Error()))
+				}
+			}
+			if !helper.HasTaskModelBillingConfig(modelName, taskModelChannels[modelName]) {
+				continue
+			}
 		}
 		userModelNames = append(userModelNames, modelName)
 	}

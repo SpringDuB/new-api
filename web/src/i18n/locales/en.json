@@ -7030,6 +7030,7 @@
     "Users only see groups marked as user selectable. Non-selectable groups can still be assigned by administrators.": "Users only see groups marked as user selectable. Non-selectable groups can still be assigned by administrators.",
     "uses": "uses",
     "Using built-in or default pricing": "Using built-in or default pricing",
+    "Using plugin default pricing": "Using plugin default pricing",
     "Using the complete global Auto order ({{count}} groups)": "Using the complete global Auto order ({{count}} groups)",
     "v{{installed}} is installed but this source does not list it. Installing replaces it with v{{target}}.": "v{{installed}} is installed but this source does not list it. Installing replaces it with v{{target}}.",
     "Validity": "Validity",

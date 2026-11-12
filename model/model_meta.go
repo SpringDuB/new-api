@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/pkg/jsplugin"
 
 	"gorm.io/gorm"
 )
@@ -56,6 +57,7 @@ type Model struct {
 	MatchedCount  int      `json:"matched_count,omitempty" gorm:"-"`
 
 	HasMetadata            bool             `json:"has_metadata" gorm:"-"`
+	VendorName             string           `json:"vendor_name,omitempty" gorm:"-"`
 	ConfiguredChannelCount int              `json:"configured_channel_count" gorm:"-"`
 	SquareState            ModelSquareState `json:"square_state" gorm:"-"`
 }
@@ -76,7 +78,7 @@ func (mi *Model) MatchesName(name string) bool {
 
 // resolveModelMetadata preserves catalog precedence: exact, prefix, suffix,
 // then contains. The first matching record within a rule type wins.
-func resolveModelMetadata(records []Model, names []string) map[string]*Model {
+func resolveModelMetadata(records []Model, names []string, vendors map[int]*Vendor) map[string]*Model {
 	resolved := make(map[string]*Model)
 	for i := range records {
 		if records[i].NameRule == NameRuleExact {
@@ -96,7 +98,54 @@ func resolveModelMetadata(records []Model, names []string) map[string]*Model {
 			}
 		}
 	}
+	generation := jsplugin.DefaultRegistry.Generation()
+	for _, name := range names {
+		if _, exists := resolved[name]; exists {
+			continue
+		}
+		defaults, exists := taskPluginModelDefaults(generation, name)
+		if !exists {
+			continue
+		}
+		language := common.DefaultLanguage
+		if language == "" {
+			language = "zh"
+		}
+		description := defaults.Description[language]
+		if description == "" {
+			primary, _, _ := strings.Cut(language, "-")
+			description = defaults.Description[primary]
+		}
+		if description == "" {
+			description = defaults.Description["en"]
+		}
+		vendorID := 0
+		if vendors != nil && defaults.Vendor != "" {
+			vendorID = getDisplayVendor(defaults.Vendor, vendors)
+		}
+		resolved[name] = &Model{ModelName: name, Description: description, Icon: defaults.Icon, VendorID: vendorID, VendorName: defaults.Vendor,
+			Tags: strings.Join(defaults.Tags, ","), Status: 1, NameRule: NameRuleExact}
+	}
 	return resolved
+}
+
+// taskPluginModelDefaults uses the same declared target as task usage metadata;
+// ambiguous aliases have no defaults. Administrator model records are resolved
+// before this fallback and retain their complete metadata and visibility policy.
+func taskPluginModelDefaults(generation *jsplugin.RoutingGeneration, name string) (jsplugin.ModelDefaults, bool) {
+	plugins := generation.PluginsByModel(name)
+	if len(plugins) == 0 {
+		if target, exists := ResolveTaskModelAlias(generation, name); exists && target.Declared != "" {
+			name = target.Declared
+			plugins = generation.PluginsByModel(name)
+		}
+	}
+	for _, plugin := range plugins {
+		if defaults, exists := plugin.Meta.DefaultsForModel(name); exists {
+			return defaults, true
+		}
+	}
+	return jsplugin.ModelDefaults{}, false
 }
 
 // FillModelSquareStates applies the same metadata policy as the public catalog
@@ -119,7 +168,7 @@ func FillModelSquareStates(rows []*Model, configured map[string][]int, connectio
 	for name := range nameSet {
 		names = append(names, name)
 	}
-	resolved := resolveModelMetadata(metadata, names)
+	resolved := resolveModelMetadata(metadata, names, nil)
 	available := make(map[string]bool)
 	for _, connection := range connections {
 		available[connection.Model] = true
@@ -196,17 +245,19 @@ func SearchModelsWithChannels(keyword, vendor, status, syncOfficial string, offs
 	}
 	_, filterStatus := parseModelStatusFilter(status)
 	_, filterSync := parseModelSyncFilter(syncOfficial)
-	if !filterStatus && !filterSync && (vendor == "" || vendor == "0") {
+	if !filterStatus && !filterSync {
 		configured, err := GetConfiguredModelChannels()
 		if err != nil {
 			return nil, 0, err
 		}
-		var exactNames []string
-		if err := DB.Model(&Model{}).Where("name_rule = ?", NameRuleExact).Pluck("model_name", &exactNames).Error; err != nil {
+		var metadata []Model
+		if err := DB.Find(&metadata).Error; err != nil {
 			return nil, 0, err
 		}
-		for _, name := range exactNames {
-			delete(configured, name)
+		for _, record := range metadata {
+			if record.NameRule == NameRuleExact {
+				delete(configured, record.ModelName)
+			}
 		}
 		names := make([]string, 0, len(configured))
 		for name := range configured {
@@ -215,8 +266,37 @@ func SearchModelsWithChannels(keyword, vendor, status, syncOfficial string, offs
 			}
 		}
 		sort.Strings(names)
+		var vendors []Vendor
+		if err := DB.Find(&vendors).Error; err != nil {
+			return nil, 0, err
+		}
+		vendorMap := make(map[int]*Vendor, len(vendors))
+		for i := range vendors {
+			vendorMap[vendors[i].Id] = &vendors[i]
+		}
+		defaults := resolveModelMetadata(metadata, names, vendorMap)
 		for _, name := range names {
-			records = append(records, &Model{ModelName: name, NameRule: NameRuleExact})
+			synthetic := Model{ModelName: name, NameRule: NameRuleExact}
+			if metadata := defaults[name]; metadata != nil {
+				synthetic = *metadata
+				synthetic.Id, synthetic.ModelName, synthetic.NameRule = 0, name, NameRuleExact
+			}
+			if vendor != "" {
+				if vendorID, err := strconv.Atoi(vendor); err == nil {
+					if synthetic.VendorID != vendorID {
+						continue
+					}
+				} else {
+					vendorName := synthetic.VendorName
+					if matched := vendorMap[synthetic.VendorID]; matched != nil {
+						vendorName = matched.Name
+					}
+					if !strings.Contains(strings.ToLower(vendorName), strings.ToLower(vendor)) {
+						continue
+					}
+				}
+			}
+			records = append(records, &synthetic)
 		}
 	}
 	total := len(records)

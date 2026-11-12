@@ -12,6 +12,7 @@
     "author": {"type": "object", "required": ["name"], "additionalProperties": false, "properties": {"name": {"type": "string"}, "url": {"type": "string", "format": "uri"}}},
     "baseUrl": {"type": "string", "format": "uri", "pattern": "^https?://", "maxLength": 191},
     "channelTypes": {"type": "array", "uniqueItems": true, "items": {"type": "integer", "minimum": 1}}, "models": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "modelDefaults": {"type": "object", "additionalProperties": {"$ref": "#/$defs/modelDefaults"}, "description": "Runtime model metadata and task price fallbacks keyed by exact names from models. Administrator configuration takes precedence; the host validates model membership."},
     "fetchMode": {"enum": ["per_task", "batch"]}, "allowedHosts": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
     "upstreams": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/upstreamKind"}, "description": "Upstream kinds the driver addresses. vendor is implied; new_api makes the plugin bindable to type-60 New API channels."},
     "protocols": {"type": "array", "uniqueItems": true, "items": {"oneOf": [
@@ -25,6 +26,18 @@
   },
   "allOf": [{"if": {"required": ["requiredCapabilities"], "properties": {"requiredCapabilities": {"contains": {"const": "submit-sse-delta@1"}}}}, "then": {"required": ["submitResponseTypes"], "properties": {"submitResponseTypes": {"contains": {"const": "sse"}}}}}],
   "$defs": {
+    "modelDefaults": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "displayName": {"type": "string", "maxLength": 128},
+        "vendor": {"type": "string", "maxLength": 128, "description": "Model manufacturer name. Matches existing vendors case-insensitively; does not create database records or replace administrator model metadata."},
+        "description": {"allOf": [{"$ref": "#/$defs/localizedText"}, {"if": {"type": "string"}, "then": {"maxLength": 4096}, "else": {"additionalProperties": {"maxLength": 4096}}}]},
+        "icon": {"type": "string", "maxLength": 128},
+        "tags": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 64}, "description": "Trimmed, unique, control-free tags. The host limits their comma-joined UTF-8 encoding to 255 bytes."},
+        "billingExpr": {"type": "string", "maxLength": 65536, "description": "Self-contained task billing expression following host monetary and quota semantics. The host enforces 64 KiB in UTF-8, selected usage-schema compatibility, no fixed(), and finite non-negative sample results. Empty means no default price."}
+      }
+    },
     "fileUploadRequest": {
       "type": "object", "additionalProperties": false, "required": ["url", "fileRef"],
       "properties": {

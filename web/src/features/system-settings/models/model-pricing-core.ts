@@ -67,6 +67,7 @@ export type LaneKey =
   | 'audioOutput'
 
 export type ModelRatioData = {
+  inheritModelPricing?: boolean
   pluginBillingExpr?: Record<string, string>
   name: string
   price?: string
@@ -80,6 +81,26 @@ export type ModelRatioData = {
   billingMode?: PricingMode
   billingExpr?: string
   requestRuleExpr?: string
+}
+
+export function inheritedTaskPricing(
+  variant: ModelPricingPluginVariant,
+  billingMode: 'ratio' | 'tiered_expr' | undefined,
+  modelExpression: string
+): { expression: string; source: 'provider' | 'model' | 'plugin' | 'legacy' } {
+  if (variant.mapped_provider_expr !== undefined) {
+    return { expression: variant.mapped_provider_expr, source: 'provider' }
+  }
+  if (billingMode === 'tiered_expr') {
+    return { expression: modelExpression, source: 'model' }
+  }
+  if (variant.mapped_model_expr !== undefined) {
+    return { expression: variant.mapped_model_expr, source: 'model' }
+  }
+  if (billingMode === undefined && variant.default_expr !== undefined) {
+    return { expression: variant.default_expr, source: 'plugin' }
+  }
+  return { expression: '', source: 'legacy' }
 }
 
 export function usesTaskModelPricing(

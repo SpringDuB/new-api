@@ -379,7 +379,8 @@ export function DynamicPricingBreakdown({
             tiers.some(
               (tier) =>
                 isTaskBreakdownTier(tier) &&
-                Number(tier.unitPrices[field] || 0) > 0
+                Number.isFinite(tier.unitPrices[field]) &&
+                tier.unitPrices[field] >= 0
             )
         )
         .sort(([left], [right]) => left.localeCompare(right))
@@ -558,9 +559,10 @@ export function DynamicPricingBreakdown({
                             )}
                           >
                             {value > 0 ||
-                            ((field.unit === 'request' ||
-                              field.unit === 'image') &&
-                              Number.isFinite(value))
+                            (value === 0 &&
+                              (field.labelKind === 'schema' ||
+                                field.unit === 'request' ||
+                                field.unit === 'image'))
                               ? formatBreakdownPrice(
                                   value,
                                   field,
@@ -675,8 +677,10 @@ export function DynamicPricingBreakdown({
                 cell: (tier: BreakdownTier) => {
                   const value = field.value(tier)
                   return value > 0 ||
-                    ((field.unit === 'request' || field.unit === 'image') &&
-                      Number.isFinite(value)) ? (
+                    (value === 0 &&
+                      (field.labelKind === 'schema' ||
+                        field.unit === 'request' ||
+                        field.unit === 'image')) ? (
                     <span className={cn(!compact && 'font-semibold')}>
                       {formatBreakdownPrice(
                         value,

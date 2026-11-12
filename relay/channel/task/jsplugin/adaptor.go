@@ -267,13 +267,17 @@ func (a *TaskAdaptor) ExtractUsageFacts(c *gin.Context, info *relaycommon.RelayI
 	return facts
 }
 
+func (a *TaskAdaptor) ResolveBillingExpression(model, mappedModel string) (string, bool) {
+	return billing_setting.ResolveTaskBillingExprForPlugin(a.plugin.Meta, model, mappedModel)
+}
+
 func (a *TaskAdaptor) ExtractUsageFactsValidated(c *gin.Context, info *relaycommon.RelayInfo) (map[string]any, error) {
 	if !a.hasHook(c.Request.Context(), "extractUsage") {
 		return nil, nil
 	}
 	usageContext := a.submitContext(c, info)
 	usageContext["usagePurpose"] = "facts"
-	expression, _ := billing_setting.ResolveTaskBillingExpr(a.plugin.Meta.Key, info.OriginModelName, info.UpstreamModelName)
+	expression, _ := a.ResolveBillingExpression(info.OriginModelName, info.UpstreamModelName)
 	usageContext["usageKeys"] = slices.Sorted(maps.Keys(billingexpr.UsedUsageKeys(expression)))
 	value, err := a.plugin.Engine.Call(mediaProbeContext(c.Request.Context(), c), "extractUsage", usageContext)
 	if err != nil {

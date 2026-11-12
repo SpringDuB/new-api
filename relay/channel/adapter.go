@@ -133,6 +133,12 @@ type TaskUsageFactsProvider interface {
 	ExtractUsageFacts(c *gin.Context, info *relaycommon.RelayInfo) map[string]any
 }
 
+// TaskBillingExpressionProvider resolves prices from the adaptor's executing
+// plugin version rather than a newer registry generation.
+type TaskBillingExpressionProvider interface {
+	ResolveBillingExpression(model, mappedModel string) (string, bool)
+}
+
 // TaskValidatedBillingProvider lets an adaptor reject invalid usage facts at
 // the existing estimate point, after model mapping and before quota
 // multiplication. Non-plugin task adaptors keep using EstimateBilling.

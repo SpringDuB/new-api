@@ -203,8 +203,6 @@ func updatePricing() {
 	for _, ability := range enableAbilities {
 		names = append(names, ability.Model)
 	}
-	metaMap := resolveModelMetadata(allMeta, names)
-
 	// 预加载供应商
 	var vendors []Vendor
 	_ = DB.Find(&vendors).Error
@@ -212,6 +210,7 @@ func updatePricing() {
 	for i := range vendors {
 		vendorMap[vendors[i].Id] = &vendors[i]
 	}
+	metaMap := resolveModelMetadata(allMeta, names, vendorMap)
 
 	// 初始化默认供应商映射
 	initDefaultVendorMapping(metaMap, vendorMap, enableAbilities)
@@ -397,20 +396,29 @@ func updatePricing() {
 			pricing.BillingUsageExamples = jsplugin.CloneUsageExamples(usageExamples)
 		}
 		providers := pluginGeneration.PluginsByModel(model)
+		if len(providers) == 0 && ok && plugin != nil {
+			providers = pluginGeneration.PluginsByModel(usageModel)
+		}
 		hasProviderOverride := false
 		for _, provider := range providers {
 			if _, configured := billing_setting.GetPluginBillingExpr(provider.Meta.Key, model); configured {
 				hasProviderOverride = true
 				break
 			}
+			if _, hasDefault := billing_setting.GetPluginDefaultBillingExpr(provider.Meta.Key, usageModel); hasDefault {
+				if _, configured := billing_setting.ResolveTaskBillingExpr(provider.Meta.Key, model, usageModel); configured {
+					hasProviderOverride = true
+					break
+				}
+			}
 		}
 		if hasProviderOverride || (len(providers) >= 2 && pricing.BillingMode == billing_setting.BillingModeTieredExpr) {
 			for _, provider := range providers {
-				schema, examples := provider.Meta.UsageForModel(model)
+				schema, examples := provider.Meta.UsageForModel(usageModel)
 				if schema == nil {
 					schema = map[string]jsplugin.UsageFieldSchema{}
 				}
-				expression, hasExpression := billing_setting.ResolveTaskBillingExpr(provider.Meta.Key, model, "")
+				expression, hasExpression := billing_setting.ResolveTaskBillingExpr(provider.Meta.Key, model, usageModel)
 				mode := billing_setting.BillingModeRatio
 				if hasExpression || billing_setting.GetBillingMode(model) == billing_setting.BillingModeTieredExpr {
 					mode = billing_setting.BillingModeTieredExpr

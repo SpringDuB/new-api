@@ -45,6 +45,7 @@ export interface Model {
   icon?: string
   tags?: string
   vendor_id?: number
+  vendor_name?: string
   endpoints?: string
   supported_endpoints?: string[]
   status: number

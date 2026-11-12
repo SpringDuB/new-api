@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
+	hostdto "github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
@@ -285,11 +287,53 @@ func HasModelBillingConfig(modelName string) bool {
 	if _, ok, _ := ratio_setting.GetModelRatio(modelName); ok {
 		return true
 	}
-	if billing_setting.GetBillingMode(modelName) != billing_setting.BillingModeTieredExpr {
-		return false
+	if billing_setting.GetBillingMode(modelName) == billing_setting.BillingModeTieredExpr {
+		if expr, ok := billing_setting.GetBillingExpr(modelName); ok && strings.TrimSpace(expr) != "" {
+			return true
+		}
 	}
-	expr, ok := billing_setting.GetBillingExpr(modelName)
-	return ok && strings.TrimSpace(expr) != ""
+	return false
+}
+
+// HasTaskModelBillingConfig only admits plugin prices through enabled channels
+// accessible to the caller; an installed plugin alone is not a usable route.
+func HasTaskModelBillingConfig(modelName string, channels []*model.Channel) bool {
+	generation := jsplugin.DefaultRegistry.Generation()
+	for _, channel := range channels {
+		if channel == nil || channel.Status != common.ChannelStatusEnabled {
+			continue
+		}
+		mappedModel := modelName
+		if raw := channel.GetModelMapping(); raw != "" && raw != "{}" {
+			var mapping map[string]string
+			if err := common.UnmarshalJsonStr(raw, &mapping); err != nil {
+				continue
+			}
+			var cycle bool
+			mappedModel, cycle = model.FollowChannelModelMapping(mapping, modelName)
+			if cycle {
+				continue
+			}
+		}
+		providers := generation.PluginsByModel(modelName)
+		if len(providers) == 0 {
+			providers = generation.PluginsByModel(mappedModel)
+		}
+		for _, provider := range providers {
+			matches, _ := model.ChannelSatisfiesFilters(channel, modelName, []hostdto.ChannelFilter{{
+				Kind: hostdto.FilterTaskPluginIdentity, TaskPluginKey: provider.Meta.Key, TaskPluginChannelTypes: provider.Meta.ChannelTypes,
+			}})
+			if !matches || (channel.Type == constant.ChannelTypeNewAPI && !provider.Meta.SupportsUpstream(jsplugin.UpstreamKindNewAPI)) {
+				continue
+			}
+			expression, ok := billing_setting.ResolveTaskBillingExprForPlugin(provider.Meta, modelName, mappedModel)
+			schema, _ := provider.Meta.UsageForModels(mappedModel, modelName)
+			if ok && billing_setting.TaskExprCompatible(expression, schema) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // HasPriceOrRatioEntry reports whether name has a configured price, ratio, or

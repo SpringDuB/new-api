@@ -67,6 +67,9 @@ var defaultVendorIcons = map[string]string{
 	"微软":         "AzureAI",
 	"Microsoft":  "AzureAI",
 	"Azure":      "AzureAI",
+	"Wan":        "AlibabaCloud.Color",
+	"ByteDance":  "Doubao.Color",
+	"Midjourney": "Midjourney",
 }
 
 // initDefaultVendorMapping 简化的默认供应商映射
@@ -134,6 +137,9 @@ var defaultVendorDisplayIDs = map[string]int{
 	"讯飞":         -1021,
 	"阿里巴巴":       -1022,
 	"零一万物":       -1023,
+	"Wan":        -1024,
+	"ByteDance":  -1025,
+	"Midjourney": -1026,
 }
 
 func getDisplayVendor(vendorName string, vendorMap map[int]*Vendor) int {
@@ -142,7 +148,13 @@ func getDisplayVendor(vendorName string, vendorMap map[int]*Vendor) int {
 			return id
 		}
 	}
-	id := defaultVendorDisplayIDs[vendorName]
+	id := 0
+	for name, displayID := range defaultVendorDisplayIDs {
+		if strings.EqualFold(name, vendorName) {
+			id, vendorName = displayID, name
+			break
+		}
+	}
 	if id == 0 {
 		return 0
 	}
