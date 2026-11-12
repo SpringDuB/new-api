@@ -209,17 +209,22 @@ export function pricingRow(
     ...row,
     name,
     billingMode,
+    inheritModelPricing:
+      values['billing_setting.billing_mode'] === undefined &&
+      values.ModelPrice === undefined &&
+      values.ModelRatio === undefined,
     pluginBillingExpr: values['billing_setting.plugin_billing_expr'],
   }
 }
 
 export function pricingFromDraft(data: ModelRatioData): PricingValues {
-  const values: PricingValues = {
-    ...(data.pluginBillingExpr === undefined
+  const values: PricingValues =
+    data.pluginBillingExpr === undefined
       ? {}
-      : { 'billing_setting.plugin_billing_expr': data.pluginBillingExpr }),
-    'billing_setting.billing_mode':
-      data.billingMode === 'tiered_expr' ? 'tiered_expr' : 'ratio',
+      : { 'billing_setting.plugin_billing_expr': data.pluginBillingExpr }
+  if (!data.inheritModelPricing) {
+    values['billing_setting.billing_mode'] =
+      data.billingMode === 'tiered_expr' ? 'tiered_expr' : 'ratio'
   }
   for (const [field, key] of Object.entries(pricingFieldMap)) {
     const value = data[field as keyof typeof pricingFieldMap]
@@ -237,7 +242,7 @@ export function pricingFromDraft(data: ModelRatioData): PricingValues {
       values[key] = number
     }
   }
-  if (data.billingMode === 'tiered_expr') {
+  if (data.billingMode === 'tiered_expr' && !data.inheritModelPricing) {
     values['billing_setting.billing_expr'] = combineBillingExpr(
       data.billingExpr || '',
       data.requestRuleExpr || ''

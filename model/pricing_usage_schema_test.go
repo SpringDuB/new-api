@@ -2,6 +2,7 @@ package model
 
 import (
 	"fmt"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -13,10 +14,314 @@ import (
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/config"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
+	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/driver/mysql"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
 )
+
+// Plugin defaults must work on every supported database without writing model
+// metadata or prices. Explicit administrator settings still own their values.
+func TestPluginModelDefaultsDatabaseMatrix(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			var driver gorm.Dialector
+			switch dialect {
+			case "sqlite":
+				driver = sqlite.Open(":memory:")
+			case "mysql":
+				dsn := os.Getenv("TEST_MYSQL_DSN")
+				if dsn == "" {
+					t.Skip("TEST_MYSQL_DSN is not configured")
+				}
+				driver = mysql.Open(dsn)
+			case "postgres":
+				dsn := os.Getenv("TEST_POSTGRES_DSN")
+				if dsn == "" {
+					t.Skip("TEST_POSTGRES_DSN is not configured")
+				}
+				driver = postgres.Open(dsn)
+			}
+			db, err := gorm.Open(driver, &gorm.Config{})
+			require.NoError(t, err)
+			sqlDB, err := db.DB()
+			require.NoError(t, err)
+			sqlDB.SetMaxOpenConns(1)
+			previousDB, previousType := DB, common.MainDatabaseType()
+			previousConfig := config.GlobalConfig.ExportAllConfigs()
+			previousPrice, previousRatio := ratio_setting.ModelPrice2JSONString(), ratio_setting.ModelRatio2JSONString()
+			previousLanguage, previousCache := common.DefaultLanguage, common.MemoryCacheEnabled
+			previousSelfUse := operation_setting.SelfUseModeEnabled
+			operation_setting.SelfUseModeEnabled = false
+			common.OptionMapRWMutex.Lock()
+			previousOptions := common.OptionMap
+			common.OptionMap = make(map[string]string)
+			common.OptionMapRWMutex.Unlock()
+			DB = db
+			common.SetMainDatabaseType(common.DatabaseType(dialect))
+			common.DefaultLanguage = "zh-CN"
+			common.MemoryCacheEnabled = true
+			initCol()
+			t.Cleanup(func() {
+				for _, key := range []string{"portable-defaults", "portable-second"} {
+					if _, exists := jsplugin.DefaultRegistry.Get(key); exists {
+						require.NoError(t, jsplugin.DefaultRegistry.Unregister(key))
+					}
+				}
+				require.NoError(t, db.Migrator().DropTable(&Ability{}, &Channel{}, &Model{}, &Vendor{}, &Option{}))
+				DB = previousDB
+				common.SetMainDatabaseType(previousType)
+				common.DefaultLanguage, common.MemoryCacheEnabled = previousLanguage, previousCache
+				operation_setting.SelfUseModeEnabled = previousSelfUse
+				common.OptionMapRWMutex.Lock()
+				common.OptionMap = previousOptions
+				common.OptionMapRWMutex.Unlock()
+				initCol()
+				require.NoError(t, config.GlobalConfig.LoadFromDB(previousConfig))
+				require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(previousPrice))
+				require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(previousRatio))
+				InitChannelCache()
+				InvalidatePricingCache()
+				require.NoError(t, sqlDB.Close())
+			})
+			require.NoError(t, db.AutoMigrate(&Channel{}, &Ability{}, &Model{}, &Vendor{}, &Option{}))
+			var version string
+			versionQuery := "SELECT version()"
+			if dialect == "sqlite" {
+				versionQuery = "SELECT sqlite_version()"
+			}
+			require.NoError(t, db.Raw(versionQuery).Scan(&version).Error)
+			t.Logf("database version: %s", version)
+			require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(`{}`))
+			require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(`{}`))
+			require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{
+				"billing_setting.billing_mode": `{}`, "billing_setting.billing_expr": `{}`,
+				billing_setting.PluginBillingExprOption: `{}`,
+			}))
+			const source = `
+export const meta = {
+ apiVersion:1,key:"portable-defaults",name:"Portable defaults",version:"1.0.0",author:{name:"Test"},
+ models:["portable-video","portable-image"],fetchMode:"per_task",
+ usageSchema:{seconds:{type:"number",unit:"second"}},
+ usageProfiles:[{models:["portable-image"],schema:{image_count:{type:"number",unit:"count"}}}],
+ modelDefaults:{
+  "portable-video":{displayName:"Portable video",description:{en:"Video reference requirements",zh:"视频参考素材要求"},icon:"Doubao.Color",tags:["Video"],billingExpr:'tier("video", u("seconds") * 0.6)'},
+  "portable-image":{description:{en:"Image requirements",zh:"图片素材要求"},icon:"OpenAI.Color",tags:["Image"],billingExpr:'tier("image", u("image_count") * 0.12)'}
+ }
+};
+export function buildSubmitRequest(){return {};}
+export function parseSubmitResponse(){return {};}
+export function buildQueryRequest(){return {};}
+export function parseTaskResult(){return {};}
+`
+			_, err = jsplugin.DefaultRegistry.Register(source, jsplugin.Options{})
+			require.NoError(t, err)
+			mapping := `{"portable-alias":"portable-video"}`
+			channel := &Channel{Type: constant.ChannelTypeTaskPlugin, Status: 1, Name: "portable-defaults", Models: "portable-video,portable-image,portable-alias", ModelMapping: &mapping}
+			channel.SetSetting(dto.ChannelSettings{TaskPluginKey: "portable-defaults"})
+			require.NoError(t, db.Create(channel).Error)
+			for _, name := range channel.GetModels() {
+				insertPricingEndpointAbility(t, channel.Id, name)
+			}
+			InitChannelCache()
+			InvalidatePricingCache()
+			prices := pricingByModel(GetPricing())
+			assert.Equal(t, "视频参考素材要求", prices["portable-video"].Description)
+			assert.Equal(t, "Doubao.Color", prices["portable-video"].Icon)
+			assert.Equal(t, "Video", prices["portable-video"].Tags)
+			assert.Equal(t, "视频参考素材要求", prices["portable-alias"].Description)
+			for _, name := range []string{"portable-video", "portable-alias"} {
+				require.Len(t, prices[name].BillingPluginVariants, 1)
+				assert.Equal(t, `tier("video", u("seconds") * 0.6)`, prices[name].BillingPluginVariants[0].BillingExpr)
+			}
+			expression, exists := billing_setting.ResolveTaskBillingExpr("portable-defaults", "portable-alias", "portable-video")
+			require.True(t, exists)
+			assert.Equal(t, `tier("video", u("seconds") * 0.6)`, expression)
+			assert.Equal(t, billing_setting.BillingModeRatio, billing_setting.GetBillingMode("portable-video"), "ordinary relays must not inherit plugin usage billing")
+			rows, _, err := SearchModelsWithChannels("portable-video", "", "", "", 0, 20)
+			require.NoError(t, err)
+			require.Len(t, rows, 1)
+			assert.Equal(t, "视频参考素材要求", rows[0].Description)
+			assert.Zero(t, rows[0].Id, "plugin metadata is an unsaved fallback")
+			snapshot, err := GetModelPricingSnapshot(nil)
+			require.NoError(t, err)
+			var imageEntry *ModelPricingEntry
+			for i := range snapshot.Entries {
+				if snapshot.Entries[i].ModelName == "portable-image" {
+					imageEntry = &snapshot.Entries[i]
+				}
+			}
+			require.NotNil(t, imageEntry, "installed defaults must appear in the pricing editor")
+			require.Len(t, imageEntry.PluginVariants, 1)
+			assert.Equal(t, `tier("image", u("image_count") * 0.12)`, imageEntry.PluginVariants[0].Effective)
+			assert.True(t, imageEntry.PluginVariants[0].Compatible)
+			assert.Empty(t, imageEntry.PluginVariants[0].Configured)
+			assert.Equal(t, imageEntry.PluginVariants[0].Effective, imageEntry.PluginVariants[0].DefaultExpr)
+			operation_setting.SelfUseModeEnabled = true
+			selfUse, err := GetModelPricingSnapshot([]string{"portable-image"})
+			require.NoError(t, err)
+			assert.Equal(t, imageEntry.PluginVariants[0].DefaultExpr, selfUse.Entries[0].PluginVariants[0].Effective, "self-use fallback ratio must not hide plugin pricing")
+			operation_setting.SelfUseModeEnabled = false
+			var modelRows, optionRows int64
+			require.NoError(t, db.Model(&Model{}).Count(&modelRows).Error)
+			require.NoError(t, db.Model(&Option{}).Count(&optionRows).Error)
+			assert.Zero(t, modelRows)
+			assert.Zero(t, optionRows)
+			secondSource := strings.ReplaceAll(strings.ReplaceAll(source, "portable-defaults", "portable-second"), `* 0.6`, `* 2`)
+			secondSource = strings.ReplaceAll(secondSource, "seconds", "credits")
+			_, err = jsplugin.DefaultRegistry.Register(secondSource, jsplugin.Options{})
+			require.NoError(t, err)
+			InvalidatePricingCache()
+			assert.Len(t, pricingByModel(GetPricing())["portable-alias"].BillingPluginVariants, 2, "an alias retains every eligible provider's price")
+			shared, err := GetModelPricingSnapshot([]string{"portable-alias"})
+			require.NoError(t, err)
+			require.Len(t, shared.Entries, 1)
+			assert.Len(t, shared.Entries[0].PluginVariants, 2)
+			assert.ErrorContains(t, ValidateModelPricing("portable-alias", PricingValues{"billing_setting.billing_expr": `u("seconds")`}), "portable-second")
+			assert.NoError(t, ValidateModelPricing("portable-alias", PricingValues{
+				billing_setting.PluginBillingExprOption: map[string]any{"portable-defaults": `u("seconds") * 4`},
+			}))
+			assert.NoError(t, ValidateModelPricing("portable-alias", PricingValues{
+				"billing_setting.billing_expr":          `u("seconds")`,
+				billing_setting.PluginBillingExprOption: map[string]any{"portable-second": `u("credits") * 4`},
+			}))
+			assert.ErrorContains(t, ValidateModelPricing("portable-alias", PricingValues{"unsupported": float64(1)}), "unsupported pricing field")
+			assert.ErrorContains(t, ValidateModelPricing("portable-alias", PricingValues{billing_setting.PluginBillingExprOption: "invalid"}), "plugin-to-expression object")
+			for _, key := range []string{"not valid!", "portable-defaults::other-model"} {
+				assert.ErrorContains(t, ValidateModelPricing("portable-alias", PricingValues{
+					billing_setting.PluginBillingExprOption: map[string]any{key: `invalid(`},
+				}), "invalid plugin billing expression key")
+			}
+			expression, exists = billing_setting.ResolveTaskBillingExpr("portable-second", "portable-alias", "portable-video")
+			assert.True(t, exists)
+			assert.Equal(t, `tier("video", u("credits") * 2)`, expression)
+			require.NoError(t, jsplugin.DefaultRegistry.Unregister("portable-second"))
+
+			require.NoError(t, db.Create(&Model{ModelName: "portable-video", Description: "Administrator description", Status: 1}).Error)
+			InvalidatePricingCache()
+			assert.Equal(t, "Administrator description", pricingByModel(GetPricing())["portable-video"].Description)
+			require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(`{"portable-video":0}`))
+			_, exists = billing_setting.ResolveTaskBillingExpr("portable-defaults", "portable-video", "")
+			assert.False(t, exists, "explicit free per-call pricing overrides the plugin default")
+			expression, exists = billing_setting.ResolveTaskBillingExpr("portable-defaults", "portable-alias", "portable-video")
+			assert.True(t, exists, "mapped legacy prices do not suppress defaults because per-call billing only reads the client model")
+			assert.Equal(t, `tier("video", u("seconds") * 0.6)`, expression)
+			aliasSnapshot, err := GetModelPricingSnapshot([]string{"portable-alias"})
+			require.NoError(t, err)
+			require.Len(t, aliasSnapshot.Entries[0].PluginVariants, 1)
+			assert.Equal(t, expression, aliasSnapshot.Entries[0].PluginVariants[0].Effective)
+			require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{
+				billing_setting.PluginBillingExprOption: `{"portable-defaults::portable-video":"u(\"seconds\") * 2"}`,
+			}))
+			expression, exists = billing_setting.ResolveTaskBillingExpr("portable-defaults", "portable-video", "")
+			require.True(t, exists)
+			assert.Equal(t, `u("seconds") * 2`, expression)
+			require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{
+				billing_setting.PluginBillingExprOption: `{}`,
+				"billing_setting.billing_mode":          `{"portable-video":"tiered_expr"}`,
+				"billing_setting.billing_expr":          `{"portable-video":"u(\"seconds\") * 3"}`,
+			}))
+			expression, exists = billing_setting.ResolveTaskBillingExpr("portable-defaults", "portable-video", "")
+			require.True(t, exists)
+			assert.Equal(t, `u("seconds") * 3`, expression)
+			require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{
+				"billing_setting.billing_mode": `{}`, "billing_setting.billing_expr": `{}`,
+			}))
+			require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(`{}`))
+			updated := strings.ReplaceAll(strings.ReplaceAll(source, `version:"1.0.0"`, `version:"1.1.0"`), `* 0.6`, `* 0.9`)
+			_, err = jsplugin.DefaultRegistry.Register(updated, jsplugin.Options{})
+			require.NoError(t, err)
+			expression, exists = billing_setting.ResolveTaskBillingExpr("portable-defaults", "portable-video", "")
+			require.True(t, exists)
+			assert.Equal(t, `tier("video", u("seconds") * 0.9)`, expression)
+			require.NoError(t, db.Model(&Option{}).Count(&optionRows).Error)
+			assert.Zero(t, optionRows, "plugin updates never save their defaults into administrator settings")
+			aliasSnapshot, err = GetModelPricingSnapshot([]string{"portable-alias"})
+			require.NoError(t, err)
+			require.NoError(t, UpdateModelPricing([]ModelPricingChange{{
+				ModelName: "portable-alias", ExpectedVersion: aliasSnapshot.Entries[0].Version,
+				Pricing: PricingValues{billing_setting.PluginBillingExprOption: map[string]any{"portable-defaults": `u("seconds") * 4`}},
+			}}))
+			expression, exists = billing_setting.ResolveTaskBillingExpr("portable-defaults", "portable-alias", "portable-video")
+			assert.True(t, exists)
+			assert.Equal(t, `u("seconds") * 4`, expression)
+			aliasSnapshot, err = GetModelPricingSnapshot([]string{"portable-alias"})
+			require.NoError(t, err)
+			assert.Equal(t, expression, aliasSnapshot.Entries[0].PluginVariants[0].Configured)
+			require.NoError(t, UpdateModelPricing([]ModelPricingChange{{
+				ModelName: "portable-alias", ExpectedVersion: aliasSnapshot.Entries[0].Version, Pricing: PricingValues{},
+			}}))
+			_, err = jsplugin.DefaultRegistry.Register(secondSource, jsplugin.Options{})
+			require.NoError(t, err)
+			for _, aliasFirst := range []bool{true, false} {
+				locked, err := GetModelPricingSnapshot([]string{"portable-alias", "portable-video"})
+				require.NoError(t, err)
+				changes := []ModelPricingChange{
+					{ModelName: "portable-alias", ExpectedVersion: locked.Entries[0].Version, Pricing: PricingValues{
+						"billing_setting.billing_mode": "tiered_expr", "billing_setting.billing_expr": `u("seconds") * 3`,
+					}},
+					{ModelName: "portable-video", ExpectedVersion: locked.Entries[1].Version, Pricing: PricingValues{
+						"billing_setting.billing_mode": "tiered_expr", "billing_setting.billing_expr": `u("seconds") * 7`,
+						billing_setting.PluginBillingExprOption: map[string]any{"portable-second": `u("credits") * 9`},
+					}},
+				}
+				if !aliasFirst {
+					slices.Reverse(changes)
+				}
+				require.NoError(t, UpdateModelPricing(changes), "validate the entire final draft independently of edit order")
+				expression, exists = billing_setting.ResolveTaskBillingExpr("portable-second", "portable-alias", "portable-video")
+				require.True(t, exists)
+				assert.Equal(t, `u("credits") * 9`, expression)
+				assert.NoError(t, ValidateModelPricing("portable-alias", PricingValues{"billing_setting.billing_expr": `u("seconds") * 3`}))
+				locked, err = GetModelPricingSnapshot([]string{"portable-alias", "portable-video"})
+				require.NoError(t, err)
+				for _, variant := range locked.Entries[0].PluginVariants {
+					assert.Equal(t, `u("seconds") * 7`, variant.MappedModelExpr)
+					assert.Empty(t, variant.Configured)
+					if variant.PluginKey == "portable-second" {
+						assert.Equal(t, `u("credits") * 9`, variant.MappedProviderExpr)
+						assert.Equal(t, variant.MappedProviderExpr, variant.Effective)
+					} else {
+						assert.Empty(t, variant.MappedProviderExpr)
+						assert.Equal(t, `u("seconds") * 3`, variant.Effective)
+					}
+				}
+				assert.ErrorContains(t, UpdateModelPricing([]ModelPricingChange{{
+					ModelName: "portable-video", ExpectedVersion: locked.Entries[1].Version, Pricing: PricingValues{},
+				}}), "portable-second", "removing a mapped override must validate the alias expression it exposes")
+				assert.ErrorContains(t, UpdateModelPricingOptions(map[string]string{billing_setting.PluginBillingExprOption: `{}`}), "portable-second")
+				for i := range changes {
+					changes[i].Pricing = PricingValues{}
+					for _, entry := range locked.Entries {
+						if entry.ModelName == changes[i].ModelName {
+							changes[i].ExpectedVersion = entry.Version
+						}
+					}
+				}
+				require.NoError(t, UpdateModelPricing(changes), "the complete removal draft is compatible in either order")
+			}
+			require.NoError(t, jsplugin.DefaultRegistry.Unregister("portable-second"))
+			prefix := Model{ModelName: "portable-", NameRule: NameRulePrefix, Description: "Administrator prefix description", Status: 1}
+			require.NoError(t, db.Create(&prefix).Error)
+			rows, _, err = SearchModelsWithChannels("portable-image", "", "", "", 0, 20)
+			require.NoError(t, err)
+			require.Len(t, rows, 1)
+			assert.Equal(t, "portable-image", rows[0].ModelName)
+			assert.Equal(t, "Administrator prefix description", rows[0].Description)
+			assert.Zero(t, rows[0].Id, "matching a prefix must not reuse that record's identity")
+			require.NoError(t, db.Delete(&prefix).Error)
+			require.NoError(t, jsplugin.DefaultRegistry.Unregister("portable-defaults"))
+			_, exists = billing_setting.ResolveTaskBillingExpr("portable-defaults", "portable-image", "")
+			assert.False(t, exists)
+			InvalidatePricingCache()
+			assert.Empty(t, pricingByModel(GetPricing())["portable-image"].Description)
+		})
+	}
+}
 
 func pricingUsagePluginSource(version, usageSchema string) string {
 	return fmt.Sprintf(`

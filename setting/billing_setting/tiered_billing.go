@@ -7,15 +7,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
-	relaycommon "github.com/QuantumNous/new-api/relay/common"
-	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/setting/config"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
-	"github.com/expr-lang/expr/ast"
-	"github.com/expr-lang/expr/parser"
 	"github.com/samber/lo"
 )
 
@@ -25,7 +20,6 @@ const (
 	BillingModeField        = "billing_mode"
 	BillingExprField        = "billing_expr"
 	PluginBillingExprOption = "billing_setting.plugin_billing_expr"
-	maxTaskExprSmokeTests   = 64
 )
 
 // BillingSetting is managed by config.GlobalConfig.Register.
@@ -106,8 +100,22 @@ func GetPluginBillingExpr(pluginKey, model string) (string, bool) {
 	return expression, ok
 }
 
-// ResolveTaskBillingExpr selects the executing plugin's override before the
-// model expression, retaining the model alias fallback and explicit modes.
+// GetPluginDefaultBillingExpr reads a price from the active plugin generation.
+// It never saves defaults into administrator pricing or ordinary relay prices.
+func GetPluginDefaultBillingExpr(pluginKey string, models ...string) (string, bool) {
+	plugin, exists := jsplugin.DefaultRegistry.Get(pluginKey)
+	if !exists {
+		return "", false
+	}
+	defaults, exists := plugin.Meta.DefaultsForModel(models...)
+	if !exists || strings.TrimSpace(defaults.BillingExpr) == "" {
+		return "", false
+	}
+	return defaults.BillingExpr, true
+}
+
+// ResolveTaskBillingExpr prefers administrator prices to the executing plugin's
+// defaults, retaining alias fallback and explicit legacy modes, including free.
 func ResolveTaskBillingExpr(pluginKey, model, mappedModel string) (string, bool) {
 	if pluginKey != "" {
 		if expr, ok := GetPluginBillingExpr(pluginKey, model); ok {
@@ -126,7 +134,18 @@ func ResolveTaskBillingExpr(pluginKey, model, mappedModel string) (string, bool)
 		expression, ok := GetBillingExpr(mappedModel)
 		return expression, ok && strings.TrimSpace(expression) != ""
 	}
-	return "", false
+	// Per-call billing reads the client model only. A legacy price on the
+	// mapped name cannot suppress a fallback that is otherwise usable here.
+	if _, configured := billingSetting.BillingMode[model]; configured {
+		return "", false
+	}
+	if ratio_setting.HasConfiguredModelRatio(model) {
+		return "", false
+	}
+	if _, configured := ratio_setting.GetModelPrice(model, false); configured {
+		return "", false
+	}
+	return GetPluginDefaultBillingExpr(pluginKey, mappedModel, model)
 }
 
 // TaskExprCompatible checks the schema contract even for usage references in
@@ -230,202 +249,10 @@ func smokeTestExpr(exprStr string) error {
 	return nil
 }
 
-// SmokeTestTaskExpr validates a task usage expression against the usage facts
-// declared by its plugin. Literal u() keys must be declared; dynamic calls are
-// still exercised by the generated runtime vectors when possible.
+// SmokeTestTaskExpr validates task prices with the same contract used for
+// plugin-supplied model defaults.
 func SmokeTestTaskExpr(exprStr string, schema map[string]jsplugin.UsageFieldSchema) error {
-	if _, err := billingexpr.CompileFromCache(exprStr); err != nil {
-		return err
-	}
-	if billingexpr.UsesFixedPricing(exprStr) {
-		return fmt.Errorf("fixed pricing is not supported for task usage expressions")
-	}
-	for key := range billingexpr.UsedUsageKeys(exprStr) {
-		if _, declared := schema[key]; !declared {
-			return fmt.Errorf("usage key %q is not declared by the task plugin", key)
-		}
-	}
-	// Open enums include authored values and a fallback probe. Keep custom
-	// dimensions separate from numeric-vector truncation so no authored
-	// resolution combination can hide a negative-price branch.
-	_, body := billingexpr.ParseExprVersion(exprStr)
-	tree, err := parser.Parse(body)
-	if err != nil {
-		return err
-	}
-	schemas := []map[string]jsplugin.UsageFieldSchema{schema}
-	customValues := make(map[string]map[string]bool)
-	for key, field := range schema {
-		if !field.AllowCustom {
-			continue
-		}
-		values := map[string]bool{}
-		for _, value := range field.Enum {
-			values[value] = true
-		}
-		customValues[key] = values
-	}
-	ast.Find(tree.Node, func(node ast.Node) bool {
-		comparison, ok := node.(*ast.BinaryNode)
-		if !ok {
-			return false
-		}
-		for _, pair := range [][2]ast.Node{{comparison.Left, comparison.Right}, {comparison.Right, comparison.Left}} {
-			call, ok := pair[0].(*ast.CallNode)
-			if !ok || len(call.Arguments) != 1 {
-				continue
-			}
-			callee, ok := call.Callee.(*ast.IdentifierNode)
-			if !ok || callee.Value != "u" {
-				continue
-			}
-			key, ok := call.Arguments[0].(*ast.StringNode)
-			if !ok || !schema[key.Value].AllowCustom {
-				continue
-			}
-			value, ok := pair[1].(*ast.StringNode)
-			if !ok {
-				continue
-			}
-			customValues[key.Value][value.Value] = true
-		}
-		return false
-	})
-	for key, values := range customValues {
-		fallback := "__other__"
-		for index := 0; values[fallback]; index++ {
-			fallback = fmt.Sprintf("__other_%d", index)
-		}
-		values[fallback] = true
-		if len(values)*len(schemas) > maxTaskExprSmokeTests {
-			return fmt.Errorf("custom pricing conditions exceed the %d-combination limit", maxTaskExprSmokeTests)
-		}
-		nextSchemas := make([]map[string]jsplugin.UsageFieldSchema, 0, len(values)*len(schemas))
-		for value := range values {
-			if !jsplugin.ValidCustomUsageValue(value) {
-				return fmt.Errorf("custom pricing condition must be a trimmed string of at most 64 bytes")
-			}
-			for _, previous := range schemas {
-				candidate := maps.Clone(previous)
-				field := candidate[key]
-				field.Enum = []string{value}
-				candidate[key] = field
-				nextSchemas = append(nextSchemas, candidate)
-			}
-		}
-		schemas = nextSchemas
-	}
-
-	for _, candidate := range schemas {
-		for _, usage := range taskUsageSmokeVectors(candidate) {
-			for _, request := range billingExprSmokeRequests() {
-				request.Usage = usage
-				result, _, err := billingexpr.RunExprWithRequest(exprStr, billingexpr.TokenParams{}, request)
-				if err != nil {
-					return fmt.Errorf("usage vector %v: run failed: %w", usage, err)
-				}
-				if math.IsNaN(result) || math.IsInf(result, 0) || result < 0 {
-					return fmt.Errorf("usage vector %v: result must be finite and non-negative, got %f", usage, result)
-				}
-			}
-		}
-	}
-	return nil
-}
-
-type usageSmokeDimension struct {
-	name   string
-	values []any
-}
-
-func taskUsageSmokeVectors(schema map[string]jsplugin.UsageFieldSchema) []map[string]any {
-	names := make([]string, 0, len(schema))
-	for name := range schema {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-
-	dimensions := make([]usageSmokeDimension, 0, len(names))
-	for _, name := range names {
-		field := schema[name]
-		if len(field.Enum) > 0 {
-			values := make([]any, len(field.Enum))
-			for index, value := range field.Enum {
-				values[index] = value
-			}
-			dimensions = append(dimensions, usageSmokeDimension{name: name, values: values})
-			continue
-		}
-		if field.Type == "boolean" {
-			dimensions = append(dimensions, usageSmokeDimension{name: name, values: []any{false, true}})
-			continue
-		}
-		limit := relaycommon.MaxTaskDurationSeconds
-		if field.Unit == "count" {
-			limit = dto.MaxImageN
-		}
-		if field.Unit == "token" || field.Unit == "credit" {
-			limit = common.MaxQuota
-		}
-		dimensions = append(dimensions, usageSmokeDimension{
-			name:   name,
-			values: []any{float64(0), float64(1), float64(limit)},
-		})
-	}
-
-	if usageSmokeCombinationCount(dimensions, maxTaskExprSmokeTests) > maxTaskExprSmokeTests {
-		for index := range dimensions {
-			field := schema[dimensions[index].name]
-			if len(field.Enum) <= 2 {
-				continue
-			}
-			dimensions[index].values = []any{field.Enum[0], field.Enum[len(field.Enum)-1]}
-		}
-	}
-
-	vectors := make([]map[string]any, 0, maxTaskExprSmokeTests)
-	var appendVectors func(int, map[string]any)
-	appendVectors = func(index int, current map[string]any) {
-		if len(vectors) >= maxTaskExprSmokeTests {
-			return
-		}
-		if index == len(dimensions) {
-			vector := make(map[string]any, len(current))
-			maps.Copy(vector, current)
-			vectors = append(vectors, vector)
-			return
-		}
-		for _, value := range dimensions[index].values {
-			current[dimensions[index].name] = value
-			appendVectors(index+1, current)
-		}
-		delete(current, dimensions[index].name)
-	}
-	appendVectors(0, make(map[string]any, len(dimensions)))
-
-	combinationCount := usageSmokeCombinationCount(dimensions, maxTaskExprSmokeTests)
-	if combinationCount > maxTaskExprSmokeTests && len(vectors) > 0 {
-		last := make(map[string]any, len(dimensions))
-		for _, dimension := range dimensions {
-			last[dimension.name] = dimension.values[len(dimension.values)-1]
-		}
-		vectors[len(vectors)-1] = last
-	}
-	return vectors
-}
-
-func usageSmokeCombinationCount(dimensions []usageSmokeDimension, stopAfter int) int {
-	count := 1
-	for _, dimension := range dimensions {
-		if len(dimension.values) == 0 {
-			return 0
-		}
-		if count > stopAfter/len(dimension.values) {
-			return stopAfter + 1
-		}
-		count *= len(dimension.values)
-	}
-	return count
+	return jsplugin.ValidateTaskBillingExpr(exprStr, schema)
 }
 
 func billingExprSmokeRequests() []billingexpr.RequestInput {

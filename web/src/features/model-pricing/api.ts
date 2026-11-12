@@ -56,6 +56,9 @@ export type ModelPricingPluginVariant = {
   usage_schema: BillingUsageSchema
   usage_examples?: BillingUsageExample[]
   configured: string
+  default_expr?: string
+  mapped_provider_expr?: string
+  mapped_model_expr?: string
   effective: string
   compatible: boolean
   stale?: boolean

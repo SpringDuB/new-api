@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/pkg/jsplugin"
 
 	"gorm.io/gorm"
 )
@@ -96,7 +97,50 @@ func resolveModelMetadata(records []Model, names []string) map[string]*Model {
 			}
 		}
 	}
+	generation := jsplugin.DefaultRegistry.Generation()
+	for _, name := range names {
+		if _, exists := resolved[name]; exists {
+			continue
+		}
+		defaults, exists := taskPluginModelDefaults(generation, name)
+		if !exists {
+			continue
+		}
+		language := common.DefaultLanguage
+		if language == "" {
+			language = "zh"
+		}
+		description := defaults.Description[language]
+		if description == "" {
+			primary, _, _ := strings.Cut(language, "-")
+			description = defaults.Description[primary]
+		}
+		if description == "" {
+			description = defaults.Description["en"]
+		}
+		resolved[name] = &Model{ModelName: name, Description: description, Icon: defaults.Icon,
+			Tags: strings.Join(defaults.Tags, ","), Status: 1, NameRule: NameRuleExact}
+	}
 	return resolved
+}
+
+// taskPluginModelDefaults uses the same declared target as task usage metadata;
+// ambiguous aliases have no defaults. Administrator model records are resolved
+// before this fallback and retain their complete metadata and visibility policy.
+func taskPluginModelDefaults(generation *jsplugin.RoutingGeneration, name string) (jsplugin.ModelDefaults, bool) {
+	plugins := generation.PluginsByModel(name)
+	if len(plugins) == 0 {
+		if target, exists := ResolveTaskModelAlias(generation, name); exists && target.Declared != "" {
+			name = target.Declared
+			plugins = generation.PluginsByModel(name)
+		}
+	}
+	for _, plugin := range plugins {
+		if defaults, exists := plugin.Meta.DefaultsForModel(name); exists {
+			return defaults, true
+		}
+	}
+	return jsplugin.ModelDefaults{}, false
 }
 
 // FillModelSquareStates applies the same metadata policy as the public catalog
@@ -201,12 +245,14 @@ func SearchModelsWithChannels(keyword, vendor, status, syncOfficial string, offs
 		if err != nil {
 			return nil, 0, err
 		}
-		var exactNames []string
-		if err := DB.Model(&Model{}).Where("name_rule = ?", NameRuleExact).Pluck("model_name", &exactNames).Error; err != nil {
+		var metadata []Model
+		if err := DB.Find(&metadata).Error; err != nil {
 			return nil, 0, err
 		}
-		for _, name := range exactNames {
-			delete(configured, name)
+		for _, record := range metadata {
+			if record.NameRule == NameRuleExact {
+				delete(configured, record.ModelName)
+			}
 		}
 		names := make([]string, 0, len(configured))
 		for name := range configured {
@@ -215,8 +261,15 @@ func SearchModelsWithChannels(keyword, vendor, status, syncOfficial string, offs
 			}
 		}
 		sort.Strings(names)
+		defaults := resolveModelMetadata(metadata, names)
 		for _, name := range names {
-			records = append(records, &Model{ModelName: name, NameRule: NameRuleExact})
+			if metadata := defaults[name]; metadata != nil {
+				synthetic := *metadata
+				synthetic.Id, synthetic.ModelName, synthetic.NameRule = 0, name, NameRuleExact
+				records = append(records, &synthetic)
+			} else {
+				records = append(records, &Model{ModelName: name, NameRule: NameRuleExact})
+			}
 		}
 	}
 	total := len(records)

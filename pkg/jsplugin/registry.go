@@ -22,8 +22,11 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
+	"github.com/expr-lang/expr/ast"
+	"github.com/expr-lang/expr/parser"
 )
 
 const APIVersion1 = 1
@@ -31,7 +34,9 @@ const APIVersion1 = 1
 const (
 	maxLocalizedTextLocales       = 16
 	maxMetaDescriptionRunes       = 512
+	maxModelDescriptionRunes      = 4096
 	maxUsageFieldDescriptionRunes = 256
+	maxTaskExprSmokeTests         = 64
 )
 
 var websiteHostLabelPattern = regexp.MustCompile(`^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$`)
@@ -98,6 +103,7 @@ type Meta struct {
 	BaseURL              string                      `json:"baseUrl,omitempty"`
 	ChannelTypes         []int                       `json:"channelTypes,omitempty"`
 	Models               []string                    `json:"models"`
+	ModelDefaults        map[string]ModelDefaults    `json:"modelDefaults,omitempty"`
 	FetchMode            string                      `json:"fetchMode"`
 	AllowedHosts         []string                    `json:"allowedHosts"`
 	Upstreams            []string                    `json:"upstreams,omitempty"`
@@ -107,6 +113,34 @@ type Meta struct {
 	UsageExamples        []UsageExample              `json:"usageExamples,omitempty"`
 	UsageProfiles        []UsageProfile              `json:"usageProfiles,omitempty"`
 	Auth                 AuthMeta                    `json:"auth"`
+}
+
+// ModelDefaults supplies portable display metadata and USD task pricing for
+// one declared model. Administrator configuration takes precedence.
+type ModelDefaults struct {
+	DisplayName string        `json:"displayName,omitempty"`
+	Description LocalizedText `json:"description,omitempty"`
+	Icon        string        `json:"icon,omitempty"`
+	Tags        []string      `json:"tags,omitempty"`
+	BillingExpr string        `json:"billingExpr,omitempty"`
+}
+
+// DefaultsForModel selects the first candidate's declared model entry, treating
+// ASCII case variants alike. Callers resolve aliases first and may pass the
+// upstream model before the client model.
+func (m Meta) DefaultsForModel(names ...string) (ModelDefaults, bool) {
+	for _, name := range names {
+		folded := asciiFold(name)
+		for declared, defaults := range m.ModelDefaults {
+			if asciiFold(declared) != folded {
+				continue
+			}
+			defaults.Description = maps.Clone(defaults.Description)
+			defaults.Tags = slices.Clone(defaults.Tags)
+			return defaults, true
+		}
+	}
+	return ModelDefaults{}, false
 }
 
 // Upstream kinds a plugin driver can address. Every driver speaks to its
@@ -906,6 +940,15 @@ func cloneMeta(meta Meta) Meta {
 	if meta.Description != nil {
 		meta.Description = maps.Clone(meta.Description)
 	}
+	if meta.ModelDefaults != nil {
+		defaults := make(map[string]ModelDefaults, len(meta.ModelDefaults))
+		for model, entry := range meta.ModelDefaults {
+			entry.Description = maps.Clone(entry.Description)
+			entry.Tags = slices.Clone(entry.Tags)
+			defaults[model] = entry
+		}
+		meta.ModelDefaults = defaults
+	}
 	meta.UsageSchema = CloneUsageSchema(meta.UsageSchema)
 	meta.UsageExamples = CloneUsageExamples(meta.UsageExamples)
 	meta.UsageProfiles = append([]UsageProfile(nil), meta.UsageProfiles...)
@@ -1035,7 +1078,7 @@ func decodeMeta(value any) (Meta, error) {
 	}
 	for field := range object {
 		switch field {
-		case "requiredCapabilities", "submitResponseTypes", "sortPriority", "website", "apiVersion", "key", "name", "icon", "description", "version", "author", "baseUrl", "channelTypes", "channelType", "compatibleChannelTypes", "models", "fetchMode", "allowedHosts", "upstreams", "routes", "protocols", "usageSchema", "usageExamples", "usageProfiles", "auth", "endpoints", "submitPaths", "actions":
+		case "requiredCapabilities", "submitResponseTypes", "sortPriority", "website", "apiVersion", "key", "name", "icon", "description", "version", "author", "baseUrl", "channelTypes", "channelType", "compatibleChannelTypes", "models", "modelDefaults", "fetchMode", "allowedHosts", "upstreams", "routes", "protocols", "usageSchema", "usageExamples", "usageProfiles", "auth", "endpoints", "submitPaths", "actions":
 		default:
 			return Meta{}, &UnknownMetaFieldError{Field: field}
 		}
@@ -1160,6 +1203,12 @@ func decodeMeta(value any) (Meta, error) {
 	}
 	if usageProfiles, exists := object["usageProfiles"]; exists {
 		meta.UsageProfiles, err = decodeUsageProfiles(usageProfiles)
+		if err != nil {
+			return Meta{}, err
+		}
+	}
+	if defaults, exists := object["modelDefaults"]; exists {
+		meta.ModelDefaults, err = decodeModelDefaults(defaults)
 		if err != nil {
 			return Meta{}, err
 		}
@@ -1474,7 +1523,321 @@ func normalizeV1Meta(meta *Meta) error {
 			return fmt.Errorf("plugin meta usageProfiles[%d]: %w", index, err)
 		}
 	}
+	for model, defaults := range meta.ModelDefaults {
+		if _, exists := models[model]; !exists {
+			return fmt.Errorf("plugin meta modelDefaults model %q is not declared in plugin meta models", model)
+		}
+		defaults.DisplayName = strings.TrimSpace(defaults.DisplayName)
+		if utf8.RuneCountInString(defaults.DisplayName) > 128 || strings.ContainsFunc(defaults.DisplayName, unicode.IsControl) {
+			return fmt.Errorf("plugin meta modelDefaults model %q displayName must be at most 128 characters without control characters", model)
+		}
+		if err := validateLocalizedText(defaults.Description, fmt.Sprintf("modelDefaults model %q description", model), maxModelDescriptionRunes); err != nil {
+			return err
+		}
+		defaults.Icon = strings.TrimSpace(defaults.Icon)
+		if utf8.RuneCountInString(defaults.Icon) > 128 || strings.ContainsFunc(defaults.Icon, unicode.IsControl) || strings.HasPrefix(defaults.Icon, "data:") || strings.Contains(defaults.Icon, "://") {
+			return fmt.Errorf("plugin meta modelDefaults model %q icon must be a LobeHub icon name or text, at most 128 characters without control characters", model)
+		}
+		seenTags := make(map[string]bool, len(defaults.Tags))
+		for index, tag := range defaults.Tags {
+			tag = strings.TrimSpace(tag)
+			if tag == "" || utf8.RuneCountInString(tag) > 64 || strings.ContainsFunc(tag, unicode.IsControl) {
+				return fmt.Errorf("plugin meta modelDefaults model %q tags must be non-empty strings of at most 64 characters without control characters", model)
+			}
+			if seenTags[tag] {
+				return fmt.Errorf("plugin meta modelDefaults model %q tags must be unique", model)
+			}
+			seenTags[tag] = true
+			defaults.Tags[index] = tag
+		}
+		if len(strings.Join(defaults.Tags, ",")) > 255 {
+			return fmt.Errorf("plugin meta modelDefaults model %q tags must not exceed 255 UTF-8 bytes joined by commas", model)
+		}
+		if len(defaults.BillingExpr) > 64*1024 {
+			return fmt.Errorf("plugin meta modelDefaults model %q billingExpr must not exceed 65536 bytes", model)
+		}
+		defaults.BillingExpr = strings.TrimSpace(defaults.BillingExpr)
+		if defaults.BillingExpr != "" {
+			schema, _ := meta.UsageForModel(model)
+			if err := ValidateTaskBillingExpr(defaults.BillingExpr, schema); err != nil {
+				return fmt.Errorf("plugin meta modelDefaults model %q billingExpr: %w", model, err)
+			}
+		}
+		meta.ModelDefaults[model] = defaults
+	}
 	return nil
+}
+
+func decodeModelDefaults(value any) (map[string]ModelDefaults, error) {
+	object, ok := value.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("plugin meta modelDefaults must be an object")
+	}
+	defaults := make(map[string]ModelDefaults, len(object))
+	for model, value := range object {
+		entry, ok := value.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("plugin meta modelDefaults model %q must be an object", model)
+		}
+		for name := range entry {
+			switch name {
+			case "displayName", "description", "icon", "tags", "billingExpr":
+			default:
+				return nil, fmt.Errorf("plugin meta modelDefaults model %q has unknown field %q", model, name)
+			}
+		}
+		var item ModelDefaults
+		var err error
+		if item.DisplayName, err = stringMetaField(entry, "displayName"); err != nil {
+			return nil, fmt.Errorf("plugin meta modelDefaults model %q: %w", model, err)
+		}
+		if item.Description, err = localizedTextMetaField(entry, "description", maxModelDescriptionRunes); err != nil {
+			return nil, fmt.Errorf("plugin meta modelDefaults model %q: %w", model, err)
+		}
+		if item.Icon, err = stringMetaField(entry, "icon"); err != nil {
+			return nil, fmt.Errorf("plugin meta modelDefaults model %q: %w", model, err)
+		}
+		if item.Tags, err = strictStringSlice(entry, "tags"); err != nil {
+			return nil, fmt.Errorf("plugin meta modelDefaults model %q: %w", model, err)
+		}
+		if item.BillingExpr, err = stringMetaField(entry, "billingExpr"); err != nil {
+			return nil, fmt.Errorf("plugin meta modelDefaults model %q: %w", model, err)
+		}
+		defaults[model] = item
+	}
+	return defaults, nil
+}
+
+// ValidateTaskBillingExpr validates a task usage expression against the usage facts
+// declared by its plugin. Literal u() keys must be declared; dynamic calls are
+// still exercised by the generated runtime vectors when possible.
+func ValidateTaskBillingExpr(exprStr string, schema map[string]UsageFieldSchema) error {
+	if _, err := billingexpr.CompileFromCache(exprStr); err != nil {
+		return err
+	}
+	if billingexpr.UsesFixedPricing(exprStr) {
+		return fmt.Errorf("fixed pricing is not supported for task usage expressions")
+	}
+	// Open enums include authored values and a fallback probe. Keep custom
+	// dimensions separate from numeric-vector truncation so no authored
+	// resolution combination can hide a negative-price branch.
+	_, body := billingexpr.ParseExprVersion(exprStr)
+	tree, err := parser.Parse(body)
+	if err != nil {
+		return err
+	}
+	// Inspect the original tree: compiler optimization can remove an invalid
+	// usage reference from a branch that is currently unreachable.
+	undeclared := ""
+	if ast.Find(tree.Node, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallNode)
+		if !ok || len(call.Arguments) != 1 {
+			return false
+		}
+		callee, ok := call.Callee.(*ast.IdentifierNode)
+		if !ok || callee.Value != "u" {
+			return false
+		}
+		key, ok := call.Arguments[0].(*ast.StringNode)
+		if !ok {
+			return false
+		}
+		undeclared = strings.TrimSpace(key.Value)
+		_, declared := schema[undeclared]
+		return !declared
+	}) != nil {
+		return fmt.Errorf("usage key %q is not declared by the task plugin", undeclared)
+	}
+
+	schemas := []map[string]UsageFieldSchema{schema}
+	customValues := make(map[string]map[string]bool)
+	for key, field := range schema {
+		if !field.AllowCustom {
+			continue
+		}
+		values := map[string]bool{}
+		for _, value := range field.Enum {
+			values[value] = true
+		}
+		customValues[key] = values
+	}
+	ast.Find(tree.Node, func(node ast.Node) bool {
+		comparison, ok := node.(*ast.BinaryNode)
+		if !ok {
+			return false
+		}
+		for _, pair := range [][2]ast.Node{{comparison.Left, comparison.Right}, {comparison.Right, comparison.Left}} {
+			call, ok := pair[0].(*ast.CallNode)
+			if !ok || len(call.Arguments) != 1 {
+				continue
+			}
+			callee, ok := call.Callee.(*ast.IdentifierNode)
+			if !ok || callee.Value != "u" {
+				continue
+			}
+			key, ok := call.Arguments[0].(*ast.StringNode)
+			if !ok {
+				continue
+			}
+			name := strings.TrimSpace(key.Value)
+			if !schema[name].AllowCustom {
+				continue
+			}
+			value, ok := pair[1].(*ast.StringNode)
+			if !ok {
+				continue
+			}
+			customValues[name][value.Value] = true
+		}
+		return false
+	})
+	for key, values := range customValues {
+		fallback := "__other__"
+		for index := 0; values[fallback]; index++ {
+			fallback = fmt.Sprintf("__other_%d", index)
+		}
+		values[fallback] = true
+		if len(values)*len(schemas) > maxTaskExprSmokeTests {
+			return fmt.Errorf("custom pricing conditions exceed the %d-combination limit", maxTaskExprSmokeTests)
+		}
+		nextSchemas := make([]map[string]UsageFieldSchema, 0, len(values)*len(schemas))
+		for value := range values {
+			if !ValidCustomUsageValue(value) {
+				return fmt.Errorf("custom pricing condition must be a trimmed string of at most 64 bytes")
+			}
+			for _, previous := range schemas {
+				candidate := maps.Clone(previous)
+				field := candidate[key]
+				field.Enum = []string{value}
+				candidate[key] = field
+				nextSchemas = append(nextSchemas, candidate)
+			}
+		}
+		schemas = nextSchemas
+	}
+
+	for _, candidate := range schemas {
+		for _, usage := range taskUsageSmokeVectors(candidate) {
+			for _, request := range taskBillingValidationRequests() {
+				request.Usage = usage
+				result, _, err := billingexpr.RunExprWithRequest(exprStr, billingexpr.TokenParams{}, request)
+				if err != nil {
+					return fmt.Errorf("usage vector %v: run failed: %w", usage, err)
+				}
+				if math.IsNaN(result) || math.IsInf(result, 0) || result < 0 {
+					return fmt.Errorf("usage vector %v: result must be finite and non-negative, got %f", usage, result)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+type usageSmokeDimension struct {
+	name   string
+	values []any
+}
+
+func taskUsageSmokeVectors(schema map[string]UsageFieldSchema) []map[string]any {
+	names := make([]string, 0, len(schema))
+	for name := range schema {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+
+	dimensions := make([]usageSmokeDimension, 0, len(names))
+	for _, name := range names {
+		field := schema[name]
+		if len(field.Enum) > 0 {
+			values := make([]any, len(field.Enum))
+			for index, value := range field.Enum {
+				values[index] = value
+			}
+			dimensions = append(dimensions, usageSmokeDimension{name: name, values: values})
+			continue
+		}
+		if field.Type == "boolean" {
+			dimensions = append(dimensions, usageSmokeDimension{name: name, values: []any{false, true}})
+			continue
+		}
+		limit := relaycommon.MaxTaskDurationSeconds
+		if field.Unit == "count" {
+			limit = dto.MaxImageN
+		}
+		if field.Unit == "token" || field.Unit == "credit" {
+			limit = common.MaxQuota
+		}
+		dimensions = append(dimensions, usageSmokeDimension{
+			name:   name,
+			values: []any{float64(0), float64(1), float64(limit)},
+		})
+	}
+
+	if usageSmokeCombinationCount(dimensions, maxTaskExprSmokeTests) > maxTaskExprSmokeTests {
+		for index := range dimensions {
+			field := schema[dimensions[index].name]
+			if len(field.Enum) <= 2 {
+				continue
+			}
+			dimensions[index].values = []any{field.Enum[0], field.Enum[len(field.Enum)-1]}
+		}
+	}
+
+	vectors := make([]map[string]any, 0, maxTaskExprSmokeTests)
+	var appendVectors func(int, map[string]any)
+	appendVectors = func(index int, current map[string]any) {
+		if len(vectors) >= maxTaskExprSmokeTests {
+			return
+		}
+		if index == len(dimensions) {
+			vector := make(map[string]any, len(current))
+			maps.Copy(vector, current)
+			vectors = append(vectors, vector)
+			return
+		}
+		for _, value := range dimensions[index].values {
+			current[dimensions[index].name] = value
+			appendVectors(index+1, current)
+		}
+		delete(current, dimensions[index].name)
+	}
+	appendVectors(0, make(map[string]any, len(dimensions)))
+
+	combinationCount := usageSmokeCombinationCount(dimensions, maxTaskExprSmokeTests)
+	if combinationCount > maxTaskExprSmokeTests && len(vectors) > 0 {
+		last := make(map[string]any, len(dimensions))
+		for _, dimension := range dimensions {
+			last[dimension.name] = dimension.values[len(dimension.values)-1]
+		}
+		vectors[len(vectors)-1] = last
+	}
+	return vectors
+}
+
+func usageSmokeCombinationCount(dimensions []usageSmokeDimension, stopAfter int) int {
+	count := 1
+	for _, dimension := range dimensions {
+		if len(dimension.values) == 0 {
+			return 0
+		}
+		if count > stopAfter/len(dimension.values) {
+			return stopAfter + 1
+		}
+		count *= len(dimension.values)
+	}
+	return count
+}
+
+func taskBillingValidationRequests() []billingexpr.RequestInput {
+	return []billingexpr.RequestInput{
+		{},
+		{
+			Headers: map[string]string{
+				"anthropic-beta": "fast-mode-2026-02-01",
+			},
+			Body: []byte(`{"service_tier":"fast","stream_options":{"include_usage":true},"messages":[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21]}`),
+		},
+	}
 }
 
 func validateUsageSchema(schema map[string]UsageFieldSchema) error {

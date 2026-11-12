@@ -42,6 +42,7 @@ import {
 import { PluginIcon } from '@/features/task-plugins/components/plugin-icon'
 
 import { SettingsSwitchField } from '../components/settings-form-layout'
+import { inheritedTaskPricing } from './model-pricing-core'
 import { TaskUsagePricingEditor } from './task-usage-pricing-editor'
 
 type TaskPluginPricingEditorProps = {
@@ -60,11 +61,13 @@ export function TaskPluginPricingEditor(props: TaskPluginPricingEditorProps) {
   const { t } = useTranslation()
   const id = useId()
   const [selected, setSelected] = useState('__model__')
-  const usesExpression = props.modelBillingMode !== 'ratio'
+  const usesModelExpression = props.modelBillingMode === 'tiered_expr'
   const incompatible = props.variants.filter((variant) => {
     if (
       variant.stale ||
-      !usesExpression ||
+      !usesModelExpression ||
+      variant.mapped_provider_expr !== undefined ||
+      !props.modelExpression.trim() ||
       Object.hasOwn(props.expressions, variant.plugin_key)
     ) {
       return false
@@ -204,9 +207,16 @@ export function TaskPluginPricingEditor(props: TaskPluginPricingEditorProps) {
             </TabsContent>
           )
         }
+        const inherited = inheritedTaskPricing(
+          variant,
+          props.modelBillingMode,
+          props.modelExpression
+        )
+        const inheritedExpression = inherited.expression
+        const usesExpression = inherited.source !== 'legacy'
         const expression = separate
           ? props.expressions[key]
-          : props.modelExpression
+          : inheritedExpression
         const split = splitBillingExprAndRequestRules(expression)
         let compatible = taskExpressionCompatible(
           expression,
@@ -216,20 +226,23 @@ export function TaskPluginPricingEditor(props: TaskPluginPricingEditorProps) {
         else if (compatible === undefined && expression === variant.effective) {
           compatible = variant.compatible
         }
-        let modelCompatible = taskExpressionCompatible(
-          props.modelExpression,
+        let inheritedCompatible = taskExpressionCompatible(
+          inheritedExpression,
           variant.usage_schema
         )
         if (
-          modelCompatible === undefined &&
-          props.modelExpression === variant.effective
+          inheritedCompatible === undefined &&
+          inheritedExpression === variant.effective
         ) {
-          modelCompatible = variant.compatible
+          inheritedCompatible = variant.compatible
         }
         let inheritDescription = t('Use model-level expression')
         if (!usesExpression) inheritDescription = t('Use model-level pricing')
+        if (inherited.source === 'plugin') {
+          inheritDescription = t('Using plugin default pricing')
+        }
         let description = !separate ? inheritDescription : undefined
-        if (props.ordinaryPricing && usesExpression) {
+        if (props.ordinaryPricing && usesModelExpression) {
           description = t(
             'Plugin expressions are independent from ordinary OpenAI pricing.'
           )
@@ -240,7 +253,7 @@ export function TaskPluginPricingEditor(props: TaskPluginPricingEditorProps) {
               controlId={`${id}-${key}`}
               checked={separate}
               disabled={Boolean(
-                separate && props.ordinaryPricing && usesExpression
+                separate && props.ordinaryPricing && usesModelExpression
               )}
               label={t('Set separately for this provider')}
               description={description}
@@ -252,8 +265,8 @@ export function TaskPluginPricingEditor(props: TaskPluginPricingEditorProps) {
                     return next
                   }
                   next[key] =
-                    usesExpression && modelCompatible
-                      ? props.modelExpression
+                    usesExpression && inheritedCompatible
+                      ? inheritedExpression
                       : generateTaskExprFromConfig(
                           createDefaultTaskVisualConfig(variant.usage_schema),
                           variant.usage_schema

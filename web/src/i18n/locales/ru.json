@@ -7030,6 +7030,7 @@
     "Users only see groups marked as user selectable. Non-selectable groups can still be assigned by administrators.": "Пользователи видят только группы, отмеченные как доступные для выбора. Недоступные для выбора группы всё равно могут назначаться администраторами.",
     "uses": "использует",
     "Using built-in or default pricing": "Используются встроенные цены или значения по умолчанию",
+    "Using plugin default pricing": "Используются цены плагина по умолчанию",
     "Using the complete global Auto order ({{count}} groups)": "Используется полный глобальный порядок Auto (групп: {{count}})",
     "v{{installed}} is installed but this source does not list it. Installing replaces it with v{{target}}.": "Установлена версия v{{installed}}, но этот источник её не содержит. Установка заменит её на v{{target}}.",
     "Validity": "Срок действия",

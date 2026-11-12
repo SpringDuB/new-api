@@ -1098,6 +1098,217 @@ func TestPluginDisplayMetadata(t *testing.T) {
 	}
 }
 
+func TestRegistryModelDefaultsContract(t *testing.T) {
+	source := routingTestPluginSource("model-defaults", 0, `["video", "image"]`, `
+		usageSchema: {seconds: {type: "number", unit: "second"}},
+		usageProfiles: [{models: ["image"], schema: {images: {type: "number", unit: "count"}}}],
+		modelDefaults: {
+			video: {displayName: " Video Model ", description: {EN: " Video generation ", "zh-tw": " 影片生成 "}, icon: " Sora.Color ", tags: [" video ", "generation"], billingExpr: " tier(\"base\", u(\"seconds\") * 0.4) "},
+			image: {description: "Image generation", billingExpr: "u(\"images\") * 0.02"},
+		},`, "")
+	plugin, err := CompilePlugin(source, Options{})
+	require.NoError(t, err)
+	encoded, err := common.Marshal(plugin.Meta)
+	require.NoError(t, err)
+	var metadata map[string]any
+	require.NoError(t, common.Unmarshal(encoded, &metadata))
+	assert.Equal(t, map[string]any{
+		"video": map[string]any{
+			"displayName": "Video Model", "description": map[string]any{"en": "Video generation", "zh-TW": "影片生成"},
+			"icon": "Sora.Color", "tags": []any{"video", "generation"}, "billingExpr": `tier("base", u("seconds") * 0.4)`,
+		},
+		"image": map[string]any{"description": map[string]any{"en": "Image generation"}, "billingExpr": `u("images") * 0.02`},
+	}, metadata["modelDefaults"])
+
+	for _, declaration := range []string{"", "modelDefaults: {},", "modelDefaults: {video: {}},"} {
+		_, err := CompilePlugin(routingTestPluginSource("optional-defaults", 0, `["video"]`, declaration, ""), Options{})
+		require.NoError(t, err)
+	}
+}
+
+func TestRegistryRejectsInvalidModelDefaults(t *testing.T) {
+	tests := []struct {
+		name        string
+		declaration string
+		wantError   string
+	}{
+		{"null defaults", `null`, "modelDefaults must be an object"},
+		{"array defaults", `[]`, "modelDefaults must be an object"},
+		{"null model", `{video: null}`, `model "video" must be an object`},
+		{"array model", `{video: []}`, `model "video" must be an object`},
+		{"unknown field", `{video: {price: 1}}`, `unknown field "price"`},
+		{"unknown model", `{other: {}}`, `model "other" is not declared`},
+		{"wrong model case", `{VIDEO: {}}`, `model "VIDEO" is not declared`},
+		{"null display name", `{video: {displayName: null}}`, "displayName must be a string"},
+		{"long display name", `{video: {displayName: "` + strings.Repeat("界", 129) + `"}}`, "displayName must be at most 128 characters"},
+		{"display name control", `{video: {displayName: "Video\u0000Model"}}`, "without control characters"},
+		{"null description", `{video: {description: null}}`, "description must be a string or object"},
+		{"missing English", `{video: {description: {zh: "影片生成"}}}`, `must include a non-empty "en" value`},
+		{"long description", `{video: {description: "` + strings.Repeat("界", 4097) + `"}}`, "must not exceed 4096 characters"},
+		{"null icon", `{video: {icon: null}}`, "icon must be a string"},
+		{"remote icon", `{video: {icon: "https://example.com/icon.png"}}`, "icon must be a LobeHub icon name or text"},
+		{"inline icon", `{video: {icon: "data:image/svg+xml;base64,PHN2Zy8+"}}`, "icon must be a LobeHub icon name or text"},
+		{"null tags", `{video: {tags: null}}`, "tags must be an array of strings"},
+		{"string tags", `{video: {tags: "video"}}`, "tags must be an array of strings"},
+		{"non-string tag", `{video: {tags: [1]}}`, "tags must be an array of strings"},
+		{"empty tag", `{video: {tags: [" "]}}`, "tags must be non-empty strings"},
+		{"long tag", `{video: {tags: ["` + strings.Repeat("界", 65) + `"]}}`, "at most 64 characters"},
+		{"duplicate tags", `{video: {tags: [" video ", "video"]}}`, "tags must be unique"},
+		{"oversized joined tags", `{video: {tags: ["` + strings.Repeat("界", 64) + `", "` + strings.Repeat("a", 63) + `"]}}`, "tags must not exceed 255 UTF-8 bytes"},
+		{"null expression", `{video: {billingExpr: null}}`, "billingExpr must be a string"},
+		{"long expression", `{video: {billingExpr: ` + fmt.Sprintf("%q", strings.Repeat(" ", 64*1024)+"1") + `}}`, "billingExpr must not exceed 65536 bytes"},
+		{"invalid expression", `{video: {billingExpr: "u(\"seconds\") *"}}`, "expr compile error"},
+		{"fixed request price", `{video: {billingExpr: "tier(\"base\", fixed(0.4))"}}`, "fixed pricing is not supported"},
+		{"undeclared usage", `{video: {billingExpr: "u(\"unknown\") * 1"}}`, `usage key "unknown" is not declared`},
+		{"unused undeclared usage", `{video: {billingExpr: "false ? u(\"unknown\") : 1"}}`, `usage key "unknown" is not declared`},
+		{"profile usage mismatch", `{image: {billingExpr: "u(\"seconds\") * 0.4"}}`, `usage key "seconds" is not declared`},
+		{"negative price", `{video: {billingExpr: "-0.4 * u(\"seconds\")"}}`, "finite and non-negative"},
+		{"negative zero quantity", `{video: {billingExpr: "u(\"seconds\") == 0 ? -1 : 1"}}`, "finite and non-negative"},
+		{"negative maximum quantity", `{video: {billingExpr: "u(\"seconds\") > 1000 ? -1 : 1"}}`, "finite and non-negative"},
+		{"negative enum branch", `{video: {billingExpr: "u(\"mode\") == \"pro\" ? -1 : 1"}}`, "finite and non-negative"},
+		{"negative boolean branch", `{video: {billingExpr: "u(\"audio\") ? -1 : 1"}}`, "finite and non-negative"},
+		{"infinite price", `{video: {billingExpr: "1.0 / 0.0"}}`, "finite and non-negative"},
+		{"not a number price", `{video: {billingExpr: "0.0 / 0.0"}}`, "finite and non-negative"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			source := routingTestPluginSource("invalid-defaults", 0, `["video", "image"]`, `
+				usageSchema: {seconds: {type: "number", unit: "second"}, mode: {enum: ["std", "pro"]}, audio: {type: "boolean"}},
+				usageProfiles: [{models: ["image"], schema: {images: {type: "number", unit: "count"}}}],
+				modelDefaults: `+tt.declaration+`,`, "")
+			_, err := CompilePlugin(source, Options{})
+			require.ErrorContains(t, err, tt.wantError)
+		})
+	}
+}
+
+func TestRegistryModelDefaultsCustomEnumPrices(t *testing.T) {
+	tests := []struct {
+		name       string
+		schema     string
+		expression string
+		wantError  string
+	}{
+		{
+			name:       "authored custom value",
+			schema:     `{resolution: {enum: ["720p"], allowCustom: true}}`,
+			expression: `u("resolution") == "1080p" ? -1 : 1`,
+			wantError:  "finite and non-negative",
+		},
+		{
+			name:       "reversed comparison and normalized usage key",
+			schema:     `{resolution: {enum: ["720p"], allowCustom: true}}`,
+			expression: `"1080p" == u(" resolution ") ? -1 : 1`,
+			wantError:  "finite and non-negative",
+		},
+		{
+			name:       "unlisted fallback",
+			schema:     `{resolution: {enum: ["720p"], allowCustom: true}}`,
+			expression: `u("resolution") == "720p" ? 1 : -1`,
+			wantError:  "finite and non-negative",
+		},
+		{
+			name:       "fallback probe avoids declared collision",
+			schema:     `{resolution: {enum: ["__other__"], allowCustom: true}}`,
+			expression: `u("resolution") == "__other__" ? 1 : -1`,
+			wantError:  "finite and non-negative",
+		},
+		{
+			name:       "combined custom conditions",
+			schema:     `{resolution: {enum: ["720p"], allowCustom: true}, mode: {enum: ["std"], allowCustom: true}}`,
+			expression: `u("resolution") == "1080p" && u("mode") == "pro" ? -1 : 1`,
+			wantError:  "finite and non-negative",
+		},
+		{
+			name:       "invalid authored custom value",
+			schema:     `{resolution: {enum: ["720p"], allowCustom: true}}`,
+			expression: `u("resolution") == " 1080p " ? 2 : 1`,
+			wantError:  "custom pricing condition must be a trimmed string of at most 64 bytes",
+		},
+		{
+			name:       "numeric boundaries for every authored custom value",
+			schema:     `{a: {type: "number", unit: "count"}, b: {type: "number", unit: "count"}, c: {type: "number", unit: "count"}, d: {type: "number", unit: "count"}, resolution: {enum: ["720p"], allowCustom: true}}`,
+			expression: `u("resolution") == "1080p" && u("a") > 0 ? -1 : 1`,
+			wantError:  "finite and non-negative",
+		},
+		{
+			name:       "closed enum boundary combinations",
+			schema:     `{a: {enum: ["a0", "a1", "a2", "a3"]}, b: {enum: ["b0", "b1", "b2", "b3"]}, c: {enum: ["c0", "c1", "c2", "c3"]}, d: {enum: ["d0", "d1", "d2", "d3"]}}`,
+			expression: `u("a") == "a3" && u("d") == "d0" ? -1 : 1`,
+			wantError:  "finite and non-negative",
+		},
+		{
+			name:       "valid custom pricing and fallback",
+			schema:     `{resolution: {enum: ["720p"], allowCustom: true}, seconds: {type: "number", unit: "second"}}`,
+			expression: `(u("resolution") == "1080p" ? 0.8 : 0.4) * u("seconds")`,
+		},
+		{
+			name:       "64 custom combinations",
+			schema:     `{resolution: {enum: ["360p", "480p", "720p"], allowCustom: true}, mode: {enum: ["a", "b", "c"], allowCustom: true}, quality: {enum: ["low", "std", "high"], allowCustom: true}}`,
+			expression: `u("resolution") == "720p" ? 2 : 1`,
+		},
+		{
+			name:       "authored custom combinations exceed validation limit",
+			schema:     `{resolution: {enum: ["360p", "480p", "720p"], allowCustom: true}, mode: {enum: ["a", "b", "c"], allowCustom: true}, quality: {enum: ["low", "std", "high"], allowCustom: true}}`,
+			expression: `u("resolution") == "1080p" ? 2 : 1`,
+			wantError:  "custom pricing conditions exceed the 64-combination limit",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			source := routingTestPluginSource("custom-defaults", 0, `["video"]`,
+				`usageSchema: `+tt.schema+`, modelDefaults: {video: {billingExpr: `+fmt.Sprintf("%q", tt.expression)+`}},`, "")
+			_, err := CompilePlugin(source, Options{})
+			if tt.wantError != "" {
+				require.ErrorContains(t, err, tt.wantError)
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
+}
+
+func TestRegistryModelDefaultsLookupAndSnapshotsAreIndependent(t *testing.T) {
+	registry := NewRegistry()
+	plugin, err := registry.Register(routingTestPluginSource("defaults-snapshot", 0, `["video", "image"]`, `
+		modelDefaults: {
+			video: {displayName: "Video Model", description: {en: "Video generation"}, tags: ["video"], billingExpr: "0.4"},
+			image: {displayName: "Image Model", billingExpr: "0.02"},
+		},`, ""), Options{})
+	require.NoError(t, err)
+
+	selected, ok := plugin.Meta.DefaultsForModel("missing", "image", "video")
+	require.True(t, ok)
+	assert.Equal(t, "Image Model", selected.DisplayName)
+	selected, ok = plugin.Meta.DefaultsForModel("IMAGE", "video")
+	require.True(t, ok)
+	assert.Equal(t, "Image Model", selected.DisplayName, "upstream case variants retain precedence over the client model")
+	_, ok = plugin.Meta.DefaultsForModel()
+	assert.False(t, ok)
+	selected, ok = plugin.Meta.DefaultsForModel("video")
+	require.True(t, ok)
+	selected.Description["en"] = "Changed lookup"
+	selected.Tags[0] = "changed lookup"
+
+	snapshot := registry.Snapshot()
+	require.Len(t, snapshot.Override, 1)
+	defaults := snapshot.Override[0].ModelDefaults["video"]
+	defaults.Description["en"] = "Changed snapshot"
+	defaults.Tags[0] = "changed snapshot"
+	snapshot.Override[0].ModelDefaults["video"] = ModelDefaults{BillingExpr: "999"}
+	delete(snapshot.Override[0].ModelDefaults, "image")
+	assert.Equal(t, "Video generation", plugin.Meta.ModelDefaults["video"].Description["en"])
+	assert.Equal(t, []string{"video"}, plugin.Meta.ModelDefaults["video"].Tags)
+	assert.Equal(t, "0.4", plugin.Meta.ModelDefaults["video"].BillingExpr)
+	assert.Contains(t, plugin.Meta.ModelDefaults, "image")
+
+	meta := plugin.Meta
+	meta.ModelDefaults = map[string]ModelDefaults{"video": {Description: LocalizedText{"EN": " Video generation "}, Tags: []string{" video "}}}
+	require.NoError(t, ValidateV1Meta(meta))
+	assert.Equal(t, LocalizedText{"EN": " Video generation "}, meta.ModelDefaults["video"].Description)
+	assert.Equal(t, []string{" video "}, meta.ModelDefaults["video"].Tags)
+}
+
 func TestRegistryUsageProfilesReplaceDefaultsAndIsolateSnapshots(t *testing.T) {
 	source := routingTestPluginSource("usage-profiles", 0, `["image", "video", "default", "empty"]`, `
 usageSchema: {seconds: {type: "number", unit: "second"}},

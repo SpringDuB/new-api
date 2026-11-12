@@ -7030,6 +7030,7 @@
     "Users only see groups marked as user selectable. Non-selectable groups can still be assigned by administrators.": "用户只能看到标记为用户可选的分组。不可选分组仍可由管理员分配。",
     "uses": "使用次数",
     "Using built-in or default pricing": "使用内置或默认定价",
+    "Using plugin default pricing": "使用插件默认价格",
     "Using the complete global Auto order ({{count}} groups)": "正在使用完整全局 Auto 顺序（{{count}} 个分组）",
     "v{{installed}} is installed but this source does not list it. Installing replaces it with v{{target}}.": "当前已安装 v{{installed}}，但该源未列出此版本。安装将把它替换为 v{{target}}。",
     "Validity": "有效期",

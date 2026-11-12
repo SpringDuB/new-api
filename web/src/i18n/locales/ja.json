@@ -7030,6 +7030,7 @@
     "Users only see groups marked as user selectable. Non-selectable groups can still be assigned by administrators.": "ユーザーにはユーザー選択可のグループだけが表示されます。選択不可グループも管理者は割り当てできます。",
     "uses": "使用回数",
     "Using built-in or default pricing": "組み込みまたは既定の料金を使用",
+    "Using plugin default pricing": "プラグインの既定料金を使用中",
     "Using the complete global Auto order ({{count}} groups)": "グローバル Auto の全順序を使用中（{{count}} グループ）",
     "v{{installed}} is installed but this source does not list it. Installing replaces it with v{{target}}.": "v{{installed}} がインストールされていますが、このソースには掲載されていません。インストールすると v{{target}} に置き換わります。",
     "Validity": "有効期間",

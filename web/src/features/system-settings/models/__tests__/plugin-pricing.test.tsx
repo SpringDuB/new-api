@@ -28,7 +28,10 @@ import type {
 } from '@/features/model-pricing/api'
 import { USD_PRICING_CURRENCY } from '@/features/model-pricing/currency'
 import { ModelPricingPanel } from '@/features/model-pricing/model-pricing-panel'
-import { pricingOptions } from '@/features/model-pricing/pricing'
+import {
+  pricingFromDraft,
+  pricingOptions,
+} from '@/features/model-pricing/pricing'
 import { api } from '@/lib/api'
 import { useAuthStore } from '@/stores/auth-store'
 import { usePricingPreferencesStore } from '@/stores/pricing-preferences-store'
@@ -38,6 +41,10 @@ import {
   type ModelPricingEditorPanelHandle,
   type ModelRatioData,
 } from '../model-pricing-sheet'
+import {
+  ModelRatioVisualEditor,
+  type ModelRatioVisualEditorHandle,
+} from '../model-ratio-visual-editor'
 import { TaskPluginPricingEditor } from '../task-plugin-pricing-editor'
 
 let client: QueryClient | undefined
@@ -226,6 +233,7 @@ it('keeps long provider names accessible while allowing the tabs to wrap', () =>
       expressions={{}}
       onChange={vi.fn()}
       modelExpression='1'
+      modelBillingMode='tiered_expr'
       currency={USD_PRICING_CURRENCY}
     >
       <span>Default editor</span>
@@ -294,6 +302,7 @@ it('shows pending server validation for an expression the browser cannot check',
       expressions={{}}
       onChange={vi.fn()}
       modelExpression='futureFunction()'
+      modelBillingMode='tiered_expr'
       currency={USD_PRICING_CURRENCY}
     >
       <span>Default editor</span>
@@ -418,6 +427,572 @@ it('opens task expression pricing when only provider metadata supplies a schema'
   )
   expect(screen.getByRole('textbox', { name: 'seconds' })).toBeVisible()
 })
+
+it('inherits each plugin default without saving a model price when editing a provider', async () => {
+  const alphaDefault = 'tier("base", u("seconds") * 0.4)'
+  const betaDefault = 'tier("base", u("seconds") * 0.7)'
+  const { ref, dirty } = renderEditor(
+    { name: 'shared', billingMode: 'per-token' },
+    [
+      ['alpha', alphaDefault],
+      ['beta', betaDefault],
+    ].map(([key, expression]) => ({
+      plugin_key: key,
+      plugin_name: key,
+      usage_schema: { seconds: { type: 'number', unit: 'second' } },
+      configured: '',
+      default_expr: expression,
+      effective: expression,
+      compatible: true,
+    }))
+  )
+  expect(screen.getByRole('textbox', { name: 'seconds' })).toHaveValue('0.4')
+  expect(
+    within(screen.getByRole('tabpanel', { name: 'Default' })).getByText(
+      'Using plugin default pricing'
+    )
+  ).toBeVisible()
+  expect(dirty).toHaveBeenLastCalledWith(false)
+  const unchanged = await ref.current?.commitDraft()
+  if (!unchanged) throw new Error('Expected a valid inherited pricing draft')
+  expect(pricingFromDraft(unchanged)).toEqual({
+    'billing_setting.plugin_billing_expr': {},
+  })
+  const user = userEvent.setup()
+  await user.click(screen.getByRole('tab', { name: 'beta' }))
+  const provider = screen.getByRole('tabpanel', { name: 'beta' })
+  expect(
+    within(provider).getByText('Using plugin default pricing')
+  ).toBeVisible()
+  expect(within(provider).getByText(betaDefault)).toBeVisible()
+  const toggle = within(provider).getByRole('switch', {
+    name: 'Set separately for this provider',
+  })
+  await user.click(toggle)
+  expect(
+    within(provider).getByRole('textbox', { name: 'seconds' })
+  ).toHaveValue('0.7')
+  const draft = await ref.current?.commitDraft()
+  if (!draft) throw new Error('Expected a valid provider pricing draft')
+  expect(pricingFromDraft(draft)).toEqual({
+    'billing_setting.plugin_billing_expr': { beta: betaDefault },
+  })
+  await user.click(toggle)
+  expect(within(provider).getByText(betaDefault)).toBeVisible()
+  expect(dirty).toHaveBeenLastCalledWith(false)
+  const restored = await ref.current?.commitDraft()
+  if (!restored) throw new Error('Expected a valid inherited pricing draft')
+  expect(pricingFromDraft(restored)).toEqual({
+    'billing_setting.plugin_billing_expr': {},
+  })
+})
+
+it('uses an edited model price after removing a provider override instead of its plugin default', async () => {
+  const pluginDefault = 'tier("base", u("seconds") * 0.4)'
+  const savedOverride = 'tier("base", u("seconds") * 0.8)'
+  const { ref } = renderEditor(
+    {
+      name: 'shared',
+      billingMode: 'per-token',
+      pluginBillingExpr: { alpha: savedOverride },
+    },
+    [
+      {
+        plugin_key: 'alpha',
+        plugin_name: 'Alpha',
+        usage_schema: { seconds: { type: 'number', unit: 'second' } },
+        configured: savedOverride,
+        default_expr: pluginDefault,
+        effective: savedOverride,
+        compatible: true,
+      },
+    ]
+  )
+  const user = userEvent.setup()
+  const modelPrice = screen.getByRole('textbox', { name: 'seconds' })
+  expect(modelPrice).toHaveValue('0.4')
+  await user.clear(modelPrice)
+  await user.type(modelPrice, '0.6')
+  await user.click(screen.getByRole('tab', { name: 'Alpha' }))
+  const provider = screen.getByRole('tabpanel', { name: 'Alpha' })
+  expect(
+    within(provider).getByRole('textbox', { name: 'seconds' })
+  ).toHaveValue('0.8')
+  await user.click(
+    within(provider).getByRole('switch', {
+      name: 'Set separately for this provider',
+    })
+  )
+  expect(within(provider).getByText('Use model-level expression')).toBeVisible()
+  expect(
+    within(provider).getByText('tier("base", u("seconds") * 0.6)')
+  ).toBeVisible()
+  expect(await ref.current?.commitDraft()).toMatchObject({
+    billingMode: 'tiered_expr',
+    billingExpr: 'tier("base", u("seconds") * 0.6)',
+    pluginBillingExpr: {},
+  })
+})
+
+it('preserves distinct plugin defaults when configuring ordinary OpenAI pricing', async () => {
+  const alphaDefault = 'tier("base", u("seconds") * 0.4)'
+  const betaDefault = 'tier("base", u("seconds") * 0.7)'
+  const { ref } = renderEditor(
+    { name: 'shared', billingMode: 'per-token' },
+    [
+      ['alpha', alphaDefault],
+      ['beta', betaDefault],
+    ].map(([key, expression]) => ({
+      plugin_key: key,
+      plugin_name: key,
+      usage_schema: { seconds: { type: 'number', unit: 'second' } },
+      configured: '',
+      default_expr: expression,
+      effective: expression,
+      compatible: true,
+    }))
+  )
+  const user = userEvent.setup()
+  await user.click(screen.getByRole('tab', { name: 'Ordinary OpenAI' }))
+  await user.click(
+    screen.getByRole('button', { name: 'Configure ordinary OpenAI pricing' })
+  )
+  const price = screen.getByRole('textbox', { name: 'Input price' })
+  await user.clear(price)
+  await user.type(price, '2.5')
+  expect(await ref.current?.commitDraft()).toMatchObject({
+    billingMode: 'tiered_expr',
+    billingExpr: 'tier("base", p * 2.5 + c * 0)',
+    pluginBillingExpr: { alpha: alphaDefault, beta: betaDefault },
+  })
+})
+
+it('saves an explicit zero per-request price selected over a plugin default', async () => {
+  const pluginDefault = 'tier("base", u("seconds") * 0.4)'
+  const { ref } = renderEditor({ name: 'shared', billingMode: 'per-token' }, [
+    {
+      plugin_key: 'alpha',
+      plugin_name: 'Alpha',
+      usage_schema: { seconds: { type: 'number', unit: 'second' } },
+      configured: '',
+      default_expr: pluginDefault,
+      effective: pluginDefault,
+      compatible: true,
+    },
+  ])
+  const user = userEvent.setup()
+  await user.click(
+    screen.getByRole('tab', { name: 'Per-request (deprecated)' })
+  )
+  await user.type(screen.getByRole('textbox', { name: 'Fixed price' }), '0')
+  await user.click(screen.getByRole('tab', { name: 'Alpha' }))
+  expect(screen.getByText('Use model-level pricing')).toBeVisible()
+  expect(await ref.current?.commitDraft()).toMatchObject({
+    billingMode: 'per-request',
+    price: '0',
+    pluginBillingExpr: {},
+  })
+})
+
+it('preserves a saved zero model expression instead of replacing it with a plugin default', async () => {
+  const expression = 'tier("base", p * 0 + c * 0)'
+  const { ref, dirty } = renderEditor(
+    { name: 'shared', billingMode: 'tiered_expr', billingExpr: expression },
+    [
+      {
+        plugin_key: 'alpha',
+        plugin_name: 'Alpha',
+        usage_schema: { seconds: { type: 'number', unit: 'second' } },
+        configured: '',
+        default_expr: 'tier("base", u("seconds") * 0.4)',
+        effective: expression,
+        compatible: true,
+      },
+    ]
+  )
+  await userEvent.setup().click(screen.getByRole('tab', { name: 'Alpha' }))
+  const provider = screen.getByRole('tabpanel', { name: 'Alpha' })
+  expect(within(provider).getByText('Use model-level expression')).toBeVisible()
+  expect(within(provider).getByText(expression)).toBeVisible()
+  expect(dirty).toHaveBeenLastCalledWith(false)
+  expect(await ref.current?.commitDraft()).toMatchObject({
+    billingMode: 'tiered_expr',
+    billingExpr: expression,
+    pluginBillingExpr: {},
+  })
+})
+
+it('keeps a mapped provider price when editing the origin model and removing its direct override', async () => {
+  const pluginDefault = 'tier("base", u("seconds") * 0.4)'
+  const mappedOverride = 'tier("base", u("seconds") * 0.8)'
+  const directOverride = 'tier("base", u("seconds") * 0.9)'
+  const { ref } = renderEditor(
+    {
+      name: 'alias',
+      billingMode: 'per-token',
+      inheritModelPricing: true,
+      pluginBillingExpr: { alpha: directOverride },
+    },
+    [
+      {
+        plugin_key: 'alpha',
+        plugin_name: 'Alpha',
+        usage_schema: { seconds: { type: 'number', unit: 'second' } },
+        configured: directOverride,
+        mapped_provider_expr: mappedOverride,
+        default_expr: pluginDefault,
+        effective: directOverride,
+        compatible: true,
+      },
+    ]
+  )
+  const user = userEvent.setup()
+  expect(screen.getByRole('textbox', { name: 'seconds' })).toHaveValue('0.8')
+  await user.click(screen.getByRole('tab', { name: 'Alpha' }))
+  const provider = screen.getByRole('tabpanel', { name: 'Alpha' })
+  const separate = within(provider).getByRole('switch', {
+    name: 'Set separately for this provider',
+  })
+  expect(
+    within(provider).getByRole('textbox', { name: 'seconds' })
+  ).toHaveValue('0.9')
+  await user.click(separate)
+  expect(within(provider).getByText(mappedOverride)).toBeVisible()
+  await user.click(separate)
+  expect(
+    within(provider).getByRole('textbox', { name: 'seconds' })
+  ).toHaveValue('0.8')
+  await user.click(separate)
+  const inherited = await ref.current?.commitDraft()
+  if (!inherited) throw new Error('Expected a valid inherited pricing draft')
+  expect(pricingFromDraft(inherited)).toEqual({
+    'billing_setting.plugin_billing_expr': {},
+  })
+  await user.click(screen.getByRole('tab', { name: 'Default' }))
+  const modelPrice = screen.getByRole('textbox', { name: 'seconds' })
+  await user.clear(modelPrice)
+  await user.type(modelPrice, '0.6')
+  await user.click(screen.getByRole('tab', { name: 'Alpha' }))
+  expect(within(provider).getByText(mappedOverride)).toBeVisible()
+  await user.click(separate)
+  expect(
+    within(provider).getByRole('textbox', { name: 'seconds' })
+  ).toHaveValue('0.8')
+  await user.click(separate)
+  expect(await ref.current?.commitDraft()).toMatchObject({
+    billingExpr: 'tier("base", u("seconds") * 0.6)',
+    pluginBillingExpr: {},
+  })
+})
+
+it('inherits a mapped model expression while the origin explicitly uses legacy pricing', async () => {
+  const mappedExpression = 'tier("base", u("seconds") * 0.8)'
+  const { ref } = renderEditor(
+    {
+      name: 'alias',
+      billingMode: 'per-request',
+      price: '0',
+      inheritModelPricing: false,
+    },
+    [
+      {
+        plugin_key: 'alpha',
+        plugin_name: 'Alpha',
+        usage_schema: { seconds: { type: 'number', unit: 'second' } },
+        configured: '',
+        mapped_model_expr: mappedExpression,
+        default_expr: 'tier("base", u("seconds") * 0.4)',
+        effective: mappedExpression,
+        compatible: true,
+      },
+    ]
+  )
+  const user = userEvent.setup()
+  await user.click(screen.getByRole('tab', { name: 'Alpha' }))
+  const provider = screen.getByRole('tabpanel', { name: 'Alpha' })
+  expect(within(provider).getByText(mappedExpression)).toBeVisible()
+  await user.click(
+    within(provider).getByRole('switch', {
+      name: 'Set separately for this provider',
+    })
+  )
+  expect(
+    within(provider).getByRole('textbox', { name: 'seconds' })
+  ).toHaveValue('0.8')
+  expect(await ref.current?.commitDraft()).toMatchObject({
+    billingMode: 'per-request',
+    price: '0',
+    pluginBillingExpr: { alpha: mappedExpression },
+  })
+})
+
+it('keeps an explicitly empty tiered draft unconfigured instead of inheriting a mapped or plugin price', async () => {
+  render(
+    <TaskPluginPricingEditor
+      variants={[
+        {
+          plugin_key: 'alpha',
+          plugin_name: 'Alpha',
+          usage_schema: { seconds: { type: 'number', unit: 'second' } },
+          configured: '',
+          mapped_model_expr: 'tier("base", u("seconds") * 0.8)',
+          default_expr: 'tier("base", u("seconds") * 0.4)',
+          effective: 'tier("base", u("seconds") * 0.8)',
+          compatible: true,
+        },
+      ]}
+      expressions={{}}
+      onChange={vi.fn()}
+      modelExpression=''
+      modelBillingMode='tiered_expr'
+      currency={USD_PRICING_CURRENCY}
+    >
+      <span>Default editor</span>
+    </TaskPluginPricingEditor>
+  )
+  await userEvent.setup().click(screen.getByRole('tab', { name: 'Alpha' }))
+  expect(screen.getByText('Not configured for this provider')).toBeVisible()
+  expect(
+    screen.queryByText('Using plugin default pricing')
+  ).not.toBeInTheDocument()
+})
+
+it('does not report an incompatible origin expression for a provider with a mapped override', async () => {
+  const mappedOverride = 'tier("base", u("seconds") * 0.8)'
+  renderEditor(
+    {
+      name: 'alias',
+      billingMode: 'tiered_expr',
+      billingExpr: 'tier("base", u("credits") * 0.6)',
+    },
+    [
+      {
+        plugin_key: 'alpha',
+        plugin_name: 'Alpha',
+        usage_schema: { seconds: { type: 'number', unit: 'second' } },
+        configured: '',
+        mapped_provider_expr: mappedOverride,
+        default_expr: 'tier("base", u("seconds") * 0.4)',
+        effective: mappedOverride,
+        compatible: true,
+      },
+    ]
+  )
+  expect(
+    screen.queryByText(
+      'The model-level expression cannot be evaluated by: Alpha'
+    )
+  ).not.toBeInTheDocument()
+  await userEvent.setup().click(screen.getByRole('tab', { name: 'Alpha' }))
+  expect(screen.getByText(mappedOverride)).toBeVisible()
+  expect(
+    screen.queryByText('Not configured for this provider')
+  ).not.toBeInTheDocument()
+})
+
+it('keeps a cleared model expression explicit after editing an inherited default', async () => {
+  const expression = 'tier("base", u("seconds") * 0.4)'
+  const { dirty } = renderEditor(
+    {
+      name: 'shared',
+      billingMode: 'per-token',
+      inheritModelPricing: true,
+    },
+    [
+      {
+        plugin_key: 'alpha',
+        plugin_name: 'Alpha',
+        usage_schema: { seconds: { type: 'number', unit: 'second' } },
+        configured: '',
+        default_expr: expression,
+        effective: expression,
+        compatible: true,
+      },
+    ]
+  )
+  const user = userEvent.setup()
+  await user.click(screen.getByRole('combobox', { name: 'Editor mode' }))
+  await user.click(screen.getByRole('option', { name: 'Expression editor' }))
+  await user.clear(screen.getByRole('textbox', { name: 'Billing expression' }))
+  expect(dirty).toHaveBeenLastCalledWith(true)
+  await user.click(screen.getByRole('tab', { name: 'Alpha' }))
+  const provider = screen.getByRole('tabpanel', { name: 'Alpha' })
+  expect(
+    within(provider).getByText('Not configured for this provider')
+  ).toBeVisible()
+  expect(
+    within(provider).queryByText('Using plugin default pricing')
+  ).not.toBeInTheDocument()
+})
+
+it('commits the confirmed visual reset of an inherited custom expression', async () => {
+  const expression = 'tier("base", u("seconds") * u("seconds") * 0.4)'
+  const { ref } = renderEditor(
+    { name: 'shared', billingMode: 'per-token', inheritModelPricing: true },
+    [
+      {
+        plugin_key: 'alpha',
+        plugin_name: 'Alpha',
+        usage_schema: { seconds: { type: 'number', unit: 'second' } },
+        configured: '',
+        default_expr: expression,
+        effective: expression,
+        compatible: true,
+      },
+    ]
+  )
+  const user = userEvent.setup()
+  expect(
+    screen.getByRole('textbox', { name: 'Billing expression' })
+  ).toHaveValue(expression)
+  await user.click(screen.getByRole('combobox', { name: 'Editor mode' }))
+  await user.click(screen.getByRole('option', { name: 'Visual editor' }))
+  await user.click(
+    within(screen.getByRole('alertdialog')).getByRole('button', {
+      name: 'Switch to visual editor',
+    })
+  )
+  expect(screen.getByRole('textbox', { name: 'seconds' })).toHaveValue('0')
+  expect(await ref.current?.commitDraft()).toMatchObject({
+    billingMode: 'tiered_expr',
+    billingExpr: 'tier("base", u("seconds") * 0)',
+  })
+})
+
+it.each([
+  {
+    kind: 'explicit ratio-only',
+    mode: '{"shared":"ratio"}',
+    cacheRatio: '{}',
+    configured: { 'billing_setting.billing_mode': 'ratio' },
+    inherited: false,
+  },
+  {
+    kind: 'modifier-only',
+    mode: '{}',
+    cacheRatio: '{"shared":0.25}',
+    configured: { CacheRatio: 0.25 },
+    inherited: true,
+  },
+])(
+  'retains $kind configuration when editing a provider through the global model table',
+  async (fixture) => {
+    useAuthStore
+      .getState()
+      .auth.setUser({ id: 1, username: 'administrator', role: 100 })
+    usePricingPreferencesStore.setState({ currency: 'USD' })
+    const mode = fixture.mode
+    const expression = 'tier("base", u("seconds") * 0.4)'
+    const snapshot: ModelPricingConfig = {
+      options: pricingOptions({ BillingMode: mode }),
+      empty_version: 'empty',
+      entries: [
+        {
+          model_name: 'shared',
+          version: 'explicit-ratio',
+          configured: fixture.configured,
+          effective: fixture.configured,
+          usage_schema: { seconds: { type: 'number', unit: 'second' } },
+          plugin_variants: [
+            {
+              plugin_key: 'alpha',
+              plugin_name: 'Alpha',
+              usage_schema: { seconds: { type: 'number', unit: 'second' } },
+              configured: '',
+              default_expr: expression,
+              effective: fixture.inherited ? expression : '',
+              compatible: fixture.inherited,
+            },
+          ],
+        },
+      ],
+    }
+    vi.spyOn(api, 'get').mockImplementation(async (url) => {
+      if (url === '/api/option/model_pricing') {
+        return { data: { success: true, data: snapshot } }
+      }
+      return { data: { success: true, data: [], vendors: [] } }
+    })
+    vi.spyOn(api, 'post').mockResolvedValue({
+      data: { success: true, data: { effective: {} } },
+    })
+    client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const ref = createRef<ModelRatioVisualEditorHandle>()
+    const onChange = vi.fn()
+    render(
+      <QueryClientProvider client={client}>
+        <ModelRatioVisualEditor
+          ref={ref}
+          savedModelPrice='{}'
+          savedModelRatio='{}'
+          savedCacheRatio={fixture.cacheRatio}
+          savedCreateCacheRatio='{}'
+          savedCompletionRatio='{}'
+          savedImageRatio='{}'
+          savedAudioRatio='{}'
+          savedAudioCompletionRatio='{}'
+          savedBillingMode={mode}
+          savedBillingExpr='{}'
+          modelPrice='{}'
+          modelRatio='{}'
+          cacheRatio={fixture.cacheRatio}
+          createCacheRatio='{}'
+          completionRatio='{}'
+          imageRatio='{}'
+          audioRatio='{}'
+          audioCompletionRatio='{}'
+          billingMode={mode}
+          billingExpr='{}'
+          onChange={onChange}
+          onSave={vi.fn()}
+          isSaving={false}
+        />
+      </QueryClientProvider>
+    )
+    const user = userEvent.setup()
+    await waitFor(() => expect(client?.isFetching()).toBe(0))
+    await user.click(
+      within(await screen.findByRole('row', { name: /shared/ })).getByText(
+        'shared'
+      )
+    )
+    await screen.findByRole('tab', { name: 'Alpha' })
+    expect(
+      screen.getByRole('tab', {
+        name: fixture.inherited ? 'Expression' : 'Per-token (deprecated)',
+      })
+    ).toHaveAttribute('aria-selected', 'true')
+    await user.click(screen.getByRole('tab', { name: 'Alpha' }))
+    const provider = screen.getByRole('tabpanel', { name: 'Alpha' })
+    expect(
+      within(provider).getByText(
+        fixture.inherited
+          ? 'Using plugin default pricing'
+          : 'Use model-level pricing'
+      )
+    ).toBeVisible()
+    await user.click(
+      screen.getByRole('switch', { name: 'Set separately for this provider' })
+    )
+    const price = screen.getByRole('textbox', { name: 'seconds' })
+    await user.clear(price)
+    await user.type(price, '0.8')
+    await act(async () => {
+      expect(await ref.current?.commitOpenEditor()).toBe(true)
+    })
+    const saved = Object.fromEntries(
+      onChange.mock.calls.map(([key, value]) => [key, JSON.parse(value)])
+    )
+    expect(saved['billing_setting.billing_mode']).toEqual(
+      fixture.inherited ? {} : { shared: 'ratio' }
+    )
+    expect(saved.CacheRatio).toEqual(JSON.parse(fixture.cacheRatio))
+    expect(saved['billing_setting.billing_expr']).toEqual({})
+    expect(saved['billing_setting.plugin_billing_expr']).toEqual({
+      'alpha::shared': 'tier("base", u("seconds") * 0.8)',
+    })
+  }
+)
 
 it('configures ordinary OpenAI pricing while preserving inherited and saved plugin prices', async () => {
   const expression = 'tier("base", u("seconds") * 0.4)'
