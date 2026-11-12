@@ -323,6 +323,21 @@ const MODELS = {
     },
     billing: { billing_unit: "second", resolution_prices: { "480p": 0.22, "720p": 0.3 }, equivalent_second_price: 0.3 },
   },
+  "lec-jm-seedance-2-5-flash": {
+    kind: "video",
+    name: "Seedance 2.5 Flash（JM）",
+    icon: "Doubao.Color",
+    tags: ["flash", "per_second", "supported", "image", "audio"],
+    parameters: {
+      prompt: { type: "string", required: true },
+      duration: { type: "integer", required: true, default: 5, min: 4, max: 30, step: 1 },
+      resolution: { type: "enum", default: "720p", values: ["480p", "720p"] },
+      aspect_ratio: { type: "enum", default: "16:9", values: ["21:9", "16:9", "4:3", "1:1", "3:4", "9:16"] },
+      images: { type: "array", constraints: { max_items: 10, url_schemes: ["https"] } },
+      audios: { type: "array", constraints: { max_items: 5, url_schemes: ["https"] } },
+    },
+    billing: { billing_unit: "second", resolution_prices: { "480p": 0.15, "720p": 0.2 }, equivalent_second_price: 0.2 },
+  },
   "lec-mf-gemini-omni-1-2-flash": {
     kind: "video",
     name: "Gemini Omni 1.2 Flash（MF）",
@@ -1494,7 +1509,7 @@ export const meta = {
   key: "lecapi",
   name: "LecAPI",
   icon: "text:LE",
-  version: "1.0.3",
+  version: "1.0.5",
   author: { name: "QuantumNous" },
   website: "https://api.lecapi.net/docs",
   baseUrl: "https://api.lecapi.net",
@@ -1620,15 +1635,23 @@ function parameterValue(value, parameter, field) {
   return value;
 }
 
-function reducedAspectRatio(width, height) {
-  let divisor = width,
-    remainder = height;
-  while (remainder) {
-    const next = divisor % remainder;
-    divisor = remainder;
-    remainder = next;
+function closestImageAspectRatio(width, height, profile) {
+  const ratios = ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9"];
+  if (["lec-sl-midjourney", "lec-sl-midjourney-niji"].includes(profile.vendorModel)) ratios.push("4:5", "5:4");
+  let closest,
+    closestDistance = Infinity;
+  for (const ratio of ratios) {
+    if (!profile.parameters.aspect_ratio.values.includes(ratio)) continue;
+    const [numerator, denominator] = ratio.split(":").map(Number);
+    // Relative distance treats landscape and portrait canvases symmetrically.
+    const distance = Math.abs(Math.log(width / height / (numerator / denominator)));
+    if (distance < closestDistance) {
+      closest = ratio;
+      closestDistance = distance;
+    }
   }
-  return width / divisor + ":" + height / divisor;
+  if (!closest) throw new Error("model does not support a canvas aspect ratio");
+  return closest;
 }
 
 function materialValue(value, parameter, field) {
@@ -1712,13 +1735,8 @@ function submission(ctx) {
             height = Number(dimensions[2]);
           if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) || width <= 0 || height <= 0)
             throw new Error("size must contain positive safe integer pixel dimensions");
-          // Reduce exactly; never approximate an unsupported canvas shape or infer a billing resolution.
-          const ratio = reducedAspectRatio(width, height);
-          value =
-            profile.parameters.aspect_ratio.values.find((candidate) => {
-              const [numerator, denominator] = candidate.split(":").map(Number);
-              return reducedAspectRatio(numerator, denominator) === ratio;
-            }) || ratio;
+          // Snap the canvas shape without changing resolution or its billing tier.
+          value = closestImageAspectRatio(width, height, profile);
           target = "aspect_ratio";
         }
       }

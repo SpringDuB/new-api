@@ -56,7 +56,7 @@ func TestLecAPIBindsCatalogModelsToTheirMediaProtocol(t *testing.T) {
 	registry := jsplugin.NewRegistry()
 	plugin, err := registry.RegisterFactory(source, jsplugin.Options{Key: "lecapi"})
 	require.NoError(t, err)
-	require.Len(t, plugin.Meta.Models, 73)
+	require.Len(t, plugin.Meta.Models, 74)
 	assert.Contains(t, plugin.Meta.RequiredCapabilities, "submit-no-retry@1")
 	assert.True(t, plugin.Meta.SupportsUpstream(jsplugin.UpstreamKindNewAPI))
 	priced := 0
@@ -71,10 +71,11 @@ func TestLecAPIBindsCatalogModelsToTheirMediaProtocol(t *testing.T) {
 			assert.NotContains(t, description, "lec-")
 		}
 	}
-	assert.Equal(t, 69, priced)
+	assert.Equal(t, 70, priced)
 	for _, tc := range []struct{ name, vendor string }{
 		{"aj-wan-3-0", "Wan"}, {"ms-minimax-h3", "Minimax"}, {"ac-image-2", "OpenAI"},
 		{"ac-seedream-5-0-lite", "ByteDance"}, {"gt-seedance-2-5-720p", "ByteDance"},
+		{"jm-seedance-2-5-flash", "ByteDance"},
 		{"nano-banana-2", "Google"}, {"sl-midjourney", "Midjourney"}, {"mf-video-upscale", ""},
 	} {
 		assert.Equal(t, tc.vendor, plugin.Meta.ModelDefaults[tc.name].Vendor, tc.name)
@@ -126,6 +127,7 @@ func TestLecAPIPublicModelsPreserveVendorRoutingAndGatewayChaining(t *testing.T)
 	plugin := loadLecAPIPlugin(t)
 	for _, tc := range []struct{ public, vendor string }{
 		{"aj-wan-3-0", "lec-aj-wan-3-0"}, {"ac-image-2", "lec-ac-image-2"}, {"image-2", "lec-image-2"}, {"image2", "image2"}, {"nano-banana-2", "nano-banana-2"},
+		{"jm-seedance-2-5-flash", "lec-jm-seedance-2-5-flash"},
 	} {
 		ctx := lecAPIContext(tc.public, map[string]any{"prompt": "boat"})
 		assert.Equal(t, tc.vendor, lecAPIHook(t, plugin, "buildSubmitRequest", ctx)["body"].(map[string]any)["model"])
@@ -182,6 +184,55 @@ func TestLecAPIBuildsAndMetersTheFinalMappedBody(t *testing.T) {
 	}
 }
 
+func TestLecAPISeedanceFlashBuildsAndMetersDocumentedRequests(t *testing.T) {
+	plugin := loadLecAPIPlugin(t)
+	images, audios := make([]any, 10), make([]any, 5)
+	for i := range images {
+		images[i] = "https://media.example/reference.png"
+	}
+	for i := range audios {
+		audios[i] = "https://media.example/reference.mp3"
+	}
+	ctx := lecAPIContext("jm-seedance-2-5-flash", map[string]any{"prompt": "A red boat", "metadata": map[string]any{"parameters": map[string]any{
+		"seconds": "4", "resolution_name": "480P", "ratio": "21:9", "image_urls": images, "audio_urls": audios,
+	}}})
+	ctx["model"] = "canvas-flash-alias"
+	submit := lecAPIHook(t, plugin, "buildSubmitRequest", ctx)
+	assert.Equal(t, "https://lec.example/v1/videos", submit["url"])
+	body := submit["body"].(map[string]any)
+	assert.Equal(t, "lec-jm-seedance-2-5-flash", body["model"])
+	assert.Equal(t, float64(4), body["duration"])
+	assert.Equal(t, "480p", body["resolution"])
+	assert.Equal(t, "21:9", body["aspect_ratio"])
+	assert.Len(t, body["images"], 10)
+	assert.Len(t, body["audios"], 5)
+	facts := lecAPIHook(t, plugin, "extractUsage", ctx)
+	assert.Equal(t, body["duration"], facts["seconds"])
+	assert.Equal(t, body["resolution"], facts["resolution"])
+	parsed := lecAPIHook(t, plugin, "parseSubmitResponse", ctx, map[string]any{"body": map[string]any{"id": "flash/id", "status": "queued"}})
+	assert.Equal(t, "flash/id", parsed["taskId"])
+	assert.NotContains(t, parsed, "immediate")
+	query := maps.Clone(ctx)
+	query["taskId"] = parsed["taskId"]
+	assert.Equal(t, "https://lec.example/v1/videos/flash%2Fid", lecAPIHook(t, plugin, "buildQueryRequest", query)["url"])
+	completed := lecAPIHook(t, plugin, "extractUsageOnComplete", ctx, map[string]any{"status": "SUCCESS"}, map[string]any{"seconds": 30})
+	assert.Equal(t, float64(30), completed["seconds"])
+	for _, invalid := range []map[string]any{
+		{"duration": 3}, {"duration": 31}, {"duration": 4.5}, {"parameters": map[string]any{"duration": 9007199254740992}},
+		{"resolution": "1080p"}, {"aspect_ratio": "3:2"}, {"n": 2},
+		{"videos": []any{"https://media.example/reference.mp4"}}, {"extra": map[string]any{"video_url": "https://media.example/reference.mp4"}},
+		{"images": append(images, "https://media.example/extra.png")}, {"audios": append(audios, "https://media.example/extra.mp3")},
+		{"images": []any{"http://media.example/reference.png"}},
+	} {
+		request := maps.Clone(invalid)
+		request["prompt"] = "A red boat"
+		for _, hook := range []string{"buildSubmitRequest", "extractUsage"} {
+			_, err := plugin.Engine.Call(t.Context(), hook, lecAPIContext("jm-seedance-2-5-flash", request))
+			require.Error(t, err, "%s must reject unsupported Flash parameters: %v", hook, invalid)
+		}
+	}
+}
+
 func TestLecAPIConvertsImageSizesWithoutChangingGenerationSettings(t *testing.T) {
 	plugin := loadLecAPIPlugin(t)
 	for _, protocol := range plugin.Meta.Protocols {
@@ -191,7 +242,7 @@ func TestLecAPIConvertsImageSizesWithoutChangingGenerationSettings(t *testing.T)
 		require.NotEmpty(t, protocol.Models)
 		for _, name := range protocol.Models {
 			t.Run(name, func(t *testing.T) {
-				ctx := lecAPIContext(name, map[string]any{"prompt": "boat", "size": "3840x2160"})
+				ctx := lecAPIContext(name, map[string]any{"prompt": "boat", "size": "1792x1024"})
 				body := lecAPIHook(t, plugin, "buildSubmitRequest", ctx)["body"].(map[string]any)
 				assert.Equal(t, "16:9", body["aspect_ratio"])
 				assert.NotContains(t, body, "size")
@@ -207,6 +258,9 @@ func TestLecAPIConvertsImageSizesWithoutChangingGenerationSettings(t *testing.T)
 		{"1024x1024", "1:1"}, {"3840x2160", "16:9"}, {"2160x3840", "9:16"},
 		{"2048x1536", "4:3"}, {"1536x2048", "3:4"}, {"1536x1024", "3:2"}, {"1024x1536", "2:3"},
 		{" 3840 X 2160 ", "16:9"}, {"3840×2160", "16:9"}, {"16:9", "16:9"},
+		{"1792x1024", "16:9"}, {"1024x1792", "9:16"}, {"1100x1000", "1:1"},
+		{"1200x1000", "4:3"}, {"1000x1200", "3:4"},
+		{"1280x1024", "4:3"}, {"1024x1280", "3:4"},
 	} {
 		t.Run(tc.size, func(t *testing.T) {
 			ctx := lecAPIContext("tinysnow-image-2-5-flare", map[string]any{"prompt": "boat", "size": tc.size, "resolution": "4k", "quality": "high", "n": 2})
@@ -257,17 +311,21 @@ func TestLecAPIConvertsImageSizesWithoutChangingGenerationSettings(t *testing.T)
 	video := lecAPIHook(t, plugin, "buildSubmitRequest", lecAPIContext("omni-video-redraw", map[string]any{"prompt": "boat", "size": "1280x720"}))["body"].(map[string]any)
 	assert.Equal(t, "1280x720", video["size"])
 	assert.NotContains(t, video, "aspect_ratio")
-	for _, tc := range []struct{ size, ratio string }{{"2520x1080", "21:9"}, {"1792x768", "21:9"}, {"1024x1280", "4:5"}} {
-		body := lecAPIHook(t, plugin, "buildSubmitRequest", lecAPIContext("sl-midjourney", map[string]any{"prompt": "boat", "size": tc.size}))["body"].(map[string]any)
-		assert.Equal(t, tc.ratio, body["aspect_ratio"], "equivalent aspect ratios must retain the model's declared spelling")
+	for _, name := range []string{"sl-midjourney", "sl-midjourney-niji"} {
+		for _, tc := range []struct{ size, ratio string }{
+			{"2520x1080", "21:9"}, {"1792x768", "21:9"}, {"2500x1080", "21:9"},
+			{"1024x1280", "4:5"}, {"1280x1024", "5:4"}, {"1000x1280", "4:5"}, {"1280x1000", "5:4"},
+			{"4:5", "4:5"}, {"5:4", "5:4"},
+		} {
+			body := lecAPIHook(t, plugin, "buildSubmitRequest", lecAPIContext(name, map[string]any{"prompt": "boat", "size": tc.size}))["body"].(map[string]any)
+			assert.Equal(t, tc.ratio, body["aspect_ratio"], "%s must match the closest supported canvas ratio for %s", name, tc.size)
+		}
 	}
-	for _, hook := range []string{"buildSubmitRequest", "extractUsage"} {
-		_, err := plugin.Engine.Call(t.Context(), hook, lecAPIContext("ty-seedream-5-pro", map[string]any{"prompt": "boat", "size": "1536x1024"}))
-		require.ErrorContains(t, err, "aspect_ratio must be one of", "conversion must enforce the selected model's narrower aspect ratios")
-	}
+	seedream := lecAPIHook(t, plugin, "buildSubmitRequest", lecAPIContext("ty-seedream-5-pro", map[string]any{"prompt": "boat", "size": "1536x1024"}))["body"].(map[string]any)
+	assert.Equal(t, "4:3", seedream["aspect_ratio"], "the nearest ratio must also be supported by the selected model")
 	for _, invalid := range []map[string]any{
 		{"size": "0x2160"}, {"size": "3840x-2160"}, {"size": "9007199254740992x9007199254740992"},
-		{"size": "1792x1024"}, {"size": "auto"}, {"size": "3840x2160", "aspect_ratio": "1:1"},
+		{"size": "auto"}, {"size": "3840x2160", "aspect_ratio": "1:1"},
 		{"size": "3840x2160", "metadata": map[string]any{"ratio": "9:16"}},
 		{"size": "4k", "resolution": "2K"}, {"size": "3840x2160", "quality": "ultra"},
 		{"size": "3840x2160", "resolution": "8K"}, {"size": "3840x2160", "metadata": map[string]any{"n": 11}},
@@ -421,6 +479,7 @@ func TestLecAPICompletionDurationsStayWithinTheModelContract(t *testing.T) {
 		seconds any
 	}{
 		{"aj-wan-3-0", 31}, {"aj-wan-3-0", 5.5}, {"ms-minimax-h3", 31}, {"mf-video-upscale", 2},
+		{"jm-seedance-2-5-flash", 3}, {"jm-seedance-2-5-flash", 31}, {"jm-seedance-2-5-flash", 4.5},
 	} {
 		facts := lecAPIHook(t, plugin, "extractUsageOnComplete", lecAPIContext(tc.model, nil), map[string]any{"status": "SUCCESS"}, map[string]any{"seconds": tc.seconds})
 		assert.Empty(t, facts, "invalid or output-dependent source usage must retain the reserved facts: %s", tc.model)
@@ -459,6 +518,9 @@ func TestLecAPIChargesThePublishedBillingUnit(t *testing.T) {
 	}{
 		{"wan-3-0-h2", map[string]any{"prompt": "boat", "duration": 12, "resolution": "720p"}, 3.6},
 		{"aj-wan-3-0", map[string]any{"prompt": "boat", "duration": 7, "resolution": "1080p"}, 5.124},
+		{"jm-seedance-2-5-flash", map[string]any{"prompt": "boat"}, 1.2},
+		{"jm-seedance-2-5-flash", map[string]any{"prompt": "boat", "duration": 4, "resolution": "480p"}, 0.72},
+		{"jm-seedance-2-5-flash", map[string]any{"prompt": "boat", "duration": 30, "resolution": "720p"}, 7.2},
 		{"tinysnow-image-2", map[string]any{"prompt": "boat", "n": 3}, 0.18},
 		{"ac-image-2-5-flare", map[string]any{"prompt": "boat", "size": "3840x2160", "resolution": "4k"}, 0.12},
 		{"ac-image-2-5-flare", map[string]any{"prompt": "boat", "size": "3840x2160"}, 0.06},
@@ -638,7 +700,7 @@ func TestLecAPIHostReservesAndSettlesDefaultPricesWithoutSavedConfiguration(t *t
 			pinned := jsplugin.PinnedPlugin{Plugin: plugin, Generation: jsplugin.DefaultRegistry.Generation()}
 			if tc.update {
 				updated := strings.Replace(source, "price * 1.2", "price * 2.4", 1)
-				updated = strings.Replace(updated, `version: "1.0.3"`, `version: "1.0.4"`, 1)
+				updated = strings.Replace(updated, `version: "1.0.5"`, `version: "1.0.6"`, 1)
 				newPlugin, err := jsplugin.DefaultRegistry.Register(updated, jsplugin.Options{Key: "lecapi"})
 				require.NoError(t, err)
 				t.Cleanup(func() { require.NoError(t, jsplugin.DefaultRegistry.Unregister("lecapi")) })
