@@ -1398,15 +1398,29 @@ func (a *TaskAdaptor) BuildContentRequest(ctx context.Context, task *model.Task,
 		return nil, err
 	}
 	hookContext["upstreamTaskId"] = task.GetUpstreamTaskID()
+	hookContext["publicTaskId"] = task.TaskID
+	hookContext["model"] = task.Properties.OriginModelName
+	upstreamModel := task.Properties.UpstreamModelName
+	if upstreamModel == "" {
+		upstreamModel = task.Properties.OriginModelName
+	}
+	hookContext["upstreamModel"] = upstreamModel
 	hookContext["artifactKey"] = artifactKey
 	hookContext["baseUrl"] = a.info.ChannelBaseUrl
 	hookContext["clientRequest"] = jsonValue(clientRequest)
 	if err = a.applyUpstreamCredentials(hookContext, a.info.ChannelType, a.info.ApiKey, a.info.ChannelSetting.Proxy); err != nil {
 		return nil, err
 	}
-	fetchContext := pluginruntime.WithFetcher(ctx, a.hookFetcher(a.info.ChannelBaseUrl, a.info.ChannelSetting.Proxy))
+	refreshStatus := 0
+	fetch := a.hookFetcher(a.info.ChannelBaseUrl, a.info.ChannelSetting.Proxy)
+	fetchContext := pluginruntime.WithFetcher(ctx, func(ctx context.Context, request pluginruntime.FetchRequest) (pluginruntime.FetchResponse, error) {
+		response, err := fetch(ctx, request)
+		refreshStatus = response.Status
+		return response, err
+	})
 	descriptor, err := a.requestDescriptor(fetchContext, "buildContentRequest", hookContext)
 	if err != nil {
+		logger.LogTaskArtifactFailure(ctx, task.TaskID, "refresh_query", refreshStatus)
 		return nil, err
 	}
 	method := strings.ToUpper(strings.TrimSpace(descriptor.Method))
@@ -1426,9 +1440,16 @@ func (a *TaskAdaptor) BuildContentRequest(ctx context.Context, task *model.Task,
 		if len(descriptor.Headers) != 0 || descriptor.Body != nil {
 			return nil, fmt.Errorf("credentialless artifact requests cannot contain headers or a body")
 		}
-		parsedURL, parseErr := url.Parse(descriptor.URL)
-		if parseErr != nil || parsedURL.Host == "" || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") {
-			return nil, fmt.Errorf("credentialless artifact request URL must be absolute HTTP(S)")
+		if strings.HasPrefix(descriptor.URL, "data:image/") || strings.HasPrefix(descriptor.URL, "data:video/") {
+			header, _, found := strings.Cut(descriptor.URL, ",")
+			if !found || !strings.HasSuffix(header, ";base64") || len(descriptor.URL) > 64<<20 || len(descriptor.ContentPath) != 0 {
+				return nil, fmt.Errorf("invalid inline artifact media")
+			}
+		} else {
+			parsedURL, parseErr := url.Parse(descriptor.URL)
+			if parseErr != nil || parsedURL.Host == "" || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") {
+				return nil, fmt.Errorf("credentialless artifact request URL must be absolute HTTP(S)")
+			}
 		}
 	} else if err = pluginruntime.ValidateRequestURL(descriptor.URL, a.info.ChannelBaseUrl, a.plugin.Meta.AllowedHosts); err != nil {
 		return nil, err

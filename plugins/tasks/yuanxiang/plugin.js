@@ -58,7 +58,7 @@ export const meta = {
   name: "Yuanxiang AI",
   icon: "text:YX",
   description: { en: "Yuanxiang video and image generation with canvas parameter mapping and configurable reference video pricing", zh: "元象视频与图片生成，支持画布参数映射和可选参考视频计费" },
-  version: "1.0.8",
+  version: "1.0.9",
   author: { name: "QuantumNous" },
   website: "https://yuanxiangai.cc/api-docs",
   baseUrl: "https://yuanxiangai.cc",
@@ -485,21 +485,36 @@ export function extractUsageOnComplete(ctx, result, body) {
 
 export function listArtifacts(task) {
   if (task.status !== "SUCCESS") return [];
-  if (task.data && task.data.object === "image") return imageEntries(task.data).filter((entry) => entry.url).map((entry, i) => ({ key: "image-" + (i + 1), type: "image", mimeType: "image/png" }));
+  if (task.data && task.data.object === "image") {
+    const entries = imageEntries(task.data);
+    return entries.filter((entry) => entry.url).map((entry, i) => ({ key: "image-" + (i + 1), type: "image", mimeType: "image/png" })).concat(
+      entries.filter((entry) => !entry.url && entry.b64_json).map((entry, i) => ({ key: "image-b64-" + (i + 1), type: "image", mimeType: "image/png" })),
+    );
+  }
   return task.data && task.data.video_url ? [{ key: "video", type: "video", mimeType: "video/mp4" }] : [];
 }
 
 export function buildContentRequest(ctx) {
-  const image = /^image-([1-9]\d*)$/.exec(ctx.artifactKey);
+  const image = /^image-(b64-)?([1-9]\d*)$/.exec(ctx.artifactKey);
   if (ctx.artifactKey !== "video" && !image) throw new Error("artifact_not_found");
-  // The authenticated same-origin endpoint refreshes signed storage URLs. The
-  // host strips credentials if that endpoint redirects to untrusted storage.
+  // A gateway's native presenter already supplies a credentialless host URL.
   if (ctx.upstream && ctx.upstream.kind === "new_api") {
-    const url = image ? (imageEntries(ctx.data)[Number(image[1]) - 1] || {}).url : ctx.data && ctx.data.video_url;
-    if (typeof url !== "string" || !/^https?:\/\/[^\s]+$/.test(url)) throw new Error("artifact_not_found");
+    const entry = image ? imageEntries(ctx.data).filter((item) => image[1] ? !item.url && item.b64_json : item.url)[Number(image[2]) - 1] : undefined;
+    const url = image ? entry?.url || (entry?.b64_json ? "data:image/png;base64," + entry.b64_json : "") : ctx.data && ctx.data.video_url;
+    if (typeof url !== "string" || !url.startsWith("data:image/png;base64,") && !/^https?:\/\/[^\s]+$/.test(url)) throw new Error("artifact_not_found");
     return { url: url, method: "GET", credentialless: true };
   }
-  return { url: ctx.baseUrl.replace(/\/$/, "") + (image ? "/v1/images/" : "/v1/videos/") + encodeURIComponent(ctx.upstreamTaskId) + "/content", method: "GET", headers: { Authorization: "Bearer " + ctx.apiKey } };
+  // The authenticated /content endpoint redirects to storage. Refresh through
+  // the JSON task query so channel credentials never accompany that redirect.
+  const response = utils.fetch(buildQueryRequest({ ...ctx, taskId: ctx.upstreamTaskId }));
+  if (response.status < 200 || response.status >= 300) throw new Error("Yuanxiang result refresh failed (HTTP " + response.status + ")");
+  const body = responseObject(response.body);
+  if (body.id !== ctx.upstreamTaskId) throw new Error("Yuanxiang result refresh returned a different task id");
+  if (parseTaskResult({ ...ctx, taskId: ctx.upstreamTaskId }, body).status !== "SUCCESS") throw new Error("Yuanxiang result is not available");
+  const entry = image ? imageEntries(body).filter((item) => image[1] ? !item.url && item.b64_json : item.url)[Number(image[2]) - 1] : undefined;
+  const url = image ? entry?.url || (entry?.b64_json ? "data:image/png;base64," + entry.b64_json : "") : body.video_url;
+  if (typeof url !== "string" || !url.startsWith("data:image/png;base64,") && !/^https?:\/\/[^/?#@\s\\]+(?:[/?][^#\s\\]*)?$/.test(url)) throw new Error("Yuanxiang result URL is not available");
+  return { url: url, method: "GET", credentialless: true };
 }
 
 function decodeRequest(ctx, kind) {

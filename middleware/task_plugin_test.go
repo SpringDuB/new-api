@@ -33,6 +33,72 @@ import (
 	"gorm.io/gorm/schema"
 )
 
+func TestTaskClientRequestSnapshotPrecedesDecodingAndRedactsCredentials(t *testing.T) {
+	for _, multipartBody := range []bool{false, true} {
+		t.Run(fmt.Sprintf("multipart=%t", multipartBody), func(t *testing.T) {
+			var body bytes.Buffer
+			contentType := "application/json"
+			if multipartBody {
+				writer := multipart.NewWriter(&body)
+				require.NoError(t, writer.WriteField("prompt", "original"))
+				require.NoError(t, writer.WriteField("seed", "0"))
+				require.NoError(t, writer.WriteField("metadata", `{"enabled":false,"apiKey":"body-secret","url":"https://cdn.example/input?access=usable-token"}`))
+				file, err := writer.CreateFormFile("image", "input.png")
+				require.NoError(t, err)
+				_, err = file.Write([]byte("binary-canary"))
+				require.NoError(t, err)
+				require.NoError(t, writer.Close())
+				contentType = writer.FormDataContentType()
+			} else {
+				body.WriteString(`{"prompt":"original","seed":0,"enabled":false,"large":9007199254740993,"nested":{"Authorization":"Bearer body-secret","api_key":"body-secret","Cookie":"session=body-secret","url":"https://user:password@cdn.example/input?access=usable-token"}}`)
+			}
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos?access=usable-token", &body)
+			c.Request.Header.Set("Content-Type", contentType)
+			c.Request.Header.Set("Authorization", "Bearer header-secret")
+			request, err := buildTaskPluginRouteRequest(c)
+			require.NoError(t, err)
+			// A decoder and channel mapping replace their body only after capture.
+			request.Body = map[string]any{"kind": "json", "value": map[string]any{"prompt": "converted"}}
+			value, exists := c.Get("task_client_request_snapshot")
+			require.True(t, exists)
+			encoded, err := common.Marshal(value)
+			require.NoError(t, err)
+			assert.Contains(t, string(encoded), "original")
+			assert.NotContains(t, string(encoded), "converted")
+			for _, secret := range []string{"body-secret", "header-secret", "usable-token", "binary-canary", "user:password"} {
+				assert.NotContains(t, string(encoded), secret)
+			}
+			assert.Contains(t, string(encoded), `"path":"/v1/videos"`)
+			assert.Contains(t, string(encoded), `"method":"POST"`)
+			assert.Contains(t, string(encoded), `"redacted":true`)
+			if multipartBody {
+				assert.Contains(t, string(encoded), "input.png")
+				assert.Contains(t, string(encoded), `"files_omitted":true`)
+			} else {
+				assert.Contains(t, string(encoded), `"seed":0`)
+				assert.Contains(t, string(encoded), `"enabled":false`)
+				assert.Contains(t, string(encoded), `9007199254740993`)
+			}
+		})
+	}
+}
+
+func TestTaskClientRequestSnapshotOmitsOversizedBodyWithoutStoringPrefix(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", strings.NewReader(`{"prompt":"`+strings.Repeat("x", 70<<10)+`"}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	_, err := buildTaskPluginRouteRequest(c)
+	require.NoError(t, err)
+	value, exists := c.Get("task_client_request_snapshot")
+	require.True(t, exists)
+	encoded, err := common.Marshal(value)
+	require.NoError(t, err)
+	assert.LessOrEqual(t, len(encoded), 64<<10)
+	assert.Contains(t, string(encoded), `"body_omitted":"size_limit"`)
+	assert.NotContains(t, string(encoded), strings.Repeat("x", 50))
+}
+
 const genericTaskPluginSource = `
 export const meta = {apiVersion: 1, key: "generic-entry-test", name: "Generic", version: "1.0.0", author: {name: "Test"}, models: ["doc"], fetchMode: "per_task"};
 export function buildSubmitRequest() { return {url: "https://example.com"}; }

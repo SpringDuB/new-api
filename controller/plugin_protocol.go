@@ -78,7 +78,7 @@ func defaultPluginProtocolBridgeDeps() pluginProtocolBridgeDeps {
 		now:                time.Now,
 		admissions:         pluginProtocolObservationAdmissions,
 		protocolLimits:     relay.DefaultPluginProtocolLimits(),
-		artifactContentURL: service.BuildTaskArtifactContentURL,
+		artifactContentURL: service.BuildTaskArtifactDownloadURL,
 		submissionTimeout:  timeout,
 		observationTimeout: timeout,
 		loadTimeout:        loadTimeout,

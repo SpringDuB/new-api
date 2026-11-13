@@ -103,7 +103,6 @@ func VideoProxy(c *gin.Context) {
 					}
 				}
 				if adaptorErr != nil {
-					logger.LogWarn(c.Request.Context(), common.LogText("Failed to resolve plugin video content for task %s: %v", taskID, adaptorErr))
 					descriptor = nil
 				}
 				break
@@ -133,6 +132,18 @@ func VideoProxy(c *gin.Context) {
 }
 
 func proxyTaskMedia(c *gin.Context, task *model.Task, descriptor *relaychannel.TaskContentRequest) error {
+	return consumeTaskMedia(c, task, descriptor, nil)
+}
+
+// consumeTaskMedia applies the same SSRF and redirect policy to serving and
+// archiving. An archive consumer only receives a complete, non-range response.
+func consumeTaskMedia(c *gin.Context, task *model.Task, descriptor *relaychannel.TaskContentRequest, consume func(io.Reader) error) (mediaErr error) {
+	upstreamStatus := 0
+	defer func() {
+		if mediaErr != nil {
+			logger.LogTaskArtifactFailure(c.Request.Context(), task.TaskID, "media_download", upstreamStatus)
+		}
+	}()
 	if descriptor == nil {
 		return &taskMediaProxyError{
 			status: http.StatusInternalServerError, code: "artifact_plugin_error",
@@ -152,6 +163,18 @@ func proxyTaskMedia(c *gin.Context, task *model.Task, descriptor *relaychannel.T
 				status: http.StatusBadGateway, code: "artifact_request_rejected",
 				message: "Artifact request was rejected", err: errTaskMediaRequestRejected,
 			}
+		}
+		if consume != nil {
+			header, payload, ok := strings.Cut(rawURL, ",")
+			if !ok || !strings.HasSuffix(header, ";base64") {
+				return errors.New("invalid artifact data URL")
+			}
+			for _, encoding := range []*base64.Encoding{base64.StdEncoding, base64.RawStdEncoding, base64.URLEncoding, base64.RawURLEncoding} {
+				if _, err := encoding.ValidateString(payload); err == nil {
+					return consume(base64.NewDecoder(encoding, strings.NewReader(payload)))
+				}
+			}
+			return errors.New("invalid artifact base64")
 		}
 		if err := writeVideoDataURL(c, rawURL); err != nil {
 			return &taskMediaProxyError{
@@ -266,6 +289,9 @@ func proxyTaskMedia(c *gin.Context, task *model.Task, descriptor *relaychannel.T
 	clientWithoutBodyTimeout := *client
 	clientWithoutBodyTimeout.Timeout = 0
 	resp, err := doTaskMediaRequest(&clientWithoutBodyTimeout, req, taskMediaResponseHeaderTimeout)
+	if resp != nil {
+		upstreamStatus = resp.StatusCode
+	}
 	if err != nil {
 		if errors.Is(err, errTaskMediaRequestRejected) {
 			return &taskMediaProxyError{
@@ -286,10 +312,16 @@ func proxyTaskMedia(c *gin.Context, task *model.Task, descriptor *relaychannel.T
 		}
 	}
 	defer resp.Body.Close()
-
 	if len(descriptor.ContentPath) > 0 && resp.StatusCode == http.StatusOK {
-		return writeTaskMediaContentPath(c, resp.Body, descriptor)
+		return writeTaskMediaContentPath(c, resp.Body, descriptor, consume)
 	}
+	if consume != nil {
+		if resp.StatusCode != http.StatusOK {
+			return &taskMediaProxyError{status: http.StatusBadGateway, code: "artifact_upstream_error", message: "Artifact archive requires a complete media response"}
+		}
+		return consume(resp.Body)
+	}
+
 	switch resp.StatusCode {
 	case http.StatusOK, http.StatusPartialContent, http.StatusNotModified, http.StatusRequestedRangeNotSatisfiable:
 		copyTaskMediaResponseHeaders(c.Writer.Header(), resp.Header)
@@ -300,7 +332,7 @@ func proxyTaskMedia(c *gin.Context, task *model.Task, descriptor *relaychannel.T
 			return nil
 		}
 		if _, err := io.Copy(c.Writer, resp.Body); err != nil {
-			logger.LogError(c.Request.Context(), common.LogText("Failed to stream task media: %v", err))
+			logger.LogTaskArtifactFailure(c.Request.Context(), task.TaskID, "media_download", resp.StatusCode)
 		}
 		return nil
 	case http.StatusUnauthorized, http.StatusForbidden:
@@ -340,7 +372,7 @@ type taskMediaHTTPResult struct {
 // ContentPath of the JSON reply. An operation that failed is an upstream
 // error, one not yet done is not ready, and one without the string, expired
 // or written to storage instead, no longer has the content.
-func writeTaskMediaContentPath(c *gin.Context, body io.Reader, descriptor *relaychannel.TaskContentRequest) error {
+func writeTaskMediaContentPath(c *gin.Context, body io.Reader, descriptor *relaychannel.TaskContentRequest, consume func(io.Reader) error) error {
 	limitMB := constant.MaxFileDownloadMB
 	if limitMB <= 0 {
 		limitMB = 64
@@ -409,6 +441,14 @@ func writeTaskMediaContentPath(c *gin.Context, body io.Reader, descriptor *relay
 			message: "Artifact content is no longer available",
 		}
 	}
+	if consume != nil {
+		for _, encoding := range []*base64.Encoding{base64.StdEncoding, base64.RawStdEncoding, base64.URLEncoding, base64.RawURLEncoding} {
+			if _, err := encoding.ValidateString(content.Str); err == nil {
+				return consume(base64.NewDecoder(encoding, strings.NewReader(content.Str)))
+			}
+		}
+		return errors.New("invalid artifact base64")
+	}
 	if err := writeTaskMediaBase64(c, descriptor.MimeType, content.Str); err != nil {
 		return &taskMediaProxyError{
 			status: http.StatusBadGateway, code: "artifact_upstream_error",
@@ -459,7 +499,7 @@ func doTaskMediaRequest(client *http.Client, request *http.Request, responseHead
 			if result.response != nil && result.response.Body != nil {
 				_ = result.response.Body.Close()
 			}
-			return nil, result.err
+			return result.response, result.err
 		}
 		if result.response == nil || result.response.Body == nil {
 			cancel()
@@ -642,7 +682,6 @@ func setTaskMediaResponseSecurityHeaders(header http.Header) {
 
 func writeTaskMediaProxyError(c *gin.Context, err error) {
 	if c.Writer.Written() {
-		logger.LogError(c.Request.Context(), err.Error())
 		return
 	}
 	var proxyErr *taskMediaProxyError

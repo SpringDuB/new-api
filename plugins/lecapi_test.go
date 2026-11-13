@@ -12,10 +12,12 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/i18n"
+	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	builtinplugins "github.com/QuantumNous/new-api/plugins"
 	"github.com/QuantumNous/new-api/relay"
+	relaychannel "github.com/QuantumNous/new-api/relay/channel"
 	taskplugin "github.com/QuantumNous/new-api/relay/channel/task/jsplugin"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/service"
@@ -48,6 +50,25 @@ func lecAPIHook(t *testing.T, plugin *jsplugin.LoadedPlugin, hook string, args .
 
 func lecAPIContext(model string, body map[string]any) map[string]any {
 	return map[string]any{"model": model, "upstreamModel": model, "requestBody": body, "baseUrl": "https://lec.example/", "apiKey": "test-key"}
+}
+
+func TestLecAPIInlineImageArtifactsRemainAvailableForStorage(t *testing.T) {
+	plugin := loadLecAPIPlugin(t)
+	data := map[string]any{"data": []any{map[string]any{"b64_json": "aW1hZ2U="}, map[string]any{"url": "https://cdn.example/second.png"}}}
+	ctx := lecAPIContext("image2", nil)
+	ctx["status"], ctx["action"], ctx["data"] = "SUCCESS", "imagine", data
+	ctx["state"] = map[string]any{"queryable": false}
+	ctx["upstreamTaskId"] = "sync-local-id"
+	artifacts, err := plugin.Engine.Call(t.Context(), "listArtifacts", ctx)
+	require.NoError(t, err)
+	require.Len(t, artifacts, 2)
+	for index, expected := range []string{"data:image/png;base64,aW1hZ2U=", "https://cdn.example/second.png"} {
+		ctx["artifactKey"] = []string{"image-b64-1", "image-1"}[index]
+		descriptor := lecAPIHook(t, plugin, "buildContentRequest", ctx)
+		assert.Equal(t, expected, descriptor["url"])
+		assert.Equal(t, true, descriptor["credentialless"])
+		assert.NotContains(t, descriptor, "headers")
+	}
 }
 
 func TestLecAPIBindsCatalogModelsToTheirMediaProtocol(t *testing.T) {
@@ -630,6 +651,82 @@ func TestLecAPIRefreshesArtifactsWithoutSendingCredentialsToStorage(t *testing.T
 	assert.JSONEq(t, `{"url":"https://storage.example/video.mp4?signature=abc","method":"GET","credentialless":true}`, string(encoded))
 }
 
+func TestLecAPIStoredTaskContentUsesPersistedModelMapping(t *testing.T) {
+	plugin := loadLecAPIPlugin(t)
+	for _, tc := range []struct {
+		name, model, key, path, response string
+		channelType                      int
+	}{
+		{"vendor video", "aj-wan-3-0", "video", "/v1/videos/upstream-id", `{"id":"upstream-id","object":"video","status":"completed","url":"https://cdn.example/fresh.mp4"}`, constant.ChannelTypeTaskPlugin},
+		{"gateway image", "ty-seedream-5-pro", "image-1", "/lecapi/v1/images/upstream-id", `{"id":"upstream-id","object":"lecapi.task","status":"SUCCESS","output":{"data":[{"url":"https://cdn.example/fresh.png"}]}}`, constant.ChannelTypeNewAPI},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				assert.Equal(t, tc.path, r.URL.Path)
+				assert.Equal(t, "Bearer test-key", r.Header.Get("Authorization"))
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, tc.response)
+			}))
+			defer server.Close()
+			adaptor := taskplugin.New(plugin)
+			adaptor.Init(&relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{ChannelType: tc.channelType, ChannelBaseUrl: server.URL, ApiKey: "test-key"}})
+			task := &model.Task{TaskID: "task-public", Status: model.TaskStatusSuccess,
+				Properties:  model.Properties{OriginModelName: "client-alias", UpstreamModelName: tc.model},
+				PrivateData: model.TaskPrivateData{UpstreamTaskID: "upstream-id"}, Data: []byte(`{"url":"https://cdn.example/expired"}`)}
+			for _, method := range []string{http.MethodGet, http.MethodHead} {
+				descriptor, err := adaptor.BuildContentRequest(t.Context(), task, tc.key, relaychannel.TaskArtifactClientRequest{Method: method, Headers: map[string]string{"Range": "bytes=0-1"}})
+				require.NoError(t, err)
+				require.NotNil(t, descriptor)
+				assert.True(t, descriptor.Credentialless)
+				assert.Empty(t, descriptor.Headers)
+				assert.Contains(t, descriptor.URL, "/fresh.")
+			}
+		})
+	}
+}
+
+func TestLecAPIHistoricalSynchronousImageDoesNotQueryInventedTaskID(t *testing.T) {
+	plugin := loadLecAPIPlugin(t)
+	ctx := lecAPIContext("ac-image-2", nil)
+	ctx["upstreamTaskId"], ctx["artifactKey"] = "generated-local-id", "image-1"
+	ctx["data"] = map[string]any{"data": []any{map[string]any{"url": "https://cdn.example/image.png"}}}
+	callCtx := jsplugin.WithFetcher(t.Context(), func(context.Context, jsplugin.FetchRequest) (jsplugin.FetchResponse, error) {
+		t.Error("historical synchronous image has no upstream query task")
+		return jsplugin.FetchResponse{Status: 404}, nil
+	})
+	value, err := plugin.Engine.Call(callCtx, "buildContentRequest", ctx)
+	require.NoError(t, err)
+	encoded, err := common.Marshal(value)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"url":"https://cdn.example/image.png","method":"GET","credentialless":true}`, string(encoded))
+}
+
+func TestLecAPIContentRefreshRejectsInvalidResults(t *testing.T) {
+	plugin := loadLecAPIPlugin(t)
+	for _, tc := range []struct {
+		name, body string
+		status     int
+	}{
+		{"query forbidden", `{"message":"secret https://cdn.example/?signature=secret"}`, 403},
+		{"wrong id", `{"id":"wrong","status":"completed","url":"https://cdn.example/video.mp4"}`, 200},
+		{"missing id", `{"status":"completed","url":"https://cdn.example/video.mp4"}`, 200},
+		{"unfinished", `{"id":"vendor-id","status":"running","url":"https://cdn.example/video.mp4"}`, 200},
+		{"no deliverable", `{"id":"vendor-id","status":"completed"}`, 200},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := lecAPIContext("aj-wan-3-0", nil)
+			ctx["upstreamTaskId"], ctx["artifactKey"] = "vendor-id", "video"
+			callCtx := jsplugin.WithFetcher(t.Context(), func(context.Context, jsplugin.FetchRequest) (jsplugin.FetchResponse, error) {
+				return jsplugin.FetchResponse{Status: tc.status, Body: []byte(tc.body)}, nil
+			})
+			_, err := plugin.Engine.Call(callCtx, "buildContentRequest", ctx)
+			require.Error(t, err)
+			assert.NotContains(t, err.Error(), "secret")
+			assert.NotContains(t, err.Error(), "https://")
+		})
+	}
+}
+
 func TestLecAPISourceVideoBillingUsesMeasuredDuration(t *testing.T) {
 	plugin := loadLecAPIPlugin(t)
 	video := yueqiReferenceVideoFixture(t, 3.5)
@@ -700,7 +797,7 @@ func TestLecAPIHostReservesAndSettlesDefaultPricesWithoutSavedConfiguration(t *t
 			pinned := jsplugin.PinnedPlugin{Plugin: plugin, Generation: jsplugin.DefaultRegistry.Generation()}
 			if tc.update {
 				updated := strings.Replace(source, "price * 1.2", "price * 2.4", 1)
-				updated = strings.Replace(updated, `version: "1.0.5"`, `version: "1.0.6"`, 1)
+				updated = strings.Replace(updated, `version: "1.0.6"`, `version: "1.0.7"`, 1)
 				newPlugin, err := jsplugin.DefaultRegistry.Register(updated, jsplugin.Options{Key: "lecapi"})
 				require.NoError(t, err)
 				t.Cleanup(func() { require.NoError(t, jsplugin.DefaultRegistry.Unregister("lecapi")) })

@@ -17,7 +17,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { api, getFreshAuthHeaders, type ApiRequestConfig } from '@/lib/api'
-import { createServerError } from '@/lib/server-error-message'
+import {
+  createServerError,
+  requireServerSuccess,
+} from '@/lib/server-error-message'
 
 import type { UsageLog } from './data/schema'
 import { buildQueryParams } from './lib/query-params'
@@ -30,6 +33,7 @@ import type {
   GetMidjourneyLogsParams,
   GetTaskLogsParams,
   TaskArtifactsResponse,
+  TaskClientRequestResponse,
   UserInfo,
 } from './types'
 
@@ -180,4 +184,14 @@ export async function getTaskArtifacts(taskId: string) {
     taskArtifactRequestConfig
   )
   return parseTaskArtifactsResponse(response.data)
+}
+
+export async function getTaskClientRequest(
+  taskId: string
+): Promise<TaskClientRequestResponse> {
+  const response = await api.get<{
+    success: boolean
+    data: TaskClientRequestResponse
+  }>(`/api/task/${encodeURIComponent(taskId)}/request`)
+  return requireServerSuccess(response.data).data
 }

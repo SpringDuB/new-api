@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -82,6 +83,16 @@ func LogWarn(ctx context.Context, msg string, args ...any) {
 		msg = fmt.Sprintf(msg, args...)
 	}
 	logHelper(ctx, loggerWarn, msg)
+}
+
+// LogTaskArtifactFailure excludes error strings, request URLs and credentials.
+func LogTaskArtifactFailure(ctx context.Context, taskID, stage string, status int) {
+	if len(taskID) > 128 || strings.ContainsFunc(taskID, func(r rune) bool {
+		return !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '_' || r == '-')
+	}) {
+		taskID = "invalid"
+	}
+	LogWarn(ctx, common.LogText("task artifact failure task_id=%s stage=%s http=%d", taskID, stage, status))
 }
 
 func LogError(ctx context.Context, msg string) {

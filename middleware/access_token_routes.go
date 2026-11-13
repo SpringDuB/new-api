@@ -148,6 +148,9 @@ var accessTokenRouteRules = map[string]accessTokenRouteRule{
 	"GET /api/option/request_policy":                             accessTokenScopeRule("option:read"),
 	"PATCH /api/option/request_policy":                           accessTokenScopeRule("option:write"),
 	"PUT /api/option/":                                           accessTokenScopeRule("option:write"),
+	"GET /api/option/task_artifact_store":                        accessTokenScopeRule("option:read"),
+	"PUT /api/option/task_artifact_store":                        accessTokenScopeRule("option:write"),
+	"POST /api/option/task_artifact_store/test":                  accessTokenScopeRule("option:write"),
 	"PUT /api/option/passkey/domains":                            accessTokenScopeRule("option:write"),
 	"GET /api/option/model_pricing":                              accessTokenScopeRule("option:read"),
 	"GET /api/option/model_pricing/issues":                       accessTokenScopeRule("option:read"),
@@ -263,6 +266,7 @@ var accessTokenRouteRules = map[string]accessTokenRouteRule{
 	"GET /api/task/self":               accessTokenScopeRule("usage:read"),
 	"GET /api/task":                    accessTokenScopeRule("log:read"),
 	"GET /api/task/:task_id/artifacts": accessTokenScopeRule("usage:read"),
+	"GET /api/task/:task_id/request":   accessTokenScopeRule("usage:read"),
 
 	// router/api-router.go: /api/vendors, /api/models (admin)
 	"POST /api/vendors/operations/preview":  accessTokenScopeRule("model:read"),

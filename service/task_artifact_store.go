@@ -4,21 +4,24 @@ import (
 	"context"
 	"errors"
 	"io"
+	"sync"
+	"time"
 
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/QuantumNous/new-api/types"
+	"github.com/bytedance/gopkg/util/gopool"
 	"github.com/gin-gonic/gin"
 )
 
-// StoredArtifactRef describes a persisted artifact object. No reference is
-// produced until a concrete storage backend is implemented.
+// StoredArtifactRef identifies a private object without persisting signed URLs.
 type StoredArtifactRef struct {
-	Backend   string
-	Bucket    string
-	ObjectKey string
-	MimeType  string
-	Size      int64
+	Backend     string
+	Bucket      string
+	ObjectKey   string
+	MimeType    string
+	Size        int64
+	ArtifactKey string
 }
 
 // TaskArtifactStore is the persistence boundary for generated artifact bytes.
@@ -52,12 +55,56 @@ func (disabledArtifactStore) Serve(*gin.Context, *model.Task, *StoredArtifactRef
 
 var taskArtifactStore TaskArtifactStore = &disabledArtifactStore{}
 
+var taskArtifactStoreMutex sync.Mutex
+var taskArtifactStoreConfig system_setting.TaskArtifactStoreConfig
+
+// The host registers its media downloader without a service -> controller
+// dependency. Archival runs after durable completion and never affects quota.
+var ArchiveTaskArtifacts func(context.Context, *model.Task)
+
+// StoredTaskArtifactURLs supplies current OSS links to authorized presenters.
+var StoredTaskArtifactURLs func(*model.Task) map[string]string
+var taskArtifactArchiveSlots = make(chan struct{}, 2)
+
+func ScheduleTaskArtifactArchive(task *model.Task) {
+	if task == nil || task.Status != model.TaskStatusSuccess || ArchiveTaskArtifacts == nil || !GetTaskArtifactStore().Enabled() {
+		return
+	}
+	taskID := task.ID
+	gopool.Go(func() {
+		taskArtifactArchiveSlots <- struct{}{}
+		defer func() { <-taskArtifactArchiveSlots }()
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		var stored model.Task
+		if model.DB.WithContext(ctx).First(&stored, taskID).Error == nil {
+			ArchiveTaskArtifacts(ctx, &stored)
+		}
+	})
+}
+
+type TaskArtifactURLProvider interface {
+	SignedURL(context.Context, *model.Task, *StoredArtifactRef, string) (string, error)
+}
+
 func init() {
 	_ = system_setting.LoadTaskArtifactStoreConfig()
 }
 
-// GetTaskArtifactStore returns the process-wide artifact storage backend. This
-// release always returns the disabled implementation.
+// GetTaskArtifactStore applies the current administrator storage configuration.
 func GetTaskArtifactStore() TaskArtifactStore {
+	config := system_setting.LoadTaskArtifactStoreConfig()
+	taskArtifactStoreMutex.Lock()
+	defer taskArtifactStoreMutex.Unlock()
+	if config == taskArtifactStoreConfig {
+		return taskArtifactStore
+	}
+	taskArtifactStoreConfig = config
+	taskArtifactStore = &disabledArtifactStore{}
+	if config.Mode == system_setting.TaskArtifactStoreModeOSS {
+		if store, err := newOSSArtifactStore(config, nil); err == nil {
+			taskArtifactStore = store
+		}
+	}
 	return taskArtifactStore
 }

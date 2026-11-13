@@ -115,6 +115,10 @@ type TaskPrivateData struct {
 	// Execution records safe, immutable request provenance. It lives next to
 	// other private task state so public task DTOs cannot expose it by accident.
 	Execution *TaskExecutionSnapshot `json:"execution,omitempty"`
+	// ClientRequest is captured before plugin decoding. It is independent of
+	// mutable upstream Data/state, private by default, and retained only for
+	// the lifetime of this task row (including its normal deletion/backups).
+	ClientRequest *TaskClientRequestSnapshot `json:"client_request,omitempty"`
 	// 计费上下文：用于异步退款/差额结算（轮询阶段读取）
 	BillingSource  string              `json:"billing_source,omitempty"`  // "wallet" 或 "subscription"
 	SubscriptionId int                 `json:"subscription_id,omitempty"` // 订阅 ID，用于订阅退款
@@ -136,6 +140,20 @@ type TaskPrivateData struct {
 	// and every retrieval surface treats the task as not found. The zero
 	// value keeps historical rows retained and retrievable.
 	ResultDiscarded bool `json:"result_discarded,omitempty"`
+}
+
+// TaskClientRequestSnapshot contains a bounded, redacted client submission,
+// never the transformed upstream request. Body is JSON to preserve numeric
+// literals and explicit zero/false without decoding through float64.
+type TaskClientRequestSnapshot struct {
+	Method       string          `json:"method"`
+	Path         string          `json:"path"`
+	ContentType  string          `json:"content_type"`
+	BodyKind     string          `json:"body_kind"`
+	Body         json.RawMessage `json:"body,omitempty"`
+	BodyOmitted  string          `json:"body_omitted,omitempty"`
+	Redacted     bool            `json:"redacted"`
+	FilesOmitted bool            `json:"files_omitted"`
 }
 
 type TaskExecutionSnapshot struct {
@@ -211,7 +229,7 @@ func (p *TaskPrivateData) Scan(val any) error {
 
 func (p TaskPrivateData) Value() (driver.Value, error) {
 	if p.Key == "" && p.UpstreamTaskID == "" && p.ResultURL == "" &&
-		p.Execution == nil && p.BillingSource == "" && p.SubscriptionId == 0 &&
+		p.Execution == nil && p.ClientRequest == nil && p.BillingSource == "" && p.SubscriptionId == 0 &&
 		p.TokenId == 0 && p.NodeName == "" && p.BillingContext == nil &&
 		!p.ResponsesBackground && len(p.PluginState) == 0 && p.PollFailures == 0 &&
 		!p.ResultDiscarded {

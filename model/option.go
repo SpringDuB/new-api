@@ -232,6 +232,13 @@ func SyncOptions(frequency int) {
 }
 
 func validateOptionValue(key string, value string) error {
+	if key == system_setting.TaskArtifactStoreOptionKey {
+		var config system_setting.TaskArtifactStoreConfig
+		if err := common.UnmarshalJsonStr(value, &config); err != nil {
+			return err
+		}
+		return system_setting.ValidateTaskArtifactStoreConfig(config)
+	}
 	if key == legacyAccessTokenRetireAtKey {
 		return errLegacyRetireAtReadOnly
 	}

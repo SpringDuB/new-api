@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/gin-gonic/gin"
@@ -197,6 +198,7 @@ func TokenOrTaskArtifactAccessAuth(taskParam, artifactParam string) gin.HandlerF
 			ip = "unknown"
 		}
 		if invalid || !service.VerifyTaskArtifactAccess(rawAccess, taskID, artifactKey) {
+			logger.LogTaskArtifactFailure(c.Request.Context(), taskID, "access_signature", http.StatusNotFound)
 			if !taskArtifactAnonymousLimiter.invalidAttempt(time.Now(), ip) {
 				writeTaskArtifactAccessLimited(c)
 				return

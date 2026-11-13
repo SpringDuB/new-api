@@ -74,3 +74,14 @@ func TestLoadTaskArtifactStoreConfigFallsBackToUpstream(t *testing.T) {
 	assert.Equal(t, "https://objects.example.com", config.S3Endpoint)
 	assert.Equal(t, 600, config.S3PresignTTLSeconds)
 }
+
+func TestLoadTaskArtifactStoreConfigAcceptsAliyunOSS(t *testing.T) {
+	t.Setenv(TaskArtifactStoreModeEnv, "oss")
+	t.Setenv("TASK_ARTIFACT_STORE_OSS_ENDPOINT", "https://oss-cn-hangzhou.aliyuncs.com")
+	t.Setenv("TASK_ARTIFACT_STORE_OSS_REGION", "cn-hangzhou")
+	t.Setenv("TASK_ARTIFACT_STORE_OSS_BUCKET", "task-results")
+	t.Setenv("TASK_ARTIFACT_STORE_OSS_ACCESS_KEY", "test-access")
+	t.Setenv("TASK_ARTIFACT_STORE_OSS_SECRET_KEY", "test-secret")
+	config := LoadTaskArtifactStoreConfig()
+	assert.Equal(t, "oss", config.Mode)
+}

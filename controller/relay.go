@@ -464,6 +464,7 @@ type taskSubmissionOutcome struct {
 }
 
 func RelayTask(c *gin.Context) {
+	service.CaptureTaskClientRequest(c, nil, nil)
 	relayInfo, err := relaycommon.GenRelayInfo(c, types.RelayFormatTask, nil, nil)
 	if err != nil {
 		respondTaskSubmissionError(c, &taskdto.TaskError{
@@ -510,6 +511,7 @@ func executeTaskSubmissionWith(
 	relayInfo *relaycommon.RelayInfo,
 	submit taskSubmitAttempt,
 ) (*taskSubmissionOutcome, *taskdto.TaskError) {
+	service.CaptureTaskClientRequest(c, nil, nil)
 	policy := service.RequestPolicy(c)
 	diagnostics := newTaskPluginSubmitDiagnostics(c)
 	diagnostics.start(relayInfo)
@@ -659,6 +661,9 @@ func executeTaskSubmissionWith(
 	stage = "insert"
 	task := model.InitTask(result.Platform, relayInfo)
 	task.PrivateData.Execution = service.TaskExecutionSnapshotFromContext(c)
+	if snapshot, exists := c.Get(service.TaskClientRequestContextKey); exists {
+		task.PrivateData.ClientRequest, _ = snapshot.(*model.TaskClientRequestSnapshot)
+	}
 	task.PrivateData.UpstreamTaskID = result.UpstreamTaskID
 	task.PrivateData.BillingSource = relayInfo.BillingSource
 	task.PrivateData.SubscriptionId = relayInfo.SubscriptionId
@@ -756,6 +761,11 @@ func executeTaskSubmissionWith(
 	}
 	service.LogTaskConsumption(c, relayInfo, task)
 	diagnostics.complete(task, result.Quota)
+	if task.PrivateData.ResultDiscarded && task.Status == model.TaskStatusSuccess && service.ArchiveTaskArtifacts != nil && service.GetTaskArtifactStore().Enabled() {
+		service.ArchiveTaskArtifacts(c.Request.Context(), task)
+	} else {
+		service.ScheduleTaskArtifactArchive(task)
+	}
 
 	return &taskSubmissionOutcome{Result: result, Task: task, RelayInfo: relayInfo}, nil
 }

@@ -216,6 +216,9 @@ func SetApiRouter(router *gin.Engine) {
 			optionRoute.GET("/request_policy", controller.GetRequestPolicy)
 			optionRoute.PATCH("/request_policy", controller.UpdateRequestPolicy)
 			optionRoute.PUT("/", controller.UpdateOption)
+			optionRoute.GET("/task_artifact_store", controller.GetTaskArtifactStoreSettings)
+			optionRoute.PUT("/task_artifact_store", controller.UpdateTaskArtifactStoreSettings)
+			optionRoute.POST("/task_artifact_store/test", controller.TestTaskArtifactStoreConnection)
 			optionRoute.PUT("/passkey/domains", controller.UpdatePasskeyDomains)
 			optionRoute.GET("/model_pricing", controller.GetModelPricingConfig)
 			optionRoute.GET("/model_pricing/issues", controller.GetModelPricingIssues)
@@ -383,6 +386,7 @@ func SetApiRouter(router *gin.Engine) {
 			taskRoute.GET("/self", middleware.UserAuth(), controller.GetUserTask)
 			taskRoute.GET("", middleware.AdminAuth(), controller.GetAllTask)
 			taskRoute.GET("/:task_id/artifacts", middleware.UserAuth(), controller.GetDashboardTaskArtifacts)
+			taskRoute.GET("/:task_id/request", middleware.UserAuth(), controller.GetDashboardTaskClientRequest)
 		}
 
 		vendorRoute := apiRouter.Group("/vendors")

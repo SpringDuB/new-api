@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { SystemInfoSection } from '../general/system-info-section'
+import { TaskArtifactStoreSection } from '../general/task-artifact-store-section'
 import {
   parseHeaderNavModules,
   parseSidebarModulesAdmin,
@@ -90,6 +91,11 @@ const SITE_SECTIONS = [
         />
       )
     },
+  },
+  {
+    id: 'task-result-storage',
+    titleKey: 'Task result storage',
+    build: () => <TaskArtifactStoreSection />,
   },
 ] as const
 

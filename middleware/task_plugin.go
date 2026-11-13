@@ -1216,6 +1216,7 @@ func buildTaskPluginRouteRequest(c *gin.Context) (pluginruntime.RouteRequestCont
 	default:
 		return requestContext, fmt.Errorf("%w %q", errTaskPluginUnsupportedMediaType, mediaType)
 	}
+	service.CaptureTaskClientRequest(c, requestContext.Body, requestContext.BodyText)
 	return requestContext, nil
 }
 
@@ -1457,7 +1458,7 @@ func renderTaskPluginQuery(
 	presenterContext := requestContext.JSValue()
 	artifacts := map[string]any{}
 	if !multiple {
-		projected, projectErr := taskjsplugin.RendererArtifacts(pinned.Plugin, tasksByID[taskIDs[0]], service.BuildTaskArtifactContentURL)
+		projected, projectErr := taskjsplugin.RendererArtifacts(pinned.Plugin, tasksByID[taskIDs[0]], service.BuildTaskArtifactDownloadURL)
 		if projectErr != nil {
 			logger.LogWarn(c, common.LogText("task_plugin subsystem=query event=artifacts_unavailable generation=%d plugin=%q err=%q", generation, pinned.Plugin.Meta.Key, projectErr.Error()))
 		} else {

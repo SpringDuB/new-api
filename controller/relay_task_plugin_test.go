@@ -219,6 +219,8 @@ func TestExecuteTaskSubmissionPersistsPinnedPluginProvenance(t *testing.T) {
 	t.Cleanup(func() { common.LogConsumeEnabled = previousLogConsumeEnabled })
 
 	c := taskSubmissionTestContext()
+	c.Request = httptest.NewRequest(http.MethodPost, "/plugin/submit", strings.NewReader(`{"prompt":"original-client","seed":0,"enabled":false}`))
+	c.Request.Header.Set("Content-Type", "application/json")
 	c.Set(common.RequestIdKey, "request-public")
 	c.Set(pluginruntime.ContextKeyPinnedPlugin, pluginruntime.PinnedPlugin{
 		Generation: &pluginruntime.RoutingGeneration{Number: 42},
@@ -263,6 +265,8 @@ func TestExecuteTaskSubmissionPersistsPinnedPluginProvenance(t *testing.T) {
 	require.NotNil(t, stored.PrivateData.Execution.TaskPlugin.Author)
 	assert.Equal(t, "Community Author", stored.PrivateData.Execution.TaskPlugin.Author.Name)
 	assert.Equal(t, "upstream-private", stored.PrivateData.UpstreamTaskID)
+	require.NotNil(t, stored.PrivateData.ClientRequest)
+	assert.JSONEq(t, `{"prompt":"original-client","seed":0,"enabled":false}`, string(stored.PrivateData.ClientRequest.Body))
 }
 
 // A submit route declaring retainResult: false persists the task row for

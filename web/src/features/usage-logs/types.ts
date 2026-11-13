@@ -381,6 +381,24 @@ export interface TaskPluginRuntimeInfo {
   generation: number
 }
 
+export interface TaskClientRequestSnapshot {
+  method: string
+  path: string
+  content_type: string
+  body_kind: 'json' | 'multipart' | 'form' | 'none'
+  body?: unknown
+  body_omitted?: string
+  redacted: boolean
+  files_omitted: boolean
+}
+
+export interface TaskClientRequestResponse {
+  recorded: boolean
+  snapshot: TaskClientRequestSnapshot | null
+  max_bytes: number
+  retention: 'task_lifetime'
+}
+
 export type TaskArtifactType = 'image' | 'video' | 'audio' | 'file'
 
 export interface TaskArtifact {

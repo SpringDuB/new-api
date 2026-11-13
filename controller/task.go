@@ -24,10 +24,11 @@ import (
 )
 
 type taskArtifactResponse struct {
-	Key        string `json:"key"`
-	Type       string `json:"type"`
-	MimeType   string `json:"mime_type,omitempty"`
-	ContentURL string `json:"content_url"`
+	Key         string `json:"key"`
+	Type        string `json:"type"`
+	MimeType    string `json:"mime_type,omitempty"`
+	ContentURL  string `json:"content_url"`
+	DownloadURL string `json:"download_url,omitempty"`
 }
 
 var (
@@ -91,10 +92,36 @@ func GetDashboardTaskArtifacts(c *gin.Context) {
 	writeTaskArtifacts(c, task, true)
 }
 
+// GetDashboardTaskClientRequest shares the dashboard's owner/admin boundary.
+// Artifact access signatures never authorize reading client request bodies.
+func GetDashboardTaskClientRequest(c *gin.Context) {
+	c.Header("Cache-Control", "private, no-store")
+	if middleware.IsTaskArtifactAccess(c) {
+		writeTaskArtifactError(c, http.StatusNotFound, "artifact_not_found", "Task or artifact not found")
+		return
+	}
+	task, exists, err := getTaskForArtifactRequest(c, c.Param("task_id"))
+	if err != nil {
+		writeTaskArtifactError(c, http.StatusInternalServerError, "artifact_internal_error", "Failed to query task")
+		return
+	}
+	if !exists || task == nil {
+		writeTaskArtifactError(c, http.StatusNotFound, "artifact_not_found", "Task or artifact not found")
+		return
+	}
+	common.ApiSuccess(c, gin.H{
+		"recorded":  task.PrivateData.ClientRequest != nil,
+		"snapshot":  task.PrivateData.ClientRequest,
+		"max_bytes": service.MaxTaskClientRequestSnapshotBytes,
+		"retention": "task_lifetime",
+	})
+}
+
 func writeTaskArtifacts(c *gin.Context, task *model.Task, dashboard bool) {
 	c.Header("Cache-Control", "private, no-store")
 	artifacts, err := projectTaskArtifacts(task)
 	if err != nil {
+		logger.LogTaskArtifactFailure(c.Request.Context(), task.TaskID, "projection", 0)
 		writeTaskArtifactProjectionError(c, err)
 		return
 	}
@@ -111,6 +138,11 @@ func writeTaskArtifacts(c *gin.Context, task *model.Task, dashboard bool) {
 			MimeType:   artifact.MimeType,
 			ContentURL: contentURL,
 		})
+		if service.GetTaskArtifactStore().Enabled() {
+			if url, err := service.BuildTaskArtifactDownloadURL(task.TaskID, artifact.Key); err == nil && url != contentURL {
+				items[len(items)-1].DownloadURL = url
+			}
+		}
 	}
 	response := gin.H{"task_id": task.TaskID, "artifacts": items}
 	if dashboard && task.Status == model.TaskStatusSuccess && task.Platform == constant.TaskPlatformSuno {
@@ -351,6 +383,7 @@ func TaskArtifactContent(c *gin.Context) {
 	}
 	artifacts, err := projectTaskArtifacts(task)
 	if err != nil {
+		logger.LogTaskArtifactFailure(c.Request.Context(), task.TaskID, "projection", 0)
 		writeTaskArtifactProjectionError(c, err)
 		return
 	}
@@ -362,13 +395,28 @@ func TaskArtifactContent(c *gin.Context) {
 		}
 	}
 	if !found {
+		logger.LogTaskArtifactFailure(c.Request.Context(), task.TaskID, "projection", http.StatusNotFound)
 		writeTaskArtifactError(c, http.StatusNotFound, "artifact_not_found", "Task or artifact not found")
 		return
 	}
 	artifactStore := service.GetTaskArtifactStore()
 	if ref, resolveErr := artifactStore.Resolve(task, artifactKey); resolveErr == nil && ref != nil {
-		_ = artifactStore.Serve(c, task, ref)
-		return
+		if artifactStore.Serve(c, task, ref) == nil {
+			return
+		}
+	}
+	if artifactStore.Enabled() {
+		for _, artifact := range artifacts {
+			if artifact.Key != artifactKey {
+				continue
+			}
+			ref, err := archiveTaskArtifact(c.Request.Context(), task, artifact)
+			if err == nil && ref != nil && artifactStore.Serve(c, task, ref) == nil {
+				return
+			}
+			logger.LogTaskArtifactFailure(c.Request.Context(), task.TaskID, "storage", 0)
+			break
+		}
 	}
 
 	adaptor, err := initTaskArtifactAdaptor(task)
@@ -387,9 +435,6 @@ func TaskArtifactContent(c *gin.Context) {
 	}
 	descriptor, err := provider.BuildContentRequest(c.Request.Context(), task, artifactKey, clientRequest)
 	if err != nil || descriptor == nil {
-		if err != nil {
-			logger.LogWarn(c.Request.Context(), fmt.Sprintf("Failed to resolve plugin %s content for task %s: %v", artifactKey, task.TaskID, err))
-		}
 		writeTaskArtifactError(c, http.StatusInternalServerError, "artifact_plugin_error", "Artifact content plugin failed")
 		return
 	}

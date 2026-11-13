@@ -1,4 +1,5 @@
 {
+  "task artifact failure task_id=%s stage=%s http=%d": "任务媒体访问失败 task_id=%s stage=%s http=%d",
   "%d quota points": "%d 点额度",
   "%s after refresh: %s": "%s（刷新凭证后重试）: %s",
   "%s failed: %s": "%s 构建失败，%s",

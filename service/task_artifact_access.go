@@ -1,15 +1,18 @@
 package service
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting/system_setting"
 )
 
@@ -134,4 +137,19 @@ func BuildTaskArtifactContentURL(taskID, artifactKey string) (string, error) {
 	query.Set(TaskArtifactAccessQueryParameter, access)
 	baseURL.RawQuery = query.Encode()
 	return baseURL.String(), nil
+}
+
+// BuildTaskArtifactDownloadURL prefers a temporary OSS link while stable
+// gateway links remain available for retries and existing task identifiers.
+func BuildTaskArtifactDownloadURL(taskID, artifactKey string) (string, error) {
+	store := GetTaskArtifactStore()
+	if provider, ok := store.(TaskArtifactURLProvider); ok {
+		task, exists, err := model.GetUniqueByOnlyTaskId(taskID)
+		if err == nil && exists && task != nil {
+			if ref, err := store.Resolve(task, artifactKey); err == nil && ref != nil {
+				return provider.SignedURL(context.Background(), task, ref, http.MethodGet)
+			}
+		}
+	}
+	return BuildTaskArtifactContentURL(taskID, artifactKey)
 }

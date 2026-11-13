@@ -31,6 +31,7 @@ import { taskActionMapper, taskStatusMapper } from '../../lib/mappers'
 import { resolveTaskDetailAccess } from '../../lib/task-details'
 import type { TaskLog } from '../../types'
 import { PluginAuthorLink } from '../plugin-author-link'
+import { TaskClientRequestDetails } from '../task-client-request'
 
 function DetailRow(props: {
   label: React.ReactNode
@@ -162,6 +163,13 @@ export function TaskDetailsDialog(props: TaskDetailsDialogProps) {
               value={translateServerText(t, props.log.fail_reason)}
             />
           ) : null}
+        </DetailSection>
+
+        <DetailSection label={t('Original client request')}>
+          <TaskClientRequestDetails
+            taskId={props.log.task_id}
+            open={props.open}
+          />
         </DetailSection>
 
         {props.isAdmin ? (

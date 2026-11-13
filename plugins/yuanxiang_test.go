@@ -41,6 +41,18 @@ func yuanxiangContext(model string, body map[string]any) map[string]any {
 	return map[string]any{"model": model, "upstreamModel": model, "requestBody": body, "baseUrl": "https://yuanxiang.example/", "apiKey": "test-key", "publicTaskId": "task_public"}
 }
 
+func TestYuanxiangInlineGatewayImagesRemainAvailableForStorage(t *testing.T) {
+	plugin := loadYuanxiangPlugin(t)
+	ctx := map[string]any{"status": "SUCCESS", "data": map[string]any{"object": "image", "data": []any{map[string]any{"b64_json": "aW1hZ2U="}}}, "upstream": map[string]any{"kind": "new_api"}, "artifactKey": "image-b64-1"}
+	artifacts, err := plugin.Engine.Call(t.Context(), "listArtifacts", ctx)
+	require.NoError(t, err)
+	require.Len(t, artifacts, 1)
+	descriptor := yuanxiangHook(t, plugin, "buildContentRequest", ctx)
+	assert.Equal(t, "data:image/png;base64,aW1hZ2U=", descriptor["url"])
+	assert.Equal(t, true, descriptor["credentialless"])
+	assert.NotContains(t, descriptor, "headers")
+}
+
 func yuanxiangHook(t *testing.T, plugin *jsplugin.LoadedPlugin, hook string, args ...any) map[string]any {
 	t.Helper()
 	value, err := plugin.Engine.Call(t.Context(), hook, args...)
@@ -423,15 +435,71 @@ func TestYuanxiangDecodersReferencesAndArtifactRoutes(t *testing.T) {
 	assert.Equal(t, "low", body["quality"], "match the actually available upstream API quality")
 	ctx = yuanxiangContext("MiniMax H3 · 特价按秒-YX", map[string]any{"prompt": "boat"})
 	ctx["artifactKey"], ctx["upstreamTaskId"] = "video", "private/id"
-	content := yuanxiangHook(t, plugin, "buildContentRequest", ctx)
-	assert.Equal(t, "https://yuanxiang.example/v1/videos/private%2Fid/content", content["url"])
-	assert.Equal(t, map[string]any{"Authorization": "Bearer test-key"}, content["headers"])
+	callCtx := jsplugin.WithFetcher(t.Context(), func(_ context.Context, request jsplugin.FetchRequest) (jsplugin.FetchResponse, error) {
+		assert.Equal(t, "https://yuanxiang.example/v1/videos/private%2Fid", request.URL)
+		assert.Equal(t, "Bearer test-key", request.Headers["Authorization"])
+		return jsplugin.FetchResponse{Status: 200, Body: []byte(`{"id":"private/id","status":"succeeded","video_url":"https://media.example/fresh.mp4?signature=fresh"}`)}, nil
+	})
+	value, err := plugin.Engine.Call(callCtx, "buildContentRequest", ctx)
+	require.NoError(t, err)
+	encoded, err := common.Marshal(value)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"url":"https://media.example/fresh.mp4?signature=fresh","method":"GET","credentialless":true}`, string(encoded))
 	ctx["upstream"] = map[string]any{"kind": "new_api"}
 	ctx["data"] = map[string]any{"video_url": "https://gateway.example/signed/content"}
-	content = yuanxiangHook(t, plugin, "buildContentRequest", ctx)
+	content := yuanxiangHook(t, plugin, "buildContentRequest", ctx)
 	assert.Equal(t, "https://gateway.example/signed/content", content["url"])
 	assert.Equal(t, true, content["credentialless"])
 	assert.NotContains(t, content, "headers")
+}
+
+func TestYuanxiangContentRefreshValidatesTaskAndResult(t *testing.T) {
+	plugin := loadYuanxiangPlugin(t)
+	for _, tc := range []struct {
+		name, model, key, body, wantURL string
+		status                          int
+	}{
+		{name: "image", model: "GT Image 2.5-YX", key: "image-2", status: 200, body: `{"id":"vendor-id","status":"succeeded","object":"image","data":[{"url":"https://cdn.example/one.png"},{"url":"https://cdn.example/two.png"}]}`, wantURL: "https://cdn.example/two.png"},
+		{name: "query failed", status: 403, body: `{"message":"secret-key https://cdn.example/?signature=secret"}`},
+		{name: "wrong task", status: 200, body: `{"id":"another-id","status":"succeeded","video_url":"https://cdn.example/video.mp4"}`},
+		{name: "missing task id", status: 200, body: `{"status":"succeeded","video_url":"https://cdn.example/video.mp4"}`},
+		{name: "pending", status: 200, body: `{"id":"vendor-id","status":"running","video_url":"https://cdn.example/video.mp4"}`},
+		{name: "invalid URL", status: 200, body: `{"id":"vendor-id","status":"succeeded","video_url":"https://user:secret@cdn.example/video.mp4"}`},
+		{name: "no result", status: 200, body: `{"id":"vendor-id","status":"succeeded"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			modelName, key := tc.model, tc.key
+			if modelName == "" {
+				modelName = "MiniMax H3 · 特价按秒-YX"
+			}
+			if key == "" {
+				key = "video"
+			}
+			ctx := yuanxiangContext(modelName, nil)
+			ctx["artifactKey"], ctx["upstreamTaskId"] = key, "vendor-id"
+			callCtx := jsplugin.WithFetcher(t.Context(), func(_ context.Context, request jsplugin.FetchRequest) (jsplugin.FetchResponse, error) {
+				if tc.model != "" {
+					assert.Equal(t, "https://yuanxiang.example/v1/images/vendor-id", request.URL)
+				}
+				return jsplugin.FetchResponse{Status: tc.status, Body: []byte(tc.body)}, nil
+			})
+			value, err := plugin.Engine.Call(callCtx, "buildContentRequest", ctx)
+			if tc.wantURL == "" {
+				require.Error(t, err)
+				assert.NotContains(t, err.Error(), "secret")
+				assert.NotContains(t, err.Error(), "https://")
+				return
+			}
+			require.NoError(t, err)
+			encoded, err := common.Marshal(value)
+			require.NoError(t, err)
+			var result map[string]any
+			require.NoError(t, common.Unmarshal(encoded, &result))
+			assert.Equal(t, tc.wantURL, result["url"])
+			assert.Equal(t, true, result["credentialless"])
+			assert.NotContains(t, result, "headers")
+		})
+	}
 }
 
 func TestYuanxiangSoraMultipartUploadsBeforeVideoSubmission(t *testing.T) {

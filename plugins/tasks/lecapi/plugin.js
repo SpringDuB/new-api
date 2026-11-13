@@ -1509,7 +1509,7 @@ export const meta = {
   key: "lecapi",
   name: "LecAPI",
   icon: "text:LE",
-  version: "1.0.5",
+  version: "1.0.6",
   author: { name: "QuantumNous" },
   website: "https://api.lecapi.net/docs",
   baseUrl: "https://api.lecapi.net",
@@ -2057,23 +2057,33 @@ export function listArtifacts(task) {
   const imageTask = ["imagine", "edits", "blend", "hd_upscale"].includes(task.action) || MODELS[vendorModelName(body.model)]?.kind === "image";
   const entries = imageEntries(task.data, imageTask);
   if (entries.length)
-    return entries.filter((entry) => entry.url).map((entry, index) => ({ key: "image-" + (index + 1), type: "image", mimeType: "image/png" }));
+    return entries.filter((entry) => entry.url).map((entry, index) => ({ key: "image-" + (index + 1), type: "image", mimeType: "image/png" })).concat(
+      entries.filter((entry) => !entry.url && entry.b64_json).map((entry, index) => ({ key: "image-b64-" + (index + 1), type: "image", mimeType: "image/png" })),
+    );
   return resultURL(task.data) ? [{ key: "video", type: "video", mimeType: "video/mp4" }] : [];
 }
 
 export function buildContentRequest(ctx) {
-  const image = /^image-([1-9]\d*)$/.exec(ctx.artifactKey);
+  const image = /^image-(b64-)?([1-9]\d*)$/.exec(ctx.artifactKey);
   if (!image && ctx.artifactKey !== "video") throw new Error("artifact_not_found");
   let data = ctx.data;
-  if (ctx.upstreamTaskId && ctx.state?.queryable !== false) {
+  // Before state was persisted, synchronous images used a locally generated
+  // id. Only models with an asynchronous task API can refresh those old rows.
+  const profile = modelProfile(ctx);
+  const queryable = ctx.state?.queryable ?? (profile.kind === "video" || ASYNC_IMAGE_MODELS.includes(profile.vendorModel));
+  if (ctx.upstreamTaskId && queryable) {
     const query = buildQueryRequest({ ...ctx, taskId: ctx.upstreamTaskId });
     const refreshed = utils.fetch(query);
-    if (refreshed.status < 200 || refreshed.status >= 300) throw new Error("LecAPI result could not be refreshed");
+    if (refreshed.status < 200 || refreshed.status >= 300) throw new Error("LecAPI result refresh failed (HTTP " + refreshed.status + ")");
+    const body = responseObject(refreshed.body);
+    const id = refreshed.body.object === "lecapi.task" ? refreshed.body.id : body.id || body.task_id || body.metadata?.task_id;
+    if (id !== ctx.upstreamTaskId) throw new Error("LecAPI result refresh returned a different task id");
     const result = parseTaskResult({ ...ctx, taskId: ctx.upstreamTaskId }, refreshed.body);
     if (result.status !== "SUCCESS") throw new Error("LecAPI result is not available");
     data = refreshed.body;
   }
-  const url = image ? imageEntries(data, true).filter((entry) => entry.url)[Number(image[1]) - 1]?.url : resultURL(data);
+  const entry = image ? imageEntries(data, true).filter((item) => image[1] ? !item.url && item.b64_json : item.url)[Number(image[2]) - 1] : undefined;
+  const url = image ? entry?.url || (entry?.b64_json ? "data:image/png;base64," + entry.b64_json : "") : resultURL(data);
   if (!url) throw new Error("artifact_not_found");
   return { url: url, method: "GET", credentialless: true };
 }
