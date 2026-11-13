@@ -302,7 +302,7 @@ interface TaskArtifactsProps {
   emptyContent?: (legacyContentUrl?: string) => React.ReactNode
 }
 
-function TaskArtifacts(props: TaskArtifactsProps) {
+export function TaskArtifacts(props: TaskArtifactsProps) {
   const { t } = useTranslation()
   const artifactsQuery = useQuery({
     queryKey: ['usage-logs', 'task-artifacts', props.taskId],
@@ -479,7 +479,7 @@ export function TaskArtifactsCell(props: { log: TaskLog }) {
         bodyClassName='pr-2 sm:pr-4'
       >
         <TaskArtifacts
-          taskId={props.log.task_id}
+          taskId={props.log.detail_id || props.log.task_id}
           enabled={shouldLoadTaskArtifacts(props.log, open)}
           emptyContent={(legacyContentUrl) => (
             <LegacyTaskArtifacts legacyContentUrl={legacyContentUrl} />

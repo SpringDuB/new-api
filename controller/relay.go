@@ -70,6 +70,10 @@ func geminiRelayHandler(c *gin.Context, info *relaycommon.RelayInfo) *types.NewA
 }
 
 func Relay(c *gin.Context, relayFormat types.RelayFormat) {
+	if relayFormat != types.RelayFormatOpenAIRealtime {
+		finishImageLog := beginImageLogCapture(c)
+		defer finishImageLog()
+	}
 
 	requestId := c.GetString(common.RequestIdKey)
 	//group := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
@@ -131,11 +135,13 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		return
 	}
 
+	captureImageLogRequestIntent(c, request)
 	relayInfo, err := relaycommon.GenRelayInfo(c, relayFormat, request, ws)
 	if err != nil {
 		newAPIError = types.NewError(err, types.ErrorCodeGenRelayInfoFailed)
 		return
 	}
+	c.Set(imageLogRelayInfoContextKey, relayInfo)
 
 	defer func() {
 		recovered := recover()
@@ -416,6 +422,8 @@ func RelayNotFound(c *gin.Context) {
 // existing handler while claimed requests enter the generation-pinned
 // host-owned protocol bridge.
 func RelayTaskPluginEndpoint(c *gin.Context, fallback gin.HandlerFunc) {
+	finishImageLog := beginImageLogCapture(c)
+	defer finishImageLog()
 	pinnedValue, exists := c.Get(pluginruntime.ContextKeyPinnedEndpoint)
 	if !exists {
 		fallback(c)
@@ -464,6 +472,8 @@ type taskSubmissionOutcome struct {
 }
 
 func RelayTask(c *gin.Context) {
+	finishImageLog := beginImageLogCapture(c)
+	defer finishImageLog()
 	service.CaptureTaskClientRequest(c, nil, nil)
 	relayInfo, err := relaycommon.GenRelayInfo(c, types.RelayFormatTask, nil, nil)
 	if err != nil {
@@ -699,6 +709,17 @@ func executeTaskSubmissionWith(
 			task.PrivateData.ResultURL = taskcommon.BuildProxyURL(task.TaskID)
 		}
 	}
+	if model.IsImageTaskAction(task.Action) {
+		task.PrivateData.ImageRequestMode = "asynchronous"
+		if result.Immediate != nil {
+			task.PrivateData.ImageRequestMode = "synchronous"
+		}
+		if pinnedValue, exists := c.Get(pluginruntime.ContextKeyPinnedEndpoint); exists {
+			if pinned, ok := pinnedValue.(pluginruntime.PinnedEndpoint); ok && pinned.Protocol == pluginruntime.ProtocolOpenAIImage {
+				task.PrivateData.ImageRequestMode = "synchronous"
+			}
+		}
+	}
 	// A native submit route may declare retainResult: false. It applies only
 	// to immediate terminal results: the client receives the complete response
 	// once, the upstream snapshot is never persisted, and the task is not
@@ -743,6 +764,8 @@ func executeTaskSubmissionWith(
 		return nil, taskErr
 	}
 	durable = true
+	c.Set(imageLogTaskContextKey, task)
+	c.Set(imageLogRelayInfoContextKey, relayInfo)
 	stage = "settle"
 	diagnostics.durable(task)
 	diagnostics.settleStart(task, result.Quota)

@@ -95,19 +95,28 @@ func archiveTaskArtifact(ctx context.Context, task *model.Task, artifact relaych
 		if ref, err := store.Resolve(task, artifact.Key); err != nil || ref != nil {
 			return ref, err
 		}
-		adaptor, err := initTaskArtifactAdaptor(task)
-		if err != nil {
-			return nil, err
-		}
-		provider, ok := adaptor.(relaychannel.TaskContentRequestProvider)
-		if !ok {
-			return nil, errTaskArtifactPluginUnavailable
-		}
 		bounded, cancel := context.WithTimeout(ctx, 5*time.Minute)
 		defer cancel()
-		descriptor, err := provider.BuildContentRequest(bounded, task, artifact.Key, relaychannel.TaskArtifactClientRequest{Method: http.MethodGet})
-		if err != nil {
-			return nil, err
+		var descriptor *relaychannel.TaskContentRequest
+		for _, image := range task.PrivateData.ImageArtifacts {
+			if image.Key == artifact.Key {
+				descriptor = &relaychannel.TaskContentRequest{URL: image.SourceURL, Method: http.MethodGet, Credentialless: true}
+				break
+			}
+		}
+		if descriptor == nil {
+			adaptor, err := initTaskArtifactAdaptor(task)
+			if err != nil {
+				return nil, err
+			}
+			provider, ok := adaptor.(relaychannel.TaskContentRequestProvider)
+			if !ok {
+				return nil, errTaskArtifactPluginUnavailable
+			}
+			descriptor, err = provider.BuildContentRequest(bounded, task, artifact.Key, relaychannel.TaskArtifactClientRequest{Method: http.MethodGet})
+			if err != nil {
+				return nil, err
+			}
 		}
 		request, err := http.NewRequestWithContext(bounded, http.MethodGet, "http://task-archive.invalid/", nil)
 		if err != nil {

@@ -380,6 +380,9 @@ func SetApiRouter(router *gin.Engine) {
 		mjRoute := apiRouter.Group("/mj")
 		mjRoute.GET("/self", middleware.UserAuth(), controller.GetUserMidjourney)
 		mjRoute.GET("/", middleware.AdminAuth(), controller.GetAllMidjourney)
+		imageLogRoute := apiRouter.Group("/image-log")
+		imageLogRoute.GET("/self", middleware.UserAuth(), controller.GetUserImageLogs)
+		imageLogRoute.GET("", middleware.AdminAuth(), controller.GetAllImageLogs)
 
 		taskRoute := apiRouter.Group("/task")
 		{
@@ -387,6 +390,7 @@ func SetApiRouter(router *gin.Engine) {
 			taskRoute.GET("", middleware.AdminAuth(), controller.GetAllTask)
 			taskRoute.GET("/:task_id/artifacts", middleware.UserAuth(), controller.GetDashboardTaskArtifacts)
 			taskRoute.GET("/:task_id/request", middleware.UserAuth(), controller.GetDashboardTaskClientRequest)
+			taskRoute.GET("/:task_id/response", middleware.UserAuth(), controller.GetDashboardTaskResponse)
 		}
 
 		vendorRoute := apiRouter.Group("/vendors")

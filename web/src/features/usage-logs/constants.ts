@@ -288,6 +288,15 @@ export const MJ_SUBMIT_RESULT_MAPPINGS: Record<string, StatusMapping> = {
  * Task action type mappings
  */
 export const TASK_ACTION_MAPPINGS: Record<string, StatusMapping> = {
+  ...MJ_TASK_TYPE_MAPPINGS,
+  image_generation: { label: 'Image Generation', variant: 'blue' },
+  text_to_image: { label: 'Image Generation', variant: 'blue' },
+  image_to_image: { label: 'Edit', variant: 'orange' },
+  image_edit: { label: 'Edit', variant: 'orange' },
+  imagine: { label: 'Draw', variant: 'blue' },
+  edits: { label: 'Edit', variant: 'orange' },
+  blend: { label: 'Blend', variant: 'lime' },
+  hd_upscale: { label: 'Upscale', variant: 'orange' },
   [TASK_ACTIONS.MUSIC]: { label: 'Generate Music', variant: 'neutral' },
   [TASK_ACTIONS.LYRICS]: { label: 'Generate Lyrics', variant: 'pink' },
   [TASK_ACTIONS.GENERATE]: { label: 'Image to Video', variant: 'blue' },

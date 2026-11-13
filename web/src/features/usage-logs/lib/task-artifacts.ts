@@ -208,7 +208,7 @@ export function shouldLoadTaskArtifacts(
   return (
     dialogOpen &&
     log.status === TASK_STATUS.SUCCESS &&
-    log.result_discarded !== true
+    (log.result_discarded !== true || log.image_artifacts_available === true)
   )
 }
 
@@ -219,7 +219,9 @@ export function resolveTaskPreviewMode(
   if (log.status !== TASK_STATUS.SUCCESS) return 'none'
   // A synchronous result was returned inline and never persisted; there is
   // nothing to project, so the viewer explains that instead of opening.
-  if (log.result_discarded === true) return 'discarded'
+  if (log.result_discarded === true && !log.image_artifacts_available) {
+    return 'discarded'
+  }
   if (hasProjectedArtifacts) return 'plugin'
   if (log.admin_info?.task_plugin) return 'plugin'
   if (log.platform === 'suno') return 'legacy-suno'

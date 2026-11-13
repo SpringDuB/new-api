@@ -28,10 +28,15 @@ import { translateServerText } from '@/lib/server-error-message'
 import { cn } from '@/lib/utils'
 
 import { taskActionMapper, taskStatusMapper } from '../../lib/mappers'
+import { shouldLoadTaskArtifacts } from '../../lib/task-artifacts'
 import { resolveTaskDetailAccess } from '../../lib/task-details'
 import type { TaskLog } from '../../types'
 import { PluginAuthorLink } from '../plugin-author-link'
-import { TaskClientRequestDetails } from '../task-client-request'
+import { TaskArtifacts } from '../task-artifacts'
+import {
+  TaskClientRequestDetails,
+  TaskResponseDetails,
+} from '../task-client-request'
 
 function DetailRow(props: {
   label: React.ReactNode
@@ -119,6 +124,16 @@ export function TaskDetailsDialog(props: TaskDetailsDialogProps) {
         <DetailSection label={t('Basic Information')}>
           <DetailRow label={t('Task ID')} value={props.log.task_id} mono />
           <DetailRow label={t('Platform')} value={props.log.platform} mono />
+          {props.log.request_mode ? (
+            <DetailRow
+              label={t('Request type')}
+              value={
+                props.log.request_mode === 'synchronous'
+                  ? t('Synchronous')
+                  : t('Asynchronous')
+              }
+            />
+          ) : null}
           <DetailRow
             label={t('Action')}
             value={t(taskActionMapper.getLabel(props.log.action))}
@@ -167,10 +182,26 @@ export function TaskDetailsDialog(props: TaskDetailsDialogProps) {
 
         <DetailSection label={t('Original client request')}>
           <TaskClientRequestDetails
-            taskId={props.log.task_id}
+            taskId={props.log.detail_id || props.log.task_id}
             open={props.open}
           />
         </DetailSection>
+
+        <DetailSection label={t('Response result')}>
+          <TaskResponseDetails
+            taskId={props.log.detail_id || props.log.task_id}
+            open={props.open}
+          />
+        </DetailSection>
+
+        {shouldLoadTaskArtifacts(props.log, props.open) ? (
+          <DetailSection label={t('Artifacts')}>
+            <TaskArtifacts
+              taskId={props.log.detail_id || props.log.task_id}
+              enabled={props.open}
+            />
+          </DetailSection>
+        ) : null}
 
         {props.isAdmin ? (
           <DetailSection

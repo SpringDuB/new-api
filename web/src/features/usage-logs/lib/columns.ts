@@ -22,7 +22,6 @@ For commercial licensing, please contact support@quantumnous.com
 import type { ColumnDef } from '@tanstack/react-table'
 
 import { useCommonLogsColumns } from '../components/columns/common-logs-columns'
-import { useDrawingLogsColumns } from '../components/columns/drawing-logs-columns'
 import { useTaskLogsColumns } from '../components/columns/task-logs-columns'
 import type { LogCategory } from '../types'
 
@@ -38,14 +37,17 @@ export function useColumnsByCategory(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
 ): ColumnDef<any>[] {
   const commonColumns = useCommonLogsColumns(isAdmin, isRoot, showBillingSource)
-  const drawingColumns = useDrawingLogsColumns(isAdmin)
-  const taskColumns = useTaskLogsColumns(isAdmin, isRoot)
+  const taskColumns = useTaskLogsColumns(
+    isAdmin,
+    isRoot,
+    logCategory === 'drawing'
+  )
 
   switch (logCategory) {
     case 'common':
       return commonColumns
     case 'drawing':
-      return drawingColumns
+      return taskColumns
     case 'task':
       return taskColumns
     default:

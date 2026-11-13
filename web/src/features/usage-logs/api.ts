@@ -34,6 +34,7 @@ import type {
   GetTaskLogsParams,
   TaskArtifactsResponse,
   TaskClientRequestResponse,
+  TaskResponseResponse,
   UserInfo,
 } from './types'
 
@@ -163,6 +164,12 @@ export const getAllMidjourneyLogs = (params: GetMidjourneyLogsParams) =>
 export const getUserMidjourneyLogs = (params: GetMidjourneyLogsParams) =>
   fetchLogs('/api/mj', params, false)
 
+export const getAllImageLogs = (params: GetTaskLogsParams) =>
+  fetchLogs('/api/image-log', params, true)
+
+export const getUserImageLogs = (params: GetTaskLogsParams) =>
+  fetchLogs('/api/image-log', params, false)
+
 // ============================================================================
 // Task Logs API
 // ============================================================================
@@ -193,5 +200,15 @@ export async function getTaskClientRequest(
     success: boolean
     data: TaskClientRequestResponse
   }>(`/api/task/${encodeURIComponent(taskId)}/request`)
+  return requireServerSuccess(response.data).data
+}
+
+export async function getTaskResponse(
+  taskId: string
+): Promise<TaskResponseResponse> {
+  const response = await api.get<{
+    success: boolean
+    data: TaskResponseResponse
+  }>(`/api/task/${encodeURIComponent(taskId)}/response`)
   return requireServerSuccess(response.data).data
 }

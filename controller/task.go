@@ -120,6 +120,9 @@ func GetDashboardTaskClientRequest(c *gin.Context) {
 func writeTaskArtifacts(c *gin.Context, task *model.Task, dashboard bool) {
 	c.Header("Cache-Control", "private, no-store")
 	artifacts, err := projectTaskArtifacts(task)
+	if dashboard && task.PrivateData.ResultDiscarded {
+		artifacts = hostImageTaskArtifacts(task)
+	}
 	if err != nil {
 		logger.LogTaskArtifactFailure(c.Request.Context(), task.TaskID, "projection", 0)
 		writeTaskArtifactProjectionError(c, err)
@@ -197,7 +200,13 @@ func legacySunoAudioClips(data json.RawMessage) []map[string]any {
 }
 
 func projectTaskArtifacts(task *model.Task) ([]relaychannel.TaskArtifact, error) {
-	if task == nil || task.Status != model.TaskStatusSuccess || !taskHasPluginExecution(task) || !task.ResultRetrievable() {
+	if task == nil || task.Status != model.TaskStatusSuccess || !task.ResultRetrievable() {
+		return []relaychannel.TaskArtifact{}, nil
+	}
+	if len(task.PrivateData.ImageArtifacts) > 0 {
+		return validateProjectedTaskArtifacts(hostImageTaskArtifacts(task))
+	}
+	if !taskHasPluginExecution(task) {
 		return []relaychannel.TaskArtifact{}, nil
 	}
 	adaptor := relay.GetTaskAdaptor(task.Platform)
@@ -213,6 +222,16 @@ func projectTaskArtifacts(task *model.Task) ([]relaychannel.TaskArtifact, error)
 		return nil, fmt.Errorf("%w: %v", errTaskArtifactPlugin, err)
 	}
 	return validateProjectedTaskArtifacts(artifacts)
+}
+
+func hostImageTaskArtifacts(task *model.Task) []relaychannel.TaskArtifact {
+	artifacts := make([]relaychannel.TaskArtifact, 0, len(task.PrivateData.ImageArtifacts))
+	for _, image := range task.PrivateData.ImageArtifacts {
+		if image.Stored || image.SourceURL != "" {
+			artifacts = append(artifacts, imageLogArtifact(image))
+		}
+	}
+	return artifacts
 }
 
 func validateProjectedTaskArtifacts(artifacts []relaychannel.TaskArtifact) ([]relaychannel.TaskArtifact, error) {
@@ -302,6 +321,21 @@ func legacyVideoAvailable(task *model.Task) bool {
 }
 
 func getTaskForArtifactRequest(c *gin.Context, taskID string) (*model.Task, bool, error) {
+	if strings.HasPrefix(taskID, "mjlog_") {
+		public := middleware.IsTaskArtifactAccess(c)
+		admin := c.GetInt("token_id") == 0 && c.GetInt("role") >= common.RoleAdminUser
+		task, exists, err := model.GetMidjourneyImageLog(taskID, c.GetInt("id"), public || admin)
+		if err != nil || !exists || task == nil {
+			return task, exists, err
+		}
+		if public {
+			owner, err := model.GetUserCache(task.UserId)
+			if err != nil || owner == nil || owner.Status != common.UserStatusEnabled {
+				return nil, false, err
+			}
+		}
+		return task, true, nil
+	}
 	if middleware.IsTaskArtifactAccess(c) {
 		task, exists, err := model.GetUniqueByOnlyTaskId(taskID)
 		if err != nil || !exists || task == nil {
@@ -358,7 +392,8 @@ func TaskArtifactContent(c *gin.Context) {
 		return
 	}
 	artifactKey := strings.TrimSpace(c.Param("artifact_key"))
-	if !taskArtifactKeyPattern.MatchString(artifactKey) || !task.ResultRetrievable() {
+	hostArtifacts := hostImageTaskArtifacts(task)
+	if !taskArtifactKeyPattern.MatchString(artifactKey) || !task.ResultRetrievable() && len(hostArtifacts) == 0 {
 		writeTaskArtifactError(c, http.StatusNotFound, "artifact_not_found", "Task or artifact not found")
 		return
 	}
@@ -366,7 +401,7 @@ func TaskArtifactContent(c *gin.Context) {
 		writeTaskArtifactError(c, http.StatusConflict, "artifact_not_ready", "Task artifacts are not ready")
 		return
 	}
-	if !taskHasPluginExecution(task) {
+	if !taskHasPluginExecution(task) && len(hostArtifacts) == 0 {
 		if artifactKey != "video" || !legacyVideoAvailable(task) {
 			writeTaskArtifactError(c, http.StatusNotFound, "artifact_not_found", "Task or artifact not found")
 			return
@@ -382,6 +417,9 @@ func TaskArtifactContent(c *gin.Context) {
 		return
 	}
 	artifacts, err := projectTaskArtifacts(task)
+	if len(hostArtifacts) > 0 {
+		artifacts = hostArtifacts
+	}
 	if err != nil {
 		logger.LogTaskArtifactFailure(c.Request.Context(), task.TaskID, "projection", 0)
 		writeTaskArtifactProjectionError(c, err)
@@ -419,6 +457,15 @@ func TaskArtifactContent(c *gin.Context) {
 		}
 	}
 
+	for _, image := range task.PrivateData.ImageArtifacts {
+		if image.Key == artifactKey {
+			descriptor := &relaychannel.TaskContentRequest{URL: image.SourceURL, Method: c.Request.Method, Credentialless: true}
+			if err := proxyTaskMedia(c, task, descriptor); err != nil {
+				writeTaskMediaProxyError(c, err)
+			}
+			return
+		}
+	}
 	adaptor, err := initTaskArtifactAdaptor(task)
 	if err != nil {
 		writeTaskArtifactProjectionError(c, err)
@@ -505,6 +552,13 @@ func tasksToDto(tasks []*model.Task, fillUser bool, viewerRole int) []*dto.TaskD
 		item := relay.TaskModel2Dto(task)
 		item.LegacyVideoAvailable = legacyVideoAvailable(task)
 		item.ResultDiscarded = task.PrivateData.ResultDiscarded
+		item.RequestMode = task.PrivateData.ImageRequestMode
+		if item.RequestMode == "" && task.PrivateData.ResultDiscarded {
+			item.RequestMode = "synchronous"
+		} else if item.RequestMode == "" && model.IsImageTaskAction(task.Action) && task.Status != model.TaskStatusSuccess && task.Status != model.TaskStatusFailure {
+			item.RequestMode = "asynchronous"
+		}
+		item.ImageArtifactsAvailable = len(hostImageTaskArtifacts(task)) > 0
 		if task.Status == model.TaskStatusSuccess {
 			item.ResultURL = ""
 			if taskFailReasonIsLegacyResultURL(task.FailReason) {

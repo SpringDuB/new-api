@@ -85,7 +85,8 @@ function TaskDetailsCell(props: {
 
 export function useTaskLogsColumns(
   isAdmin: boolean,
-  isRoot: boolean
+  isRoot: boolean,
+  imageLogs = false
 ): ColumnDef<TaskLog>[] {
   const { t } = useTranslation()
   return useMemo(() => {
@@ -115,6 +116,32 @@ export function useTaskLogsColumns(
         size: 180,
       },
     ]
+
+    if (imageLogs) {
+      columns.push(
+        {
+          id: 'model',
+          header: t('Model'),
+          accessorFn: (row) => row.properties?.origin_model_name || '-',
+          size: 180,
+        },
+        {
+          id: 'request_mode',
+          header: t('Request type'),
+          accessorFn: (row) => row.request_mode || '-',
+          cell: ({ row }) => {
+            if (row.original.request_mode === 'synchronous') {
+              return t('Synchronous')
+            }
+            if (row.original.request_mode === 'asynchronous') {
+              return t('Asynchronous')
+            }
+            return '-'
+          },
+          size: 110,
+        }
+      )
+    }
 
     if (isAdmin) {
       columns.push(
@@ -218,7 +245,8 @@ export function useTaskLogsColumns(
                 className='border-border/60 bg-muted/30 !text-foreground max-w-full truncate rounded-md border px-1.5 py-0.5 font-mono'
               />
               <span className='text-muted-foreground/60 truncate text-[11px]'>
-                {t(log.platform)} · {t(taskActionMapper.getLabel(log.action))}
+                {log.platform === 'image' ? 'API' : log.platform} ·{' '}
+                {t(taskActionMapper.getLabel(log.action))}
               </span>
             </div>
           )
@@ -277,5 +305,5 @@ export function useTaskLogsColumns(
     )
 
     return columns
-  }, [t, isAdmin, isRoot])
+  }, [t, isAdmin, isRoot, imageLogs])
 }

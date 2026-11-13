@@ -118,7 +118,12 @@ type TaskPrivateData struct {
 	// ClientRequest is captured before plugin decoding. It is independent of
 	// mutable upstream Data/state, private by default, and retained only for
 	// the lifetime of this task row (including its normal deletion/backups).
-	ClientRequest *TaskClientRequestSnapshot `json:"client_request,omitempty"`
+	ClientRequest    *TaskClientRequestSnapshot `json:"client_request,omitempty"`
+	Response         *TaskResponseSnapshot      `json:"response,omitempty"`
+	ImageRequestMode string                     `json:"image_request_mode,omitempty"`
+	// ImageArtifacts are host-managed results of synchronous image relays.
+	// Source URLs stay private; inline image binaries are only kept in OSS.
+	ImageArtifacts []TaskImageArtifact `json:"image_artifacts,omitempty"`
 	// 计费上下文：用于异步退款/差额结算（轮询阶段读取）
 	BillingSource  string              `json:"billing_source,omitempty"`  // "wallet" 或 "subscription"
 	SubscriptionId int                 `json:"subscription_id,omitempty"` // 订阅 ID，用于订阅退款
@@ -154,6 +159,23 @@ type TaskClientRequestSnapshot struct {
 	BodyOmitted  string          `json:"body_omitted,omitempty"`
 	Redacted     bool            `json:"redacted"`
 	FilesOmitted bool            `json:"files_omitted"`
+}
+
+type TaskResponseSnapshot struct {
+	StatusCode    int             `json:"status_code,omitempty"`
+	ContentType   string          `json:"content_type"`
+	BodyKind      string          `json:"body_kind"`
+	Body          json.RawMessage `json:"body,omitempty"`
+	BodyOmitted   string          `json:"body_omitted,omitempty"`
+	Redacted      bool            `json:"redacted"`
+	BinaryOmitted bool            `json:"binary_omitted"`
+}
+
+type TaskImageArtifact struct {
+	Key       string `json:"key"`
+	MimeType  string `json:"mime_type"`
+	SourceURL string `json:"source_url,omitempty"`
+	Stored    bool   `json:"stored"`
 }
 
 type TaskExecutionSnapshot struct {
@@ -229,7 +251,7 @@ func (p *TaskPrivateData) Scan(val any) error {
 
 func (p TaskPrivateData) Value() (driver.Value, error) {
 	if p.Key == "" && p.UpstreamTaskID == "" && p.ResultURL == "" &&
-		p.Execution == nil && p.ClientRequest == nil && p.BillingSource == "" && p.SubscriptionId == 0 &&
+		p.Execution == nil && p.ClientRequest == nil && p.Response == nil && p.ImageRequestMode == "" && len(p.ImageArtifacts) == 0 && p.BillingSource == "" && p.SubscriptionId == 0 &&
 		p.TokenId == 0 && p.NodeName == "" && p.BillingContext == nil &&
 		!p.ResponsesBackground && len(p.PluginState) == 0 && p.PollFailures == 0 &&
 		!p.ResultDiscarded {

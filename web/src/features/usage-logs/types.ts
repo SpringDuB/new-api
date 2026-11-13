@@ -327,6 +327,10 @@ export interface TaskLog {
   username?: string
   platform: string // suno, kling, runway, etc.
   task_id: string
+  // Legacy drawing rows use a separate identity for detail/artifact reads.
+  detail_id?: string
+  request_mode?: 'synchronous' | 'asynchronous'
+  image_artifacts_available?: boolean
   action: string // MUSIC, LYRICS, GENERATE, TEXT_GENERATE, etc.
   channel_id: number
   group: string
@@ -395,6 +399,24 @@ export interface TaskClientRequestSnapshot {
 export interface TaskClientRequestResponse {
   recorded: boolean
   snapshot: TaskClientRequestSnapshot | null
+  max_bytes: number
+  retention: 'task_lifetime'
+}
+
+export interface TaskResponseSnapshot {
+  status_code?: number
+  content_type: string
+  body_kind: 'json' | 'events'
+  body?: unknown
+  body_omitted?: string
+  redacted: boolean
+  binary_omitted: boolean
+}
+
+export interface TaskResponseResponse {
+  recorded: boolean
+  snapshot: TaskResponseSnapshot | null
+  source: 'client_response' | 'upstream_result'
   max_bytes: number
   retention: 'task_lifetime'
 }

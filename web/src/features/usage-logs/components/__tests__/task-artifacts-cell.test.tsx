@@ -74,6 +74,14 @@ describe('task artifacts cell', () => {
     expect(screen.queryByText('Result not retained')).not.toBeInTheDocument()
   })
 
+  test('an inline response archived separately in OSS offers image preview', () => {
+    renderCell(
+      taskLog({ result_discarded: true, image_artifacts_available: true })
+    )
+    expect(screen.getByRole('button', { name: /Artifacts/ })).toBeVisible()
+    expect(screen.queryByText('Result not retained')).not.toBeInTheDocument()
+  })
+
   test('given an unfinished task, neither the button nor the hint is shown', () => {
     renderCell(taskLog({ status: 'IN_PROGRESS', result_discarded: true }))
 

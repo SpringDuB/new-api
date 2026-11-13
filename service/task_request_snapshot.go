@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
 	"mime"
+	"mime/multipart"
 	"net/url"
 	"regexp"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/gin-gonic/gin"
 )
@@ -25,8 +28,10 @@ var taskRequestURLPattern = regexp.MustCompile(`https?://[^\s"'<>]+`)
 var taskRequestCredentialPattern = regexp.MustCompile(`(?i)\b(?:Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+|\bsk-[A-Za-z0-9_-]{6,}|\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+`)
 
 type taskRequestRedactor struct {
-	secrets  []string
-	redacted bool
+	secrets       []string
+	redacted      bool
+	omitBinary    bool
+	binaryOmitted bool
 }
 
 func taskRequestCredentialField(name string) bool {
@@ -83,6 +88,13 @@ func (r *taskRequestRedactor) json(raw json.RawMessage, depth int) (json.RawMess
 		}
 		redacted := make(map[string]json.RawMessage, len(object))
 		for key, value := range object {
+			if r.omitBinary && (key == "b64_json" || key == "partial_image_b64" || key == "bytesBase64Encoded" || key == "base64" ||
+				key == "result" && bytes.Equal(object["type"], []byte(`"image_generation_call"`)) ||
+				key == "data" && (bytes.Contains(object["mimeType"], []byte("image/")) || bytes.Contains(object["mime_type"], []byte("image/")))) {
+				r.binaryOmitted = true
+				redacted[key] = json.RawMessage(`"[BINARY OMITTED]"`)
+				continue
+			}
 			if taskRequestCredentialField(key) {
 				r.redacted = true
 				redacted[r.text(key)] = json.RawMessage(`"[REDACTED]"`)
@@ -113,6 +125,10 @@ func (r *taskRequestRedactor) json(raw json.RawMessage, depth int) (json.RawMess
 		if err := common.Unmarshal(raw, &value); err != nil {
 			return nil, err
 		}
+		if r.omitBinary && strings.HasPrefix(value, "data:") {
+			r.binaryOmitted = true
+			return common.Marshal("[BINARY OMITTED]")
+		}
 		// Multipart text fields may themselves contain JSON credentials.
 		trimmed := bytes.TrimSpace([]byte(value))
 		if len(trimmed) > 0 && (trimmed[0] == '{' || trimmed[0] == '[') {
@@ -142,25 +158,7 @@ func CaptureTaskClientRequest(c *gin.Context, parsedBody any, rawJSON []byte) {
 	if _, exists := c.Get(TaskClientRequestContextKey); exists {
 		return
 	}
-	redactor := taskRequestRedactor{}
-	for name, values := range c.Request.Header {
-		if !taskRequestCredentialField(name) {
-			continue
-		}
-		for _, value := range values {
-			if value != "" {
-				redactor.secrets = append(redactor.secrets, value)
-			}
-			if _, credential, found := strings.Cut(value, " "); found && credential != "" {
-				redactor.secrets = append(redactor.secrets, credential)
-			}
-		}
-	}
-	for _, cookie := range c.Request.Cookies() {
-		if cookie.Value != "" {
-			redactor.secrets = append(redactor.secrets, cookie.Value)
-		}
-	}
+	redactor := taskSnapshotRedactor(c)
 	snapshot := &model.TaskClientRequestSnapshot{
 		Method: c.Request.Method, Path: redactor.text(c.Request.URL.Path),
 		ContentType: redactor.text(c.GetHeader("Content-Type")), BodyKind: "none",
@@ -176,12 +174,31 @@ func CaptureTaskClientRequest(c *gin.Context, parsedBody any, rawJSON []byte) {
 		snapshot.BodyKind = kind
 	}
 	if parsedBody == nil {
-		mediaType, _, _ := mime.ParseMediaType(c.GetHeader("Content-Type"))
+		mediaType, params, _ := mime.ParseMediaType(c.GetHeader("Content-Type"))
 		if mediaType == "application/json" || strings.HasSuffix(mediaType, "+json") {
 			snapshot.BodyKind = "json"
 			storage, err := common.GetBodyStorage(c)
-			if err == nil {
+			if err == nil && storage.Size() > MaxTaskClientRequestSnapshotBytes {
+				snapshot.BodyOmitted = "size_limit"
+			} else if err == nil {
 				rawJSON, err = storage.Bytes()
+			}
+			if err != nil {
+				snapshot.BodyOmitted = "unavailable"
+			}
+		} else if mediaType == "multipart/form-data" || mediaType == "application/x-www-form-urlencoded" {
+			snapshot.BodyKind = "form"
+			if mediaType == "multipart/form-data" {
+				snapshot.BodyKind = "multipart"
+			}
+			storage, err := common.GetBodyStorage(c)
+			if err == nil {
+				var reader io.ReadCloser
+				reader, err = storage.NewReader()
+				if err == nil {
+					body, err = taskClientFormSnapshot(reader, snapshot.BodyKind, params["boundary"])
+					_ = reader.Close()
+				}
 			}
 			if err != nil {
 				snapshot.BodyOmitted = "unavailable"
@@ -202,6 +219,9 @@ func CaptureTaskClientRequest(c *gin.Context, parsedBody any, rawJSON []byte) {
 		snapshot.FilesOmitted = len(files) > 0
 		raw, _ = common.Marshal(map[string]any{"fields": body["fields"], "files": files})
 	}
+	if snapshot.BodyOmitted != "" {
+		raw = nil
+	}
 	if len(raw) > MaxTaskClientRequestSnapshotBytes {
 		snapshot.BodyOmitted = "size_limit"
 	} else if len(raw) > 0 {
@@ -219,4 +239,115 @@ func CaptureTaskClientRequest(c *gin.Context, parsedBody any, rawJSON []byte) {
 		snapshot.BodyOmitted = "size_limit"
 	}
 	c.Set(TaskClientRequestContextKey, snapshot)
+}
+
+func taskSnapshotRedactor(c *gin.Context) taskRequestRedactor {
+	redactor := taskRequestRedactor{}
+	if c == nil || c.Request == nil {
+		return redactor
+	}
+	for name, values := range c.Request.Header {
+		if !taskRequestCredentialField(name) {
+			continue
+		}
+		for _, value := range values {
+			if value != "" {
+				redactor.secrets = append(redactor.secrets, value)
+			}
+			if _, credential, found := strings.Cut(value, " "); found && credential != "" {
+				redactor.secrets = append(redactor.secrets, credential)
+			}
+		}
+	}
+	for _, cookie := range c.Request.Cookies() {
+		if cookie.Value != "" {
+			redactor.secrets = append(redactor.secrets, cookie.Value)
+		}
+	}
+	if key := common.GetContextKeyString(c, constant.ContextKeyChannelKey); key != "" {
+		redactor.secrets = append(redactor.secrets, key)
+	}
+	return redactor
+}
+
+// BuildTaskResponseSnapshot sanitizes the actual downstream response, or an
+// explicitly labelled upstream result for older/asynchronous tasks. No binary
+// or usable signed URL is exposed, and the complete snapshot fits in 64 KiB.
+func BuildTaskResponseSnapshot(c *gin.Context, body []byte, status int, contentType, kind string, secrets ...string) *model.TaskResponseSnapshot {
+	redactor := taskSnapshotRedactor(c)
+	for _, secret := range secrets {
+		if secret != "" {
+			redactor.secrets = append(redactor.secrets, secret)
+		}
+	}
+	redactor.omitBinary = true
+	snapshot := &model.TaskResponseSnapshot{StatusCode: status, ContentType: redactor.text(contentType), BodyKind: kind}
+	if len(snapshot.ContentType) > 1024 {
+		snapshot.ContentType = "[OMITTED]"
+	}
+	if len(body) > 64<<20 {
+		snapshot.BodyOmitted = "size_limit"
+	} else if len(body) > 0 {
+		encoded, err := redactor.json(body, 0)
+		if err != nil {
+			snapshot.BodyOmitted = "invalid_or_too_deep"
+		} else {
+			snapshot.Body = encoded
+		}
+	}
+	snapshot.Redacted = redactor.redacted
+	snapshot.BinaryOmitted = redactor.binaryOmitted
+	encoded, err := common.Marshal(snapshot)
+	if err != nil || len(encoded) > MaxTaskClientRequestSnapshotBytes {
+		snapshot.Body = nil
+		snapshot.BodyOmitted = "size_limit"
+	}
+	return snapshot
+}
+
+// taskClientFormSnapshot reads an independent body reader. Only text and file
+// metadata are retained; multipart binaries never enter the snapshot buffer.
+func taskClientFormSnapshot(reader io.Reader, kind, boundary string) (map[string]any, error) {
+	fields := map[string][]string{}
+	files := make([]map[string]any, 0)
+	if kind == "form" {
+		body, err := io.ReadAll(io.LimitReader(reader, MaxTaskClientRequestSnapshotBytes+1))
+		if err != nil || len(body) > MaxTaskClientRequestSnapshotBytes {
+			return nil, errors.New("form snapshot size limit")
+		}
+		fields, err = url.ParseQuery(string(body))
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"fields": fields, "files": files}, nil
+	}
+	parts := multipart.NewReader(reader, boundary)
+	textBytes := 0
+	for count := 0; ; count++ {
+		part, err := parts.NextPart()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		if count >= 256 {
+			return nil, errors.New("multipart snapshot field limit")
+		}
+		if part.FileName() != "" {
+			size, err := io.Copy(io.Discard, part)
+			if err != nil {
+				return nil, err
+			}
+			files = append(files, map[string]any{"field": part.FormName(), "filename": part.FileName(), "mimeType": part.Header.Get("Content-Type"), "size": size})
+			continue
+		}
+		value, err := io.ReadAll(io.LimitReader(part, int64(MaxTaskClientRequestSnapshotBytes-textBytes+1)))
+		textBytes += len(value)
+		if err != nil || textBytes > MaxTaskClientRequestSnapshotBytes {
+			return nil, errors.New("multipart snapshot size limit")
+		}
+		fields[part.FormName()] = append(fields[part.FormName()], string(value))
+	}
+	return map[string]any{"fields": fields, "files": files}, nil
 }

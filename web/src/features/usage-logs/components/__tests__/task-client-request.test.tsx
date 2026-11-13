@@ -22,15 +22,22 @@ import { describe, expect, test, vi } from 'vitest'
 
 import { api } from '@/lib/api'
 
-import { TaskClientRequestDetails } from '../task-client-request'
+import {
+  TaskClientRequestDetails,
+  TaskResponseDetails,
+} from '../task-client-request'
 
-function renderRequest(open = true) {
+function renderRequest(open = true, response = false) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
   return render(
     <QueryClientProvider client={client}>
-      <TaskClientRequestDetails taskId='task-public' open={open} />
+      {response ? (
+        <TaskResponseDetails taskId='task-public' open={open} />
+      ) : (
+        <TaskClientRequestDetails taskId='task-public' open={open} />
+      )}
     </QueryClientProvider>
   )
 }
@@ -116,5 +123,95 @@ describe('task client request details', () => {
     renderRequest()
     fireEvent.click(await screen.findByRole('button', { name: 'Retry' }))
     expect(await screen.findByText('Not recorded')).toBeVisible()
+  })
+
+  test('a closed response view does not load the response body', () => {
+    const get = vi.spyOn(api, 'get')
+    renderRequest(false, true)
+    expect(get).not.toHaveBeenCalled()
+  })
+
+  test('response results load on demand and show binary omission while remaining copyable', async () => {
+    const snapshot = {
+      status_code: 200,
+      content_type: 'application/json',
+      body_kind: 'json',
+      body: { data: [{ b64_json: '[BINARY OMITTED]' }] },
+      redacted: true,
+      binary_omitted: true,
+    }
+    const get = vi.spyOn(api, 'get').mockResolvedValue({
+      data: {
+        success: true,
+        data: { recorded: true, source: 'client_response', snapshot },
+      },
+    })
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    })
+    renderRequest(true, true)
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Copy to clipboard' })
+    )
+    await waitFor(() =>
+      expect(writeText).toHaveBeenCalledWith(JSON.stringify(snapshot, null, 2))
+    )
+    expect(get).toHaveBeenCalledWith('/api/task/task-public/response')
+    expect(
+      screen.getByText('Image binaries omitted from response logs')
+    ).toBeVisible()
+    expect(screen.getAllByText('Client response').length).toBeGreaterThan(0)
+  })
+
+  test('an asynchronous result is labelled as upstream output and marks the size limit', async () => {
+    vi.spyOn(api, 'get').mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          recorded: true,
+          source: 'upstream_result',
+          snapshot: {
+            content_type: 'application/json',
+            body_kind: 'json',
+            body_omitted: 'size_limit',
+            redacted: false,
+            binary_omitted: false,
+          },
+        },
+      },
+    })
+    renderRequest(true, true)
+    expect(await screen.findByText('Stored upstream result')).toBeVisible()
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'Response body omitted: size limit exceeded'
+    )
+  })
+
+  test('streaming response snapshots disclose that only final events are retained', async () => {
+    vi.spyOn(api, 'get').mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          recorded: true,
+          source: 'client_response',
+          snapshot: {
+            status_code: 200,
+            content_type: 'text/event-stream',
+            body_kind: 'events',
+            body: { events: [] },
+            redacted: false,
+            binary_omitted: false,
+          },
+        },
+      },
+    })
+    renderRequest(true, true)
+    expect(
+      await screen.findByText(
+        'Streaming logs retain final image and error events only'
+      )
+    ).toBeVisible()
   })
 })

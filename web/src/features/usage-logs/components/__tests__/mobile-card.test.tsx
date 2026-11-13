@@ -27,7 +27,9 @@ import userEvent from '@testing-library/user-event'
 import { expect, it, vi } from 'vitest'
 
 import { usageLogSchema, type UsageLog } from '../../data/schema'
+import type { TaskLog } from '../../types'
 import { useCommonLogsColumns } from '../columns/common-logs-columns'
+import { useTaskLogsColumns } from '../columns/task-logs-columns'
 import { UsageLogsMobileList } from '../usage-logs-mobile-card'
 import { UsageLogsProvider, useUsageLogsContext } from '../usage-logs-provider'
 
@@ -96,6 +98,48 @@ function renderLogs(props: Parameters<typeof Fixture>[0] = {}) {
     </QueryClientProvider>
   )
 }
+
+function DrawingFixture() {
+  const columns = useTaskLogsColumns(false, false, true)
+  const data: TaskLog[] = [
+    {
+      id: 1,
+      user_id: 7,
+      platform: 'image',
+      task_id: 'task-sync-image',
+      action: 'image_generation',
+      channel_id: 1,
+      group: 'default',
+      quota: 0,
+      submit_time: 1788840000,
+      status: 'SUCCESS',
+      request_mode: 'synchronous',
+      properties: { origin_model_name: 'gpt-image-1' },
+      image_artifacts_available: true,
+    },
+  ]
+  const table = useReactTable({
+    data,
+    columns,
+    getCoreRowModel: getCoreRowModel(),
+  })
+  return <UsageLogsMobileList table={table} logCategory='drawing' />
+}
+
+it('drawing mobile cards expose synchronous model requests, results and details', () => {
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <UsageLogsProvider>
+        <DrawingFixture />
+      </UsageLogsProvider>
+    </QueryClientProvider>
+  )
+  expect(screen.getByText('task-sync-image')).toBeVisible()
+  expect(screen.getByText('gpt-image-1')).toBeVisible()
+  expect(screen.getByText('Synchronous')).toBeVisible()
+  expect(screen.getByRole('button', { name: 'View details' })).toBeVisible()
+  expect(screen.getByRole('button', { name: 'Artifacts' })).toBeVisible()
+})
 
 it('shows model mismatch evidence when tapping the mobile model badge', async () => {
   const user = userEvent.setup()

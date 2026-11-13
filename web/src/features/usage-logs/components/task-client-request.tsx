@@ -25,16 +25,26 @@ import { ErrorState } from '@/components/error-state'
 import { LoadingState } from '@/components/loading-state'
 import { Badge } from '@/components/ui/badge'
 
-import { getTaskClientRequest } from '../api'
+import { getTaskClientRequest, getTaskResponse } from '../api'
+import type { TaskClientRequestResponse, TaskResponseResponse } from '../types'
 
-export function TaskClientRequestDetails(props: {
+function TaskSnapshotDetails(props: {
   taskId: string
   open: boolean
+  kind: 'request' | 'response'
 }) {
   const { t } = useTranslation()
-  const request = useQuery({
-    queryKey: ['usage-logs', 'task-client-request', props.taskId],
-    queryFn: () => getTaskClientRequest(props.taskId),
+  const isResponse = props.kind === 'response'
+  const request = useQuery<TaskClientRequestResponse | TaskResponseResponse>({
+    queryKey: [
+      'usage-logs',
+      isResponse ? 'task-response' : 'task-client-request',
+      props.taskId,
+    ],
+    queryFn: () =>
+      isResponse
+        ? getTaskResponse(props.taskId)
+        : getTaskClientRequest(props.taskId),
     enabled: props.open,
     retry: false,
     gcTime: 0,
@@ -47,7 +57,11 @@ export function TaskClientRequestDetails(props: {
     return (
       <ErrorState
         className='min-h-24'
-        title={t('Failed to load client request')}
+        title={
+          isResponse
+            ? t('Failed to load response')
+            : t('Failed to load client request')
+        }
         onRetry={() => void request.refetch()}
       />
     )
@@ -58,6 +72,13 @@ export function TaskClientRequestDetails(props: {
 
   const snapshot = request.data.snapshot
   const code = JSON.stringify(snapshot, null, 2)
+  let title = t('Original client request')
+  if (isResponse) {
+    title =
+      'source' in request.data && request.data.source === 'upstream_result'
+        ? t('Stored upstream result')
+        : t('Client response')
+  }
   let omissionReason = t('Content unavailable')
   if (snapshot.body_omitted === 'size_limit') {
     omissionReason = t('size limit exceeded')
@@ -67,31 +88,49 @@ export function TaskClientRequestDetails(props: {
 
   return (
     <div className='min-w-0 space-y-2'>
+      {!isResponse ? (
+        <p className='text-muted-foreground text-xs'>
+          {t('Captured before request decoding and parameter conversion')}
+        </p>
+      ) : null}
       <p className='text-muted-foreground text-xs'>
-        {t('Captured before plugin decoding and parameter conversion')}
+        {isResponse
+          ? t(
+              'Response snapshots are limited to 64 KiB and retained with the task record'
+            )
+          : t(
+              'Request snapshots are limited to 64 KiB and retained with the task record'
+            )}
       </p>
-      <p className='text-muted-foreground text-xs'>
-        {t(
-          'Request snapshots are limited to 64 KiB and retained with the task record'
-        )}
-      </p>
+      {snapshot.body_kind === 'events' ? (
+        <p className='text-muted-foreground text-xs'>
+          {t('Streaming logs retain final image and error events only')}
+        </p>
+      ) : null}
       <div className='flex flex-wrap gap-1.5'>
         {snapshot.redacted ? (
           <Badge variant='secondary'>{t('Sensitive values redacted')}</Badge>
         ) : null}
-        {snapshot.files_omitted ? (
+        {'files_omitted' in snapshot && snapshot.files_omitted ? (
           <Badge variant='secondary'>{t('File contents omitted')}</Badge>
+        ) : null}
+        {'binary_omitted' in snapshot && snapshot.binary_omitted ? (
+          <Badge variant='secondary'>
+            {t('Image binaries omitted from response logs')}
+          </Badge>
         ) : null}
       </div>
       {snapshot.body_omitted ? (
         <p role='status' className='text-muted-foreground text-xs'>
-          {t('Request body omitted: {{reason}}', { reason: omissionReason })}
+          {isResponse
+            ? t('Response body omitted: {{reason}}', { reason: omissionReason })
+            : t('Request body omitted: {{reason}}', { reason: omissionReason })}
         </p>
       ) : null}
       <CodeBlock
         code={code}
         language='json'
-        title={t('Original client request')}
+        title={title}
         showToolbar
         collapsedLines={12}
         maxExpandedLines={28}
@@ -100,4 +139,15 @@ export function TaskClientRequestDetails(props: {
       </CodeBlock>
     </div>
   )
+}
+
+export function TaskClientRequestDetails(props: {
+  taskId: string
+  open: boolean
+}) {
+  return <TaskSnapshotDetails {...props} kind='request' />
+}
+
+export function TaskResponseDetails(props: { taskId: string; open: boolean }) {
+  return <TaskSnapshotDetails {...props} kind='response' />
 }

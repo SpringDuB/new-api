@@ -33,6 +33,7 @@ func TestTaskArtifactOSSArchivePreservesMediaAndServesSignedLinks(t *testing.T) 
 	allowPrivateTaskMediaTest(t)
 	objects := map[string][]byte{}
 	puts := 0
+	var imageResponse *httptest.ResponseRecorder
 	ossServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodHead:
@@ -43,6 +44,9 @@ func TestTaskArtifactOSSArchivePreservesMediaAndServesSignedLinks(t *testing.T) 
 				w.WriteHeader(404)
 			}
 		case http.MethodPut:
+			if imageResponse != nil {
+				assert.True(t, imageResponse.Flushed, "the client response must be flushed before OSS upload")
+			}
 			value, err := io.ReadAll(r.Body)
 			require.NoError(t, err)
 			assert.Contains(t, r.Header.Get("Authorization"), "OSS4-HMAC-SHA256")
@@ -193,6 +197,57 @@ export function buildContentRequest(ctx){if(ctx.data.object==="operation")return
 	require.NoError(t, err)
 	assert.Contains(t, view.Data.(map[string]any)["video_url"], "x-oss-signature=", "historical successful tasks archive on retrieval with their existing ID")
 	assert.Equal(t, 6, puts)
+
+	// Ordinary Images responses use the same private OSS store, without task
+	// plugin credentials or task billing. Both URL and Base64 output archive.
+	imageResponse = httptest.NewRecorder()
+	imageContext, _ := gin.CreateTestContext(imageResponse)
+	imageContext.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", strings.NewReader(`{"model":"ordinary-image","prompt":"draw","seed":0}`))
+	imageContext.Request.Header.Set("Content-Type", "application/json")
+	imageContext.Request.Header.Set("Authorization", "Bearer downstream-secret")
+	imageContext.Set("id", task.UserId)
+	common.SetContextKey(imageContext, constant.ContextKeyChannelId, task.ChannelId)
+	finishImageLog := beginImageLogCapture(imageContext)
+	imageContext.Data(http.StatusOK, "application/json", []byte(`{"data":[{"url":"`+origin.URL+`/ordinary-image"},{"b64_json":"aW1hZ2UtYnl0ZXM="}]}`))
+	finishImageLog()
+	assert.Equal(t, 8, puts)
+	var imageLog model.Task
+	require.NoError(t, model.DB.Where("platform = ?", "image").First(&imageLog).Error)
+	require.Len(t, imageLog.PrivateData.ImageArtifacts, 2)
+	assert.True(t, imageLog.PrivateData.ImageArtifacts[0].Stored)
+	assert.True(t, imageLog.PrivateData.ImageArtifacts[1].Stored)
+	privateJSON, err := common.Marshal(imageLog.PrivateData)
+	require.NoError(t, err)
+	assert.NotContains(t, string(privateJSON), "aW1hZ2UtYnl0ZXM=")
+	assert.NotContains(t, string(privateJSON), "downstream-secret")
+	assert.NotContains(t, string(privateJSON), "x-oss-signature")
+	for _, method := range []string{http.MethodGet, http.MethodHead} {
+		mediaRecorder := httptest.NewRecorder()
+		mediaContext, _ := gin.CreateTestContext(mediaRecorder)
+		mediaContext.Request = httptest.NewRequest(method, "/content", nil)
+		mediaContext.Request.Header.Set("Range", "bytes=0-3")
+		mediaContext.Set("id", task.UserId)
+		mediaContext.Params = gin.Params{{Key: "key", Value: imageLog.TaskID}, {Key: "artifact_key", Value: "image-1"}}
+		TaskArtifactContent(mediaContext)
+		require.Equal(t, http.StatusTemporaryRedirect, mediaRecorder.Code)
+		request, err := http.NewRequestWithContext(t.Context(), method, mediaRecorder.Header().Get("Location"), nil)
+		require.NoError(t, err)
+		request.Header.Set("Range", "bytes=0-3")
+		response, err := ossServer.Client().Do(request)
+		require.NoError(t, err)
+		mediaBytes, err := io.ReadAll(response.Body)
+		require.NoError(t, response.Body.Close())
+		require.NoError(t, err)
+		if method == http.MethodGet {
+			assert.Equal(t, http.StatusPartialContent, response.StatusCode)
+			assert.Equal(t, "arch", string(mediaBytes))
+		} else {
+			assert.Equal(t, http.StatusOK, response.StatusCode)
+			assert.Empty(t, mediaBytes)
+		}
+	}
+	assert.Equal(t, 8, puts, "preview never regenerates or uploads a duplicate")
+	assert.Equal(t, 0, imageLog.Quota, "archival does not charge quota")
 }
 
 func TestTaskArtifactStoreSettingsPersistWithoutReturningCredentials(t *testing.T) {
@@ -401,6 +456,7 @@ func TestTaskClientRequestSurvivesRealPollingAndDatabaseRoundTrip(t *testing.T) 
 	task.Status = model.TaskStatusSubmitted
 	task.Progress = "0%"
 	task.PrivateData.ClientRequest = &model.TaskClientRequestSnapshot{Method: "POST", Path: "/v1/videos", ContentType: "application/json", BodyKind: "json", Body: []byte(`{"prompt":"client-before-conversion","seed":0}`)}
+	task.PrivateData.Response = &model.TaskResponseSnapshot{StatusCode: 202, ContentType: "application/json", BodyKind: "json", Body: []byte(`{"id":"client-task","status":"queued"}`)}
 	require.NoError(t, model.DB.Save(task).Error)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -427,6 +483,8 @@ export function parseTaskResult(){return {status:"IN_PROGRESS",progress:"35%",st
 	require.NotNil(t, reloaded.PrivateData.ClientRequest)
 	assert.JSONEq(t, `{"prompt":"client-before-conversion","seed":0}`, string(reloaded.PrivateData.ClientRequest.Body))
 	assert.JSONEq(t, `{"round":2}`, string(reloaded.PrivateData.PluginState))
+	require.NotNil(t, reloaded.PrivateData.Response)
+	assert.JSONEq(t, `{"id":"client-task","status":"queued"}`, string(reloaded.PrivateData.Response.Body))
 	// No SQL schema change is introduced. Both legacy rows and the additional
 	// private JSON member must survive repeated startup migrations unchanged.
 	require.NoError(t, model.DB.AutoMigrate(&model.Task{}))
