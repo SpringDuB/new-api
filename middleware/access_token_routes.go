@@ -267,6 +267,9 @@ var accessTokenRouteRules = map[string]accessTokenRouteRule{
 	"GET /api/task":                    accessTokenScopeRule("log:read"),
 	"GET /api/task/:task_id/artifacts": accessTokenScopeRule("usage:read"),
 	"GET /api/task/:task_id/request":   accessTokenScopeRule("usage:read"),
+	"GET /api/task/:task_id/response":  accessTokenScopeRule("usage:read"),
+	"GET /api/image-log/self":          accessTokenScopeRule("usage:read"),
+	"GET /api/image-log":               accessTokenScopeRule("log:read"),
 
 	// router/api-router.go: /api/vendors, /api/models (admin)
 	"POST /api/vendors/operations/preview":  accessTokenScopeRule("model:read"),

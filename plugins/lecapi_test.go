@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -649,6 +650,46 @@ func TestLecAPIRefreshesArtifactsWithoutSendingCredentialsToStorage(t *testing.T
 	encoded, err := common.Marshal(value)
 	require.NoError(t, err)
 	assert.JSONEq(t, `{"url":"https://storage.example/video.mp4?signature=abc","method":"GET","credentialless":true}`, string(encoded))
+}
+
+func TestLecAPIRecentCompletedArtifactsAvoidDuplicateQueries(t *testing.T) {
+	plugin := loadLecAPIPlugin(t)
+	for _, tc := range []struct {
+		name        string
+		completedAt int64
+		url         string
+		refresh     bool
+	}{
+		{"just completed", time.Now().Unix() - 5, "https://storage.example/current.mp4", false},
+		{"historical result", 1, "https://storage.example/expired.mp4", true},
+		{"missing completion time", 0, "https://storage.example/expired.mp4", true},
+		{"missing result", time.Now().Unix() - 5, "", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := lecAPIContext("aj-wan-3-0", nil)
+			ctx["upstreamTaskId"], ctx["artifactKey"] = "lec-task", "video"
+			ctx["data"] = map[string]any{"id": "lec-task", "status": "completed", "completed_at": tc.completedAt, "url": tc.url}
+			queries := 0
+			callCtx := jsplugin.WithFetcher(t.Context(), func(context.Context, jsplugin.FetchRequest) (jsplugin.FetchResponse, error) {
+				queries++
+				if !tc.refresh {
+					return jsplugin.FetchResponse{Status: 429, Body: []byte(`{"error":"query rate limit"}`)}, nil
+				}
+				return jsplugin.FetchResponse{Status: 200, Body: []byte(`{"id":"lec-task","status":"completed","url":"https://storage.example/refreshed.mp4"}`)}, nil
+			})
+			value, err := plugin.Engine.Call(callCtx, "buildContentRequest", ctx)
+			require.NoError(t, err)
+			encoded, err := common.Marshal(value)
+			require.NoError(t, err)
+			if tc.refresh {
+				assert.Equal(t, 1, queries)
+				assert.Contains(t, string(encoded), "refreshed.mp4")
+			} else {
+				assert.Zero(t, queries)
+				assert.JSONEq(t, `{"url":"https://storage.example/current.mp4","method":"GET","credentialless":true}`, string(encoded))
+			}
+		})
+	}
 }
 
 func TestLecAPIStoredTaskContentUsesPersistedModelMapping(t *testing.T) {

@@ -20,6 +20,7 @@ import { TASK_STATUS } from '../constants'
 import type {
   AudioClip,
   TaskArtifact,
+  TaskArtifactArchiveStatus,
   TaskArtifactProjection,
   TaskArtifactsResponse,
   TaskLog,
@@ -31,6 +32,7 @@ const safeArtifactKeyPattern = /^[A-Za-z0-9][A-Za-z0-9._~-]{0,127}$/
 const taskArtifactContentPathPattern =
   /\/v1\/tasks\/[^/]+\/artifacts\/[^/]+\/content$/
 const taskArtifactAccessTokenPattern = /^[A-Za-z0-9_-]{43}$/
+const archiveStatuses = new Set(['pending', 'archiving', 'completed', 'failed'])
 const maxTaskArtifacts = 64
 export type TaskPreviewMode =
   | 'plugin'
@@ -97,7 +99,8 @@ function parseContentUrl(value: unknown): string {
     if (
       accessToken == null ||
       !taskArtifactAccessTokenPattern.test(accessToken) ||
-      url.search !== `?access=${accessToken}`
+      (url.search !== `?access=${accessToken}` &&
+        url.search !== `?access=${accessToken}&archive=1`)
     ) {
       throw new TaskArtifactApiError('invalid_content_url')
     }
@@ -188,6 +191,16 @@ export function parseTaskArtifactsResponse(
     keys.add(artifact.key)
   }
   const projection: TaskArtifactProjection = { artifacts }
+  const archiveStatus = response.data?.archive_status
+  if (archiveStatus != null && archiveStatus !== '') {
+    if (
+      typeof archiveStatus !== 'string' ||
+      !archiveStatuses.has(archiveStatus)
+    ) {
+      throw new TaskArtifactApiError('invalid_artifact_response')
+    }
+    projection.archiveStatus = archiveStatus as TaskArtifactArchiveStatus
+  }
   if (response.data?.legacy_content_url != null) {
     projection.legacyContentUrl = parseContentUrl(
       response.data.legacy_content_url
@@ -208,7 +221,9 @@ export function shouldLoadTaskArtifacts(
   return (
     dialogOpen &&
     log.status === TASK_STATUS.SUCCESS &&
-    (log.result_discarded !== true || log.image_artifacts_available === true)
+    (log.result_discarded !== true ||
+      log.image_artifacts_available === true ||
+      !!log.artifact_archive_status)
   )
 }
 
@@ -219,7 +234,11 @@ export function resolveTaskPreviewMode(
   if (log.status !== TASK_STATUS.SUCCESS) return 'none'
   // A synchronous result was returned inline and never persisted; there is
   // nothing to project, so the viewer explains that instead of opening.
-  if (log.result_discarded === true && !log.image_artifacts_available) {
+  if (
+    log.result_discarded === true &&
+    !log.image_artifacts_available &&
+    !log.artifact_archive_status
+  ) {
     return 'discarded'
   }
   if (hasProjectedArtifacts) return 'plugin'

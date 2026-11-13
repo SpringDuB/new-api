@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -32,9 +34,11 @@ func TestTaskArtifactOSSArchivePreservesMediaAndServesSignedLinks(t *testing.T) 
 	task := setupGenericTaskTest(t)
 	allowPrivateTaskMediaTest(t)
 	objects := map[string][]byte{}
-	puts := 0
-	var imageResponse *httptest.ResponseRecorder
+	var puts atomic.Int32
+	var objectsMu sync.Mutex
 	ossServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		objectsMu.Lock()
+		defer objectsMu.Unlock()
 		switch r.Method {
 		case http.MethodHead:
 			if value, ok := objects[r.URL.Path]; ok {
@@ -44,14 +48,12 @@ func TestTaskArtifactOSSArchivePreservesMediaAndServesSignedLinks(t *testing.T) 
 				w.WriteHeader(404)
 			}
 		case http.MethodPut:
-			if imageResponse != nil {
-				assert.True(t, imageResponse.Flushed, "the client response must be flushed before OSS upload")
-			}
+
 			value, err := io.ReadAll(r.Body)
 			require.NoError(t, err)
 			assert.Contains(t, r.Header.Get("Authorization"), "OSS4-HMAC-SHA256")
 			objects[r.URL.Path] = value
-			puts++
+			puts.Add(1)
 			w.Header().Set("ETag", `"test"`)
 		case http.MethodGet:
 			assert.Empty(t, r.Header.Get("Authorization"))
@@ -86,9 +88,9 @@ func TestTaskArtifactOSSArchivePreservesMediaAndServesSignedLinks(t *testing.T) 
 		common.OptionMap[system_setting.TaskArtifactStoreOptionKey] = previous
 		common.OptionMapRWMutex.Unlock()
 	})
-	mediaCalls := 0
+	var mediaCalls atomic.Int32
 	media := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		mediaCalls++
+		mediaCalls.Add(1)
 		assert.Empty(t, r.Header.Get("Authorization"))
 		assert.Empty(t, r.Header.Get("Cookie"))
 		assert.Empty(t, r.Header.Get("Range"))
@@ -121,19 +123,21 @@ export function buildContentRequest(ctx){if(ctx.data.object==="operation")return
 	task.SetData(map[string]any{"video_url": "https://old.example/video.mp4"})
 	require.NoError(t, model.DB.Save(task).Error)
 	for _, artifact := range []relaychannel.TaskArtifact{{Key: "video", Type: "video", MimeType: "video/mp4"}, {Key: "image-1", Type: "image", MimeType: "image/png"}} {
-		ref, err := archiveTaskArtifact(t.Context(), task, artifact)
+		ref, err := archiveTaskArtifact(t.Context(), task, artifact, service.GetTaskArtifactStore())
 		require.NoError(t, err)
 		require.NotNil(t, ref)
 		assert.Equal(t, int64(14), ref.Size)
-		_, err = archiveTaskArtifact(t.Context(), task, artifact)
+		_, err = archiveTaskArtifact(t.Context(), task, artifact, service.GetTaskArtifactStore())
 		require.NoError(t, err)
 	}
-	assert.Equal(t, 2, mediaCalls)
-	assert.Equal(t, 2, puts)
+	assert.EqualValues(t, 2, mediaCalls.Load())
+	assert.EqualValues(t, 2, puts.Load())
+	service.ScheduleTaskArtifactArchive(task)
+	awaitTaskArtifactArchive(t, task.ID, model.TaskArchiveCompleted)
 	for _, method := range []string{http.MethodGet, http.MethodHead} {
 		recorder := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(recorder)
-		c.Request = httptest.NewRequest(method, "/v1/tasks/"+task.TaskID+"/artifacts/video/content", nil)
+		c.Request = httptest.NewRequest(method, "/v1/tasks/"+task.TaskID+"/artifacts/video/content?archive=1", nil)
 		c.Request.Header.Set("Range", "bytes=0-3")
 		c.Set("id", task.UserId)
 		c.Params = gin.Params{{Key: "key", Value: task.TaskID}, {Key: "artifact_key", Value: "video"}}
@@ -156,25 +160,39 @@ export function buildContentRequest(ctx){if(ctx.data.object==="operation")return
 			assert.Empty(t, content)
 		}
 	}
-	assert.Equal(t, 2, mediaCalls, "cached reads never need the upstream again")
+	assert.EqualValues(t, 2, mediaCalls.Load(), "cached reads never need the upstream again")
+	publicResponse := httptest.NewRecorder()
+	publicContext, _ := gin.CreateTestContext(publicResponse)
+	publicContext.Request = httptest.NewRequest(http.MethodGet, "/v1/tasks/"+task.TaskID+"/artifacts/video/content", nil)
+	publicContext.Set("id", task.UserId)
+	publicContext.Params = gin.Params{{Key: "key", Value: task.TaskID}, {Key: "artifact_key", Value: "video"}}
+	TaskArtifactContent(publicContext)
+	assert.Equal(t, http.StatusOK, publicResponse.Code)
+	assert.Empty(t, publicResponse.Header().Get("Location"))
+	assert.Equal(t, "archived-media", publicResponse.Body.String())
+	assert.EqualValues(t, 3, mediaCalls.Load(), "public content continues using the original upstream")
+	assert.EqualValues(t, 2, puts.Load())
+
 	view, err := service.BuildTaskPluginView(task)
 	require.NoError(t, err)
-	assert.Contains(t, view.Data.(map[string]any)["video_url"], "x-oss-signature=")
+	assert.Equal(t, "https://old.example/video.mp4", view.Data.(map[string]any)["video_url"])
 	assert.Contains(t, string(task.Data), "old.example", "OSS presentation does not overwrite the upstream snapshot")
 	// Immediate image submissions can deliberately omit the provider result
-	// from the task row, but the bytes still need archiving before responding.
+	// from the task row. The background worker must retain its inline bytes.
 	immediate := *task
 	immediate.ID = 0
 	immediate.TaskID += "_sync"
 	immediate.PrivateData.ResultDiscarded = true
+	immediate.PrivateData.ArtifactArchive = nil
 	immediate.SetData(map[string]any{"object": "image", "data": []any{map[string]any{"b64_json": "aW1hZ2UtYnl0ZXM="}}})
 	require.NoError(t, model.DB.Omit("data").Create(&immediate).Error)
-	service.ArchiveTaskArtifacts(t.Context(), &immediate)
-	assert.Equal(t, 3, puts)
+	service.ScheduleTaskArtifactArchive(&immediate)
+	awaitTaskArtifactArchive(t, immediate.ID, model.TaskArchiveCompleted)
+	assert.EqualValues(t, 3, puts.Load())
 	view, err = service.BuildTaskPluginView(&immediate)
 	require.NoError(t, err)
 	image := view.Data.(map[string]any)["data"].([]any)[0].(map[string]any)
-	assert.Contains(t, image["url"], "x-oss-signature=")
+	assert.NotContains(t, image, "url")
 	assert.Equal(t, "aW1hZ2UtYnl0ZXM=", image["b64_json"])
 	var discarded model.Task
 	require.NoError(t, model.DB.First(&discarded, immediate.ID).Error)
@@ -183,24 +201,26 @@ export function buildContentRequest(ctx){if(ctx.data.object==="operation")return
 	inlineVideo := *task
 	inlineVideo.ID = 0
 	inlineVideo.TaskID += "_embedded"
+	inlineVideo.PrivateData.ArtifactArchive = nil
 	inlineVideo.SetData(map[string]any{"object": "operation"})
 	require.NoError(t, model.DB.Create(&inlineVideo).Error)
-	ref, err := archiveTaskArtifact(t.Context(), &inlineVideo, relaychannel.TaskArtifact{Key: "video", Type: "video", MimeType: "video/mp4"})
+	ref, err := archiveTaskArtifact(t.Context(), &inlineVideo, relaychannel.TaskArtifact{Key: "video", Type: "video", MimeType: "video/mp4"}, service.GetTaskArtifactStore())
 	require.NoError(t, err)
 	assert.Equal(t, int64(len("embedded-video")), ref.Size)
-	assert.Equal(t, 4, puts)
+	assert.EqualValues(t, 4, puts.Load())
 	old := *task
 	old.ID = 0
 	old.TaskID += "_old"
+	old.PrivateData.ArtifactArchive = nil
 	require.NoError(t, model.DB.Create(&old).Error)
 	view, err = service.BuildTaskPluginView(&old)
 	require.NoError(t, err)
-	assert.Contains(t, view.Data.(map[string]any)["video_url"], "x-oss-signature=", "historical successful tasks archive on retrieval with their existing ID")
-	assert.Equal(t, 6, puts)
+	assert.Equal(t, "https://old.example/video.mp4", view.Data.(map[string]any)["video_url"])
+	assert.EqualValues(t, 4, puts.Load(), "presenting a result never performs archival")
 
 	// Ordinary Images responses use the same private OSS store, without task
 	// plugin credentials or task billing. Both URL and Base64 output archive.
-	imageResponse = httptest.NewRecorder()
+	imageResponse := httptest.NewRecorder()
 	imageContext, _ := gin.CreateTestContext(imageResponse)
 	imageContext.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", strings.NewReader(`{"model":"ordinary-image","prompt":"draw","seed":0}`))
 	imageContext.Request.Header.Set("Content-Type", "application/json")
@@ -208,11 +228,12 @@ export function buildContentRequest(ctx){if(ctx.data.object==="operation")return
 	imageContext.Set("id", task.UserId)
 	common.SetContextKey(imageContext, constant.ContextKeyChannelId, task.ChannelId)
 	finishImageLog := beginImageLogCapture(imageContext)
-	imageContext.Data(http.StatusOK, "application/json", []byte(`{"data":[{"url":"`+origin.URL+`/ordinary-image"},{"b64_json":"aW1hZ2UtYnl0ZXM="}]}`))
+	imageContext.Data(http.StatusOK, "application/json", []byte(`{"error":null,"data":[{"url":"`+origin.URL+`/ordinary-image"},{"b64_json":"aW1hZ2UtYnl0ZXM="}]}`))
 	finishImageLog()
-	assert.Equal(t, 8, puts)
 	var imageLog model.Task
 	require.NoError(t, model.DB.Where("platform = ?", "image").First(&imageLog).Error)
+	imageLog = awaitTaskArtifactArchive(t, imageLog.ID, model.TaskArchiveCompleted)
+	assert.EqualValues(t, 6, puts.Load())
 	require.Len(t, imageLog.PrivateData.ImageArtifacts, 2)
 	assert.True(t, imageLog.PrivateData.ImageArtifacts[0].Stored)
 	assert.True(t, imageLog.PrivateData.ImageArtifacts[1].Stored)
@@ -224,7 +245,7 @@ export function buildContentRequest(ctx){if(ctx.data.object==="operation")return
 	for _, method := range []string{http.MethodGet, http.MethodHead} {
 		mediaRecorder := httptest.NewRecorder()
 		mediaContext, _ := gin.CreateTestContext(mediaRecorder)
-		mediaContext.Request = httptest.NewRequest(method, "/content", nil)
+		mediaContext.Request = httptest.NewRequest(method, "/content?archive=1", nil)
 		mediaContext.Request.Header.Set("Range", "bytes=0-3")
 		mediaContext.Set("id", task.UserId)
 		mediaContext.Params = gin.Params{{Key: "key", Value: imageLog.TaskID}, {Key: "artifact_key", Value: "image-1"}}
@@ -246,8 +267,222 @@ export function buildContentRequest(ctx){if(ctx.data.object==="operation")return
 			assert.Empty(t, mediaBytes)
 		}
 	}
-	assert.Equal(t, 8, puts, "preview never regenerates or uploads a duplicate")
+	assert.EqualValues(t, 6, puts.Load(), "preview never regenerates or uploads a duplicate")
 	assert.Equal(t, 0, imageLog.Quota, "archival does not charge quota")
+
+	// Old completed archives acquire their manifest before the original
+	// plugin, channel or current write location is changed.
+	var archived model.Task
+	require.NoError(t, model.DB.First(&archived, task.ID).Error)
+	privateBytes, err := common.Marshal(archived.PrivateData)
+	require.NoError(t, err)
+	var legacyPrivate map[string]any
+	require.NoError(t, common.Unmarshal(privateBytes, &legacyPrivate))
+	delete(legacyPrivate["artifact_archive"].(map[string]any), "artifacts")
+	privateBytes, err = common.Marshal(legacyPrivate)
+	require.NoError(t, err)
+	require.NoError(t, model.DB.Model(&archived).Update("private_data", string(privateBytes)).Error)
+	backfillContext, backfillResponse := imageLogReadContext("/api/task/"+task.TaskID+"/artifacts", task.TaskID, task.UserId, common.RoleCommonUser)
+	GetDashboardTaskArtifacts(backfillContext)
+	require.Equal(t, http.StatusOK, backfillResponse.Code)
+	assert.EqualValues(t, 6, puts.Load(), "legacy manifest backfill never uploads again")
+	require.NoError(t, model.DB.First(&archived, task.ID).Error)
+	require.Len(t, archived.PrivateData.ArtifactArchive.Artifacts, 2)
+	manifestJSON, err := common.Marshal(archived.PrivateData.ArtifactArchive)
+	require.NoError(t, err)
+	for _, credential := range []string{"oss-access", "oss-secret", "x-oss-signature"} {
+		assert.NotContains(t, string(manifestJSON), credential)
+	}
+	_, err = model.UpdateTaskArtifactArchive(t.Context(), &archived, model.TaskArtifactArchive{Status: model.TaskArchiveCompleted, UpdatedAt: time.Now().Unix()})
+	require.NoError(t, err)
+	require.NoError(t, model.DB.First(&archived, task.ID).Error)
+	require.Len(t, archived.PrivateData.ArtifactArchive.Artifacts, 2, "state updates preserve the persisted manifest")
+	reader, err := service.GetTaskArtifactReadStore(&archived, "video")
+	require.NoError(t, err)
+	assert.False(t, reader.Enabled())
+	_, err = reader.Persist(t.Context(), &archived, relaychannel.TaskArtifact{Key: "video", Type: "video"}, strings.NewReader("replacement"))
+	assert.ErrorIs(t, err, service.ErrTaskArtifactStoreDisabled)
+	_, err = service.GetTaskArtifactReadStore(&archived, "unknown")
+	assert.Error(t, err)
+	foreign := archived
+	foreign.UserId = 8
+	_, err = service.GetTaskArtifactReadStore(&foreign, "video")
+	assert.Error(t, err, "a copied manifest cannot authorize another owner's object")
+
+	previousEnabled := jsplugin.DefaultRegistry.Enabled()
+	jsplugin.DefaultRegistry.SetEnabled(false)
+	t.Cleanup(func() { jsplugin.DefaultRegistry.SetEnabled(previousEnabled) })
+	require.NoError(t, model.DB.Delete(&model.Channel{}, task.ChannelId).Error)
+	config.Mode = system_setting.TaskArtifactStoreModeUpstream
+	config.S3PresignTTLSeconds = 900
+	config.OSSBucket = "next-results"
+	config.OSSPrefix = "tasks/v2"
+	encoded, err = common.Marshal(config)
+	require.NoError(t, err)
+	common.OptionMapRWMutex.Lock()
+	common.OptionMap[system_setting.TaskArtifactStoreOptionKey] = string(encoded)
+	common.OptionMapRWMutex.Unlock()
+	require.False(t, service.GetTaskArtifactStore().Enabled())
+	previewContext, previewResponse := imageLogReadContext("/api/task/"+task.TaskID+"/artifacts", task.TaskID, task.UserId, common.RoleCommonUser)
+	GetDashboardTaskArtifacts(previewContext)
+	require.Equal(t, http.StatusOK, previewResponse.Code, "completed archives remain discoverable without a plugin or channel")
+	var projection struct {
+		Data struct {
+			Artifacts []taskArtifactResponse `json:"artifacts"`
+		} `json:"data"`
+	}
+	require.NoError(t, common.Unmarshal(previewResponse.Body.Bytes(), &projection))
+	require.Len(t, projection.Data.Artifacts, 2)
+	assert.NotContains(t, previewResponse.Body.String(), "oss-secret")
+	assert.NotContains(t, previewResponse.Body.String(), "old.example")
+	for _, method := range []string{http.MethodGet, http.MethodHead} {
+		mediaContext, mediaResponse := imageLogReadContext(projection.Data.Artifacts[0].ContentURL, "", task.UserId, common.RoleCommonUser)
+		mediaContext.Request.Method = method
+		mediaContext.Params = gin.Params{{Key: "key", Value: task.TaskID}, {Key: "artifact_key", Value: "video"}}
+		TaskArtifactContent(mediaContext)
+		require.Equal(t, http.StatusTemporaryRedirect, mediaResponse.Code, "disabling writes preserves historical reads")
+		location := mediaResponse.Header().Get("Location")
+		assert.Contains(t, location, "/results/tasks/v1/")
+		assert.NotContains(t, location, "next-results")
+		request, err := http.NewRequestWithContext(t.Context(), method, location, nil)
+		require.NoError(t, err)
+		request.Header.Set("Range", "bytes=0-3")
+		response, err := ossServer.Client().Do(request)
+		require.NoError(t, err)
+		content, err := io.ReadAll(response.Body)
+		require.NoError(t, response.Body.Close())
+		require.NoError(t, err)
+		if method == http.MethodGet {
+			assert.Equal(t, http.StatusPartialContent, response.StatusCode)
+			assert.Equal(t, "arch", string(content))
+		} else {
+			assert.Equal(t, http.StatusOK, response.StatusCode)
+			assert.Empty(t, content)
+		}
+	}
+	newTask := *task
+	newTask.ID = 0
+	newTask.TaskID += "_disabled"
+	newTask.PrivateData.ArtifactArchive = nil
+	require.NoError(t, model.DB.Create(&newTask).Error)
+	service.ScheduleTaskArtifactArchive(&newTask)
+	require.NoError(t, model.DB.First(&newTask, newTask.ID).Error)
+	assert.Nil(t, newTask.PrivateData.ArtifactArchive, "disabled writes never schedule new archives")
+	assert.EqualValues(t, 6, puts.Load())
+}
+
+func TestTaskArtifactArchiveDoesNotDelayOrFailGeneration(t *testing.T) {
+	setupGenericTaskTest(t)
+	config := system_setting.TaskArtifactStoreConfig{Mode: "oss", OSSEndpoint: "https://oss-cn-hangzhou.aliyuncs.com", OSSBucket: "results", OSSRegion: "cn-hangzhou", OSSAccessKey: "test-access", OSSSecretKey: "test-secret", OSSPrefix: "tasks/v1", OSSPresignTTLSeconds: 900, OSSMaxBytes: 1024}
+	encoded, err := common.Marshal(config)
+	require.NoError(t, err)
+	common.OptionMapRWMutex.Lock()
+	if common.OptionMap == nil {
+		common.OptionMap = map[string]string{}
+	}
+	previous := common.OptionMap[system_setting.TaskArtifactStoreOptionKey]
+	common.OptionMap[system_setting.TaskArtifactStoreOptionKey] = string(encoded)
+	common.OptionMapRWMutex.Unlock()
+	previousArchive := service.ArchiveTaskArtifacts
+	t.Cleanup(func() {
+		service.ArchiveTaskArtifacts = previousArchive
+		common.OptionMapRWMutex.Lock()
+		common.OptionMap[system_setting.TaskArtifactStoreOptionKey] = previous
+		common.OptionMapRWMutex.Unlock()
+	})
+	for _, outcome := range []string{model.TaskArchiveCompleted, model.TaskArchiveFailed} {
+		t.Run(outcome, func(t *testing.T) {
+			started := make(chan *model.Task, 1)
+			release := make(chan struct{})
+			var unblock sync.Once
+			defer unblock.Do(func() { close(release) })
+			service.ArchiveTaskArtifacts = func(ctx context.Context, task *model.Task, store service.TaskArtifactStore) error {
+				started <- task
+				select {
+				case <-release:
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+				if outcome == model.TaskArchiveFailed {
+					return errors.New("storage unavailable")
+				}
+				for i := range task.PrivateData.ImageArtifacts {
+					task.PrivateData.ImageArtifacts[i].Stored = true
+				}
+				return nil
+			}
+			wire := `{"data":[{"url":"https://upstream.example/original.png"},{"b64_json":"aW1hZ2UtYnl0ZXM="}]}`
+			router := gin.New()
+			router.POST("/v1/images/generations", func(c *gin.Context) {
+				c.Set("id", 7)
+				c.Set(service.SettledQuotaContextKey, 123)
+				finish := beginImageLogCapture(c)
+				defer finish()
+				c.Data(http.StatusOK, "application/json", []byte(wire))
+			})
+			server := httptest.NewServer(router)
+			defer server.Close()
+			client := &http.Client{Timeout: 3 * time.Second}
+			response, err := client.Post(server.URL+"/v1/images/generations", "application/json", strings.NewReader(`{"model":"image-test"}`))
+			require.NoError(t, err, "storage must never hold the response open")
+			body, err := io.ReadAll(response.Body)
+			require.NoError(t, response.Body.Close())
+			require.NoError(t, err, "the HTTP body must finish before storage is released")
+			assert.Equal(t, http.StatusOK, response.StatusCode)
+			assert.Equal(t, wire, string(body))
+			var snapshot *model.Task
+			select {
+			case snapshot = <-started:
+			case <-time.After(3 * time.Second):
+				t.Fatal("archive worker did not start")
+			}
+			require.Len(t, snapshot.PrivateData.ImageArtifacts, 2)
+			assert.Equal(t, "data:image/png;base64,aW1hZ2UtYnl0ZXM=", snapshot.PrivateData.ImageArtifacts[1].SourceURL)
+			var current model.Task
+			require.NoError(t, model.DB.First(&current, snapshot.ID).Error)
+			assert.Equal(t, model.TaskStatus(model.TaskStatusSuccess), current.Status)
+			assert.Equal(t, 123, current.Quota)
+			privateJSON, err := common.Marshal(current.PrivateData)
+			require.NoError(t, err)
+			assert.NotContains(t, string(privateJSON), "aW1hZ2UtYnl0ZXM=")
+			current.PrivateData.PluginState = []byte(`{"revision":"newer"}`)
+			require.NoError(t, model.DB.Model(&current).Update("private_data", current.PrivateData).Error)
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Request = httptest.NewRequest(http.MethodGet, "/api/task/preview/artifacts", nil)
+			writeTaskArtifacts(c, &current, true)
+			assert.Contains(t, recorder.Body.String(), `"archive_status":"archiving"`)
+			unblock.Do(func() { close(release) })
+			current = awaitTaskArtifactArchive(t, snapshot.ID, outcome)
+			assert.Equal(t, model.TaskStatus(model.TaskStatusSuccess), current.Status)
+			assert.Equal(t, 123, current.Quota)
+			assert.Empty(t, current.FailReason)
+			if outcome == model.TaskArchiveFailed {
+				recorder := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(recorder)
+				c.Request = httptest.NewRequest(http.MethodGet, "/content?archive=1", nil)
+				c.Set("id", current.UserId)
+				c.Params = gin.Params{{Key: "key", Value: current.TaskID}, {Key: "artifact_key", Value: "image-1"}}
+				TaskArtifactContent(c)
+				assert.Equal(t, http.StatusServiceUnavailable, recorder.Code)
+				assert.Contains(t, recorder.Body.String(), "artifact_archive_failed")
+			}
+
+			assert.JSONEq(t, `{"revision":"newer"}`, string(current.PrivateData.PluginState))
+			assert.Empty(t, model.GetAllUnFinishSyncTasks(100))
+		})
+	}
+}
+
+func awaitTaskArtifactArchive(t *testing.T, taskID int64, status string) model.Task {
+	t.Helper()
+	var stored model.Task
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
+		if assert.NoError(c, model.DB.First(&stored, taskID).Error) && assert.NotNil(c, stored.PrivateData.ArtifactArchive) {
+			assert.Equal(c, status, stored.PrivateData.ArtifactArchive.Status)
+		}
+	}, 10*time.Second, 10*time.Millisecond)
+	return stored
 }
 
 func TestTaskArtifactStoreSettingsPersistWithoutReturningCredentials(t *testing.T) {

@@ -784,9 +784,9 @@ func executeTaskSubmissionWith(
 	}
 	service.LogTaskConsumption(c, relayInfo, task)
 	diagnostics.complete(task, result.Quota)
-	if task.PrivateData.ResultDiscarded && task.Status == model.TaskStatusSuccess && service.ArchiveTaskArtifacts != nil && service.GetTaskArtifactStore().Enabled() {
-		service.ArchiveTaskArtifacts(c.Request.Context(), task)
-	} else {
+	// The response observer owns immediate image archival, including inline
+	// results. Other successful tasks can be copied as soon as they settle.
+	if !task.PrivateData.ResultDiscarded || !model.IsImageTaskAction(task.Action) {
 		service.ScheduleTaskArtifactArchive(task)
 	}
 

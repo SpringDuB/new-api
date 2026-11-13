@@ -21,7 +21,7 @@ import { render, screen } from '@testing-library/react'
 import { describe, expect, test } from 'vitest'
 
 import type { TaskLog } from '../../types'
-import { TaskArtifactsCell } from '../task-artifacts'
+import { TaskArtifacts, TaskArtifactsCell } from '../task-artifacts'
 
 function taskLog(overrides: Partial<TaskLog> = {}): TaskLog {
   return {
@@ -91,4 +91,54 @@ describe('task artifacts cell', () => {
       screen.queryByRole('button', { name: /Artifacts/ })
     ).not.toBeInTheDocument()
   })
+})
+
+describe('artifact archival state', () => {
+  test.each(['pending', 'archiving', 'failed'])(
+    'a discarded successful result with %s archival still opens the viewer',
+    (status) => {
+      renderCell(
+        taskLog({
+          result_discarded: true,
+          artifact_archive_status: status,
+        } as Partial<TaskLog>)
+      )
+      expect(screen.getByRole('button', { name: /Artifacts/ })).toBeVisible()
+      expect(screen.queryByText('Result not retained')).not.toBeInTheDocument()
+    }
+  )
+
+  test.each([
+    ['pending', 'Artifacts are being archived'],
+    ['archiving', 'Artifacts are being archived'],
+    ['failed', 'Artifact archival failed'],
+  ])(
+    '%s archival shows its own state without requesting unfinished media',
+    (status, message) => {
+      const client = new QueryClient({
+        defaultOptions: { queries: { retry: false } },
+      })
+      client.setQueryData(['usage-logs', 'task-artifacts', 'task-public'], {
+        artifacts: [
+          {
+            key: 'image-1',
+            type: 'image',
+            content_url: 'https://media.example/image.png',
+          },
+        ],
+        archiveStatus: status,
+      })
+      render(
+        <QueryClientProvider client={client}>
+          <TaskArtifacts taskId='task-public' enabled />
+        </QueryClientProvider>
+      )
+      expect(screen.getByText(message)).toBeVisible()
+      expect(screen.queryByRole('img')).not.toBeInTheDocument()
+      expect(
+        screen.queryByRole('link', { name: /Download/ })
+      ).not.toBeInTheDocument()
+      client.clear()
+    }
+  )
 })

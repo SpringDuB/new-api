@@ -2057,9 +2057,14 @@ export function listArtifacts(task) {
   const imageTask = ["imagine", "edits", "blend", "hd_upscale"].includes(task.action) || MODELS[vendorModelName(body.model)]?.kind === "image";
   const entries = imageEntries(task.data, imageTask);
   if (entries.length)
-    return entries.filter((entry) => entry.url).map((entry, index) => ({ key: "image-" + (index + 1), type: "image", mimeType: "image/png" })).concat(
-      entries.filter((entry) => !entry.url && entry.b64_json).map((entry, index) => ({ key: "image-b64-" + (index + 1), type: "image", mimeType: "image/png" })),
-    );
+    return entries
+      .filter((entry) => entry.url)
+      .map((entry, index) => ({ key: "image-" + (index + 1), type: "image", mimeType: "image/png" }))
+      .concat(
+        entries
+          .filter((entry) => !entry.url && entry.b64_json)
+          .map((entry, index) => ({ key: "image-b64-" + (index + 1), type: "image", mimeType: "image/png" }))
+      );
   return resultURL(task.data) ? [{ key: "video", type: "video", mimeType: "video/mp4" }] : [];
 }
 
@@ -2071,7 +2076,13 @@ export function buildContentRequest(ctx) {
   // id. Only models with an asynchronous task API can refresh those old rows.
   const profile = modelProfile(ctx);
   const queryable = ctx.state?.queryable ?? (profile.kind === "video" || ASYNC_IMAGE_MODELS.includes(profile.vendorModel));
-  if (ctx.upstreamTaskId && queryable) {
+  // The completion poll already supplies a fresh deliverable. Re-querying
+  // immediately can hit the task endpoint's rate limit during OSS archival.
+  // Historical downloads still refresh their possibly expired source URL.
+  const completedAt = Number(responseObject(data).completed_at);
+  const completedAge = utils.unixNow() - completedAt;
+  const freshResult = completedAt > 0 && completedAge >= 0 && completedAge < 60 && !!resultURL(data);
+  if (ctx.upstreamTaskId && queryable && !freshResult) {
     const query = buildQueryRequest({ ...ctx, taskId: ctx.upstreamTaskId });
     const refreshed = utils.fetch(query);
     if (refreshed.status < 200 || refreshed.status >= 300) throw new Error("LecAPI result refresh failed (HTTP " + refreshed.status + ")");
@@ -2082,7 +2093,7 @@ export function buildContentRequest(ctx) {
     if (result.status !== "SUCCESS") throw new Error("LecAPI result is not available");
     data = refreshed.body;
   }
-  const entry = image ? imageEntries(data, true).filter((item) => image[1] ? !item.url && item.b64_json : item.url)[Number(image[2]) - 1] : undefined;
+  const entry = image ? imageEntries(data, true).filter((item) => (image[1] ? !item.url && item.b64_json : item.url))[Number(image[2]) - 1] : undefined;
   const url = image ? entry?.url || (entry?.b64_json ? "data:image/png;base64," + entry.b64_json : "") : resultURL(data);
   if (!url) throw new Error("artifact_not_found");
   return { url: url, method: "GET", credentialless: true };

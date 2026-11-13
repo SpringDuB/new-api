@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -18,59 +19,87 @@ import (
 var taskArtifactArchives singleflight.Group
 
 func init() {
-	service.StoredTaskArtifactURLs = func(task *model.Task) map[string]string {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-		defer cancel()
-		urls := map[string]string{}
-		store := service.GetTaskArtifactStore()
-		provider, ok := store.(service.TaskArtifactURLProvider)
-		if !ok {
-			return urls
-		}
+	service.ArchiveTaskArtifacts = func(ctx context.Context, task *model.Task, store service.TaskArtifactStore) error {
 		artifacts, err := taskStorageArtifacts(task)
 		if err != nil {
-			return urls
+			return err
 		}
+		var failures []error
+		task.PrivateData.ArtifactArchive.Artifacts = make([]model.TaskArchivedArtifact, 0, len(artifacts))
 		for _, artifact := range artifacts {
 			if ctx.Err() != nil {
-				break
+				return ctx.Err()
 			}
-			ref, err := store.Resolve(task, artifact.Key)
-			if err == nil && ref == nil && (artifact.Type == "video" || artifact.Type == "image") {
-				ref, err = archiveTaskArtifact(ctx, task, artifact)
-				if err != nil {
-					logger.LogTaskArtifactFailure(ctx, task.TaskID, "storage", 0)
-				}
-			}
-			if err != nil || ref == nil {
-				continue
-			}
-			url, err := provider.SignedURL(context.Background(), task, ref, http.MethodGet)
-			if err == nil {
-				urls[artifact.Key] = url
-			}
-		}
-		return urls
-	}
-	service.ArchiveTaskArtifacts = func(ctx context.Context, task *model.Task) {
-		ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
-		defer cancel()
-		artifacts, err := taskStorageArtifacts(task)
-		if err != nil {
-			return
-		}
-		for _, artifact := range artifacts {
-			if ctx.Err() != nil {
-				return
-			}
+			task.PrivateData.ArtifactArchive.Artifacts = append(task.PrivateData.ArtifactArchive.Artifacts, taskArchivedArtifact(artifact, nil))
 			if artifact.Type != "video" && artifact.Type != "image" {
 				continue
 			}
-			if _, err := archiveTaskArtifact(ctx, task, artifact); err != nil {
+			ref, err := archiveTaskArtifact(ctx, task, artifact, store)
+			if err != nil || ref == nil {
 				logger.LogTaskArtifactFailure(ctx, task.TaskID, "storage", 0)
+				failures = append(failures, errors.New("artifact archival failed"))
+				continue
+			}
+			task.PrivateData.ArtifactArchive.Artifacts[len(task.PrivateData.ArtifactArchive.Artifacts)-1] = taskArchivedArtifact(artifact, ref)
+			for i := range task.PrivateData.ImageArtifacts {
+				if task.PrivateData.ImageArtifacts[i].Key == artifact.Key {
+					task.PrivateData.ImageArtifacts[i].Stored = true
+				}
 			}
 		}
+		return errors.Join(failures...)
 	}
+}
+
+func taskArchivedArtifact(artifact relaychannel.TaskArtifact, ref *service.StoredArtifactRef) model.TaskArchivedArtifact {
+	stored := model.TaskArchivedArtifact{Key: artifact.Key, Type: artifact.Type, MimeType: artifact.MimeType}
+	if ref != nil {
+		stored.Backend, stored.Endpoint, stored.Region = ref.Backend, ref.Endpoint, ref.Region
+		stored.Bucket, stored.Prefix, stored.ObjectKey = ref.Bucket, ref.Prefix, ref.ObjectKey
+		stored.Size = ref.Size
+	}
+	return stored
+}
+
+// Legacy archives have objects but no manifest. While their original plugin
+// is available, verify those objects and backfill without fetching media again.
+func archivedTaskArtifacts(ctx context.Context, task *model.Task) ([]relaychannel.TaskArtifact, error) {
+	archive := *task.PrivateData.ArtifactArchive
+	if len(archive.Artifacts) == 0 {
+		artifacts, err := taskStorageArtifacts(task)
+		if err != nil {
+			return nil, err
+		}
+		archive.Artifacts = make([]model.TaskArchivedArtifact, 0, len(artifacts))
+		for _, artifact := range artifacts {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			var ref *service.StoredArtifactRef
+			if artifact.Type == "video" || artifact.Type == "image" {
+				store, err := service.GetTaskArtifactReadStore(task, artifact.Key)
+				if err != nil {
+					return nil, err
+				}
+				ref, err = store.Resolve(task, artifact.Key)
+				if err != nil || ref == nil {
+					return nil, errors.New("archived artifact is unavailable")
+				}
+			}
+			archive.Artifacts = append(archive.Artifacts, taskArchivedArtifact(artifact, ref))
+		}
+		if len(archive.Artifacts) > 0 {
+			if _, err := model.UpdateTaskArtifactArchive(ctx, task, archive); err != nil {
+				return nil, err
+			}
+			task.PrivateData.ArtifactArchive = &archive
+		}
+	}
+	artifacts := make([]relaychannel.TaskArtifact, 0, len(archive.Artifacts))
+	for _, artifact := range archive.Artifacts {
+		artifacts = append(artifacts, relaychannel.TaskArtifact{Key: artifact.Key, Type: artifact.Type, MimeType: artifact.MimeType})
+	}
+	return validateProjectedTaskArtifacts(artifacts)
 }
 
 // A synchronous response still holds its result in memory even when the
@@ -82,13 +111,19 @@ func taskStorageArtifacts(task *model.Task) ([]relaychannel.TaskArtifact, error)
 		transient.PrivateData.ResultDiscarded = false
 		task = &transient
 	}
+	if task != nil && len(task.PrivateData.ImageArtifacts) > 0 {
+		artifacts := make([]relaychannel.TaskArtifact, 0, len(task.PrivateData.ImageArtifacts))
+		for _, image := range task.PrivateData.ImageArtifacts {
+			artifacts = append(artifacts, imageLogArtifact(image))
+		}
+		return validateProjectedTaskArtifacts(artifacts)
+	}
 	return projectTaskArtifacts(task)
 }
 
-func archiveTaskArtifact(ctx context.Context, task *model.Task, artifact relaychannel.TaskArtifact) (*service.StoredArtifactRef, error) {
+func archiveTaskArtifact(ctx context.Context, task *model.Task, artifact relaychannel.TaskArtifact, store service.TaskArtifactStore) (*service.StoredArtifactRef, error) {
 	identity := fmt.Sprintf("%d/%d/%s/%s", task.UserId, task.ID, task.TaskID, artifact.Key)
 	value, err, _ := taskArtifactArchives.Do(identity, func() (any, error) {
-		store := service.GetTaskArtifactStore()
 		if !store.Enabled() {
 			return nil, service.ErrTaskArtifactStoreDisabled
 		}

@@ -123,7 +123,8 @@ type TaskPrivateData struct {
 	ImageRequestMode string                     `json:"image_request_mode,omitempty"`
 	// ImageArtifacts are host-managed results of synchronous image relays.
 	// Source URLs stay private; inline image binaries are only kept in OSS.
-	ImageArtifacts []TaskImageArtifact `json:"image_artifacts,omitempty"`
+	ImageArtifacts  []TaskImageArtifact  `json:"image_artifacts,omitempty"`
+	ArtifactArchive *TaskArtifactArchive `json:"artifact_archive,omitempty"`
 	// 计费上下文：用于异步退款/差额结算（轮询阶段读取）
 	BillingSource  string              `json:"billing_source,omitempty"`  // "wallet" 或 "subscription"
 	SubscriptionId int                 `json:"subscription_id,omitempty"` // 订阅 ID，用于订阅退款
@@ -145,6 +146,36 @@ type TaskPrivateData struct {
 	// and every retrieval surface treats the task as not found. The zero
 	// value keeps historical rows retained and retrievable.
 	ResultDiscarded bool `json:"result_discarded,omitempty"`
+}
+
+const (
+	TaskArchivePending   = "pending"
+	TaskArchiveRunning   = "archiving"
+	TaskArchiveCompleted = "completed"
+	TaskArchiveFailed    = "failed"
+)
+
+// TaskArtifactArchive describes a best-effort copy for dashboard previews.
+// It never changes generation status, billing or the upstream result.
+type TaskArtifactArchive struct {
+	Status    string                 `json:"status"`
+	UpdatedAt int64                  `json:"updated_at"`
+	Artifacts []TaskArchivedArtifact `json:"artifacts,omitempty"`
+}
+
+// TaskArchivedArtifact keeps a credential-free manifest. Storage identities
+// are immutable so historical reads survive plugin and write-config changes.
+type TaskArchivedArtifact struct {
+	Key       string `json:"key"`
+	Type      string `json:"type"`
+	MimeType  string `json:"mime_type,omitempty"`
+	Backend   string `json:"backend,omitempty"`
+	Endpoint  string `json:"endpoint,omitempty"`
+	Region    string `json:"region,omitempty"`
+	Bucket    string `json:"bucket,omitempty"`
+	Prefix    string `json:"prefix,omitempty"`
+	ObjectKey string `json:"object_key,omitempty"`
+	Size      int64  `json:"size,omitempty"`
 }
 
 // TaskClientRequestSnapshot contains a bounded, redacted client submission,
@@ -251,7 +282,7 @@ func (p *TaskPrivateData) Scan(val any) error {
 
 func (p TaskPrivateData) Value() (driver.Value, error) {
 	if p.Key == "" && p.UpstreamTaskID == "" && p.ResultURL == "" &&
-		p.Execution == nil && p.ClientRequest == nil && p.Response == nil && p.ImageRequestMode == "" && len(p.ImageArtifacts) == 0 && p.BillingSource == "" && p.SubscriptionId == 0 &&
+		p.Execution == nil && p.ClientRequest == nil && p.Response == nil && p.ImageRequestMode == "" && len(p.ImageArtifacts) == 0 && p.ArtifactArchive == nil && p.BillingSource == "" && p.SubscriptionId == 0 &&
 		p.TokenId == 0 && p.NodeName == "" && p.BillingContext == nil &&
 		!p.ResponsesBackground && len(p.PluginState) == 0 && p.PollFailures == 0 &&
 		!p.ResultDiscarded {
@@ -325,7 +356,7 @@ func TaskGetAllUserTask(userId int, startIdx int, num int, queryParams SyncTaskQ
 	var err error
 
 	// 初始化查询构建器
-	query := DB.Where("user_id = ?", userId)
+	query := DB.Where("user_id = ?", userId).Where("(action IS NULL OR action NOT IN ?)", ImageTaskActions)
 
 	if queryParams.TaskID != "" {
 		query = query.Where("task_id = ?", queryParams.TaskID)
@@ -363,7 +394,7 @@ func TaskGetAllTasks(startIdx int, num int, queryParams SyncTaskQueryParams) []*
 	var err error
 
 	// 初始化查询构建器
-	query := DB
+	query := DB.Where("(action IS NULL OR action NOT IN ?)", ImageTaskActions)
 
 	// 添加过滤条件
 	if queryParams.ChannelID != "" {
@@ -624,7 +655,7 @@ type TaskQuotaUsage struct {
 // TaskCountAllTasks returns total tasks that match the given query params (admin usage)
 func TaskCountAllTasks(queryParams SyncTaskQueryParams) int64 {
 	var total int64
-	query := DB.Model(&Task{})
+	query := DB.Model(&Task{}).Where("(action IS NULL OR action NOT IN ?)", ImageTaskActions)
 	if queryParams.ChannelID != "" {
 		query = query.Where("channel_id = ?", queryParams.ChannelID)
 	}
@@ -659,7 +690,7 @@ func TaskCountAllTasks(queryParams SyncTaskQueryParams) int64 {
 // TaskCountAllUserTask returns total tasks for given user
 func TaskCountAllUserTask(userId int, queryParams SyncTaskQueryParams) int64 {
 	var total int64
-	query := DB.Model(&Task{}).Where("user_id = ?", userId)
+	query := DB.Model(&Task{}).Where("user_id = ?", userId).Where("(action IS NULL OR action NOT IN ?)", ImageTaskActions)
 	if queryParams.TaskID != "" {
 		query = query.Where("task_id = ?", queryParams.TaskID)
 	}

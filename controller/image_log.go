@@ -105,7 +105,8 @@ func (w *imageLogResponseWriter) captureEvent(data []byte) {
 		return
 	}
 	typ := gjson.GetBytes(data, "type").String()
-	eventError := typ == "error" || strings.Contains(typ, "failed") || gjson.GetBytes(data, "error").Exists() || gjson.GetBytes(data, "response.status").String() == "failed"
+	failure := gjson.GetBytes(data, "error")
+	eventError := typ == "error" || strings.Contains(typ, "failed") || failure.Exists() && failure.Type != gjson.Null || gjson.GetBytes(data, "response.status").String() == "failed"
 	w.streamError = w.streamError || eventError
 	// Ignore text/reasoning/tool completion events. Ark partial_succeeded is
 	// a complete image, unlike progressive partial_image or delta events.
@@ -220,7 +221,8 @@ func beginImageLogCapture(c *gin.Context) func() {
 				streamFailed = outcome.HasErrors || outcome.Response == relaycommon.ResponseOutcomeFailed || outcome.Response == relaycommon.ResponseOutcomeIncomplete || outcome.Response == relaycommon.ResponseOutcomeCancelled ||
 					outcome.EndReason != relaycommon.StreamEndReasonNone && outcome.EndReason != relaycommon.StreamEndReasonDone && outcome.EndReason != relaycommon.StreamEndReasonEOF
 			}
-			if writer.Status() >= 400 || writer.streamError || streamFailed || gjson.GetBytes(body, "error").Exists() {
+			failure := gjson.GetBytes(body, "error")
+			if writer.Status() >= 400 || writer.streamError || streamFailed || failure.Exists() && failure.Type != gjson.Null {
 				task.Status = model.TaskStatusFailure
 				task.FailReason = "Image generation failed"
 			}
@@ -263,29 +265,18 @@ func beginImageLogCapture(c *gin.Context) func() {
 				return
 			}
 		}
-		if task.Status == model.TaskStatusSuccess && service.GetTaskArtifactStore().Enabled() {
-			// Complete the client-facing response before potentially slow media
-			// downloads and uploads. Archival has its own bounded context.
-			c.Writer.Flush()
-			for i := range task.PrivateData.ImageArtifacts {
-				artifact := &task.PrivateData.ImageArtifacts[i]
-				source := artifact.SourceURL
-				if inline[artifact.Key] != "" {
-					artifact.SourceURL = inline[artifact.Key]
-				}
-				ref, err := archiveTaskArtifact(ctx, task, imageLogArtifact(*artifact))
-				artifact.SourceURL = source
-				artifact.Stored = err == nil && ref != nil
-				if err != nil {
-					logger.LogTaskArtifactFailure(ctx, task.TaskID, "storage", 0)
-				}
-			}
-		}
 		writeCtx, stopWrite := context.WithTimeout(context.WithoutCancel(c.Request.Context()), 10*time.Second)
 		defer stopWrite()
 		if err := model.UpdateTaskImageLog(writeCtx, task); err != nil {
 			logger.LogTaskArtifactFailure(ctx, task.TaskID, "image_log", 0)
+			return
 		}
+		for i := range task.PrivateData.ImageArtifacts {
+			if source := inline[task.PrivateData.ImageArtifacts[i].Key]; source != "" {
+				task.PrivateData.ImageArtifacts[i].SourceURL = source
+			}
+		}
+		service.ScheduleTaskArtifactArchive(task)
 	}
 }
 

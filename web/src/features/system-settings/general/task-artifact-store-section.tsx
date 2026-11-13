@@ -135,7 +135,7 @@ export function TaskArtifactStoreSection() {
     <SettingsSection title={t('Task result storage')}>
       <p className='text-muted-foreground text-sm'>
         {t(
-          'Save generated videos and images to private Aliyun OSS objects and return temporary signed links'
+          'Archive generated videos and images to private Aliyun OSS for task log previews. API responses remain unchanged.'
         )}
       </p>
       <Form {...form}>

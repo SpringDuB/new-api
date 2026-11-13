@@ -115,32 +115,30 @@ export function useTaskLogsColumns(
         },
         size: 180,
       },
+      {
+        id: 'model',
+        header: t('Model'),
+        accessorFn: (row) => row.properties?.origin_model_name || '-',
+        size: 180,
+      },
     ]
 
     if (imageLogs) {
-      columns.push(
-        {
-          id: 'model',
-          header: t('Model'),
-          accessorFn: (row) => row.properties?.origin_model_name || '-',
-          size: 180,
+      columns.push({
+        id: 'request_mode',
+        header: t('Request type'),
+        accessorFn: (row) => row.request_mode || '-',
+        cell: ({ row }) => {
+          if (row.original.request_mode === 'synchronous') {
+            return t('Synchronous')
+          }
+          if (row.original.request_mode === 'asynchronous') {
+            return t('Asynchronous')
+          }
+          return '-'
         },
-        {
-          id: 'request_mode',
-          header: t('Request type'),
-          accessorFn: (row) => row.request_mode || '-',
-          cell: ({ row }) => {
-            if (row.original.request_mode === 'synchronous') {
-              return t('Synchronous')
-            }
-            if (row.original.request_mode === 'asynchronous') {
-              return t('Asynchronous')
-            }
-            return '-'
-          },
-          size: 110,
-        }
-      )
+        size: 110,
+      })
     }
 
     if (isAdmin) {

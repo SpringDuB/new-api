@@ -24,11 +24,10 @@ import (
 )
 
 type taskArtifactResponse struct {
-	Key         string `json:"key"`
-	Type        string `json:"type"`
-	MimeType    string `json:"mime_type,omitempty"`
-	ContentURL  string `json:"content_url"`
-	DownloadURL string `json:"download_url,omitempty"`
+	Key        string `json:"key"`
+	Type       string `json:"type"`
+	MimeType   string `json:"mime_type,omitempty"`
+	ContentURL string `json:"content_url"`
 }
 
 var (
@@ -119,9 +118,19 @@ func GetDashboardTaskClientRequest(c *gin.Context) {
 
 func writeTaskArtifacts(c *gin.Context, task *model.Task, dashboard bool) {
 	c.Header("Cache-Control", "private, no-store")
-	artifacts, err := projectTaskArtifacts(task)
-	if dashboard && task.PrivateData.ResultDiscarded {
-		artifacts = hostImageTaskArtifacts(task)
+	if dashboard && task.Status == model.TaskStatusSuccess && (taskHasPluginExecution(task) || len(task.PrivateData.ImageArtifacts) > 0) {
+		service.ScheduleTaskArtifactArchive(task)
+	}
+	archiveStatus := service.TaskArtifactArchiveStatus(task)
+	var artifacts []relaychannel.TaskArtifact
+	var err error
+	if dashboard && archiveStatus == model.TaskArchiveCompleted {
+		artifacts, err = archivedTaskArtifacts(c.Request.Context(), task)
+	} else {
+		artifacts, err = projectTaskArtifacts(task)
+		if dashboard && task.PrivateData.ResultDiscarded {
+			artifacts = hostImageTaskArtifacts(task)
+		}
 	}
 	if err != nil {
 		logger.LogTaskArtifactFailure(c.Request.Context(), task.TaskID, "projection", 0)
@@ -135,17 +144,15 @@ func writeTaskArtifacts(c *gin.Context, task *model.Task, dashboard bool) {
 			writeTaskArtifactError(c, http.StatusInternalServerError, "artifact_url_error", "Failed to build artifact content URL")
 			return
 		}
+		if dashboard && archiveStatus != "" && (artifact.Type == "image" || artifact.Type == "video") {
+			contentURL += "&archive=1"
+		}
 		items = append(items, taskArtifactResponse{
 			Key:        artifact.Key,
 			Type:       artifact.Type,
 			MimeType:   artifact.MimeType,
 			ContentURL: contentURL,
 		})
-		if service.GetTaskArtifactStore().Enabled() {
-			if url, err := service.BuildTaskArtifactDownloadURL(task.TaskID, artifact.Key); err == nil && url != contentURL {
-				items[len(items)-1].DownloadURL = url
-			}
-		}
 	}
 	response := gin.H{"task_id": task.TaskID, "artifacts": items}
 	if dashboard && task.Status == model.TaskStatusSuccess && task.Platform == constant.TaskPlatformSuno {
@@ -160,6 +167,7 @@ func writeTaskArtifacts(c *gin.Context, task *model.Task, dashboard bool) {
 		response["legacy_content_url"] = legacyContentURL
 	}
 	if dashboard {
+		response["archive_status"] = archiveStatus
 		common.ApiSuccess(c, response)
 		return
 	}
@@ -392,6 +400,26 @@ func TaskArtifactContent(c *gin.Context) {
 		return
 	}
 	artifactKey := strings.TrimSpace(c.Param("artifact_key"))
+	if c.Query("archive") == "1" {
+		if !taskArtifactKeyPattern.MatchString(artifactKey) || task.Status != model.TaskStatusSuccess {
+			writeTaskArtifactError(c, http.StatusNotFound, "artifact_not_found", "Task or artifact not found")
+			return
+		}
+		status := service.TaskArtifactArchiveStatus(task)
+		if status == model.TaskArchivePending || status == model.TaskArchiveRunning {
+			writeTaskArtifactError(c, http.StatusConflict, "artifact_archiving", "Artifacts are being archived")
+			return
+		}
+		if status == model.TaskArchiveCompleted {
+			if store, err := service.GetTaskArtifactReadStore(task, artifactKey); err == nil {
+				if ref, err := store.Resolve(task, artifactKey); err == nil && ref != nil && store.Serve(c, task, ref) == nil {
+					return
+				}
+			}
+		}
+		writeTaskArtifactError(c, http.StatusServiceUnavailable, "artifact_archive_failed", "Artifact archival failed")
+		return
+	}
 	hostArtifacts := hostImageTaskArtifacts(task)
 	if !taskArtifactKeyPattern.MatchString(artifactKey) || !task.ResultRetrievable() && len(hostArtifacts) == 0 {
 		writeTaskArtifactError(c, http.StatusNotFound, "artifact_not_found", "Task or artifact not found")
@@ -437,26 +465,6 @@ func TaskArtifactContent(c *gin.Context) {
 		writeTaskArtifactError(c, http.StatusNotFound, "artifact_not_found", "Task or artifact not found")
 		return
 	}
-	artifactStore := service.GetTaskArtifactStore()
-	if ref, resolveErr := artifactStore.Resolve(task, artifactKey); resolveErr == nil && ref != nil {
-		if artifactStore.Serve(c, task, ref) == nil {
-			return
-		}
-	}
-	if artifactStore.Enabled() {
-		for _, artifact := range artifacts {
-			if artifact.Key != artifactKey {
-				continue
-			}
-			ref, err := archiveTaskArtifact(c.Request.Context(), task, artifact)
-			if err == nil && ref != nil && artifactStore.Serve(c, task, ref) == nil {
-				return
-			}
-			logger.LogTaskArtifactFailure(c.Request.Context(), task.TaskID, "storage", 0)
-			break
-		}
-	}
-
 	for _, image := range task.PrivateData.ImageArtifacts {
 		if image.Key == artifactKey {
 			descriptor := &relaychannel.TaskContentRequest{URL: image.SourceURL, Method: c.Request.Method, Credentialless: true}
@@ -559,6 +567,7 @@ func tasksToDto(tasks []*model.Task, fillUser bool, viewerRole int) []*dto.TaskD
 			item.RequestMode = "asynchronous"
 		}
 		item.ImageArtifactsAvailable = len(hostImageTaskArtifacts(task)) > 0
+		item.ArtifactArchiveStatus = service.TaskArtifactArchiveStatus(task)
 		if task.Status == model.TaskStatusSuccess {
 			item.ResultURL = ""
 			if taskFailReasonIsLegacyResultURL(task.FailReason) {

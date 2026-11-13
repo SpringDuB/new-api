@@ -1458,7 +1458,7 @@ func renderTaskPluginQuery(
 	presenterContext := requestContext.JSValue()
 	artifacts := map[string]any{}
 	if !multiple {
-		projected, projectErr := taskjsplugin.RendererArtifacts(pinned.Plugin, tasksByID[taskIDs[0]], service.BuildTaskArtifactDownloadURL)
+		projected, projectErr := taskjsplugin.RendererArtifacts(pinned.Plugin, tasksByID[taskIDs[0]], service.BuildTaskArtifactContentURL)
 		if projectErr != nil {
 			logger.LogWarn(c, common.LogText("task_plugin subsystem=query event=artifacts_unavailable generation=%d plugin=%q err=%q", generation, pinned.Plugin.Meta.Key, projectErr.Error()))
 		} else {

@@ -119,6 +119,9 @@ func TestImageLogRecognizesGeneratedImagesAcrossFormatsWithoutLoggingVisionInput
 		{"images", "/v1/images/generations", `{"model":"m"}`, `{"data":{"url":"https://cdn.example/output.png"}}`, "application/json", 1},
 		{"gemini", "/v1beta/models/gemini:generateContent", `{"contents":[{"parts":[{"text":"draw"}]}]}`, `{"candidates":[{"content":{"parts":[{"inlineData":{"mimeType":"image/png","data":"aW1hZ2U="}}]}}]}`, "application/json", 1},
 		{"responses", "/v1/responses", `{"model":"m","tools":[{"type":"image_generation"}]}`, `{"output":[{"type":"image_generation_call","result":"aW1hZ2U="}]}`, "application/json", 1},
+		{"responses null error", "/v1/responses", `{"model":"m","tools":[{"type":"image_generation"}]}`, `{"status":"completed","error":null,"output":[{"type":"image_generation_call","result":"aW1hZ2U="}]}`, "application/json", 1},
+		{"image null error", "/v1/images/generations", `{"model":"m"}`, `{"error":null,"data":[{"url":"https://cdn.example/output.png"}]}`, "application/json", 1},
+		{"stream null error", "/v1/images/generations", `{"model":"m","stream":true}`, "data: {\"type\":\"image_generation.completed\",\"error\":null,\"b64_json\":\"aW1hZ2U=\"}\n\n", "text/event-stream", 1},
 		{"chat", "/v1/chat/completions", `{"model":"m","modalities":["text","image"]}`, `{"choices":[{"message":{"images":[{"image_url":{"url":"https://cdn.example/output.png"}}]}}]}`, "application/json", 1},
 		{"chat stream", "/v1/chat/completions", `{"model":"m","stream":true}`, "data: {\"choices\":[{\"delta\":{\"images\":[{\"image_url\":{\"url\":\"https://cdn.example/output.png\"}}]}}]}\n\ndata: [DONE]\n\n", "text/event-stream", 1},
 		{"stream", "/v1/images/generations", `{"model":"m","stream":true}`, "data: {\"type\":\"image_generation.partial_image\",\"b64_json\":\"cGFydGlhbA==\"}\n\ndata: {\"type\":\"image_generation.completed\",\"b64_json\":\"aW1hZ2U=\"}\n\ndata: [DONE]\n\n", "text/event-stream", 1},
@@ -149,6 +152,7 @@ func TestImageLogRecognizesGeneratedImagesAcrossFormatsWithoutLoggingVisionInput
 			if tc.images == 1 {
 				var task model.Task
 				require.NoError(t, model.DB.Order("id desc").First(&task).Error)
+				assert.Equal(t, model.TaskStatus(model.TaskStatusSuccess), task.Status)
 				require.NotNil(t, task.PrivateData.Response)
 				assert.Len(t, task.PrivateData.ImageArtifacts, 1)
 				assert.NotContains(t, string(task.PrivateData.Response.Body), "aW1hZ2U=")
@@ -229,6 +233,24 @@ func TestImageLogsMergeAsyncSyncAndMidjourneyWithGlobalPaginationAndOwnership(t 
 	GetUserImageLogs(c)
 	assert.NotContains(t, recorder.Body.String(), "foreign-image")
 	assert.NotContains(t, recorder.Body.String(), `"task_id":"video"`)
+	// Images belong exclusively to drawing history. Task rows, totals and
+	// pagination must all exclude them for both owner and admin queries.
+	userTasks := model.TaskGetAllUserTask(7, 0, 10, model.SyncTaskQueryParams{})
+	require.Len(t, userTasks, 2)
+	assert.Equal(t, "video", userTasks[0].TaskID)
+	assert.Equal(t, "task_generic", userTasks[1].TaskID)
+	assert.EqualValues(t, 2, model.TaskCountAllUserTask(7, model.SyncTaskQueryParams{}))
+	adminTasks := model.TaskGetAllTasks(0, 10, model.SyncTaskQueryParams{})
+	require.Len(t, adminTasks, 2)
+	assert.EqualValues(t, 2, model.TaskCountAllTasks(model.SyncTaskQueryParams{}))
+	assert.Empty(t, model.TaskGetAllUserTask(8, 0, 10, model.SyncTaskQueryParams{}))
+	assert.Zero(t, model.TaskCountAllUserTask(8, model.SyncTaskQueryParams{}))
+	page := model.TaskGetAllUserTask(7, 1, 1, model.SyncTaskQueryParams{})
+	require.Len(t, page, 1)
+	assert.Equal(t, "task_generic", page[0].TaskID)
+	assert.Empty(t, model.TaskGetAllTasks(0, 10, model.SyncTaskQueryParams{Action: "imagine"}))
+	assert.Zero(t, model.TaskCountAllTasks(model.SyncTaskQueryParams{TaskID: "image-sync"}))
+
 }
 
 func TestImageLogDoesNotMistakeVideoThumbnailsForImageGeneration(t *testing.T) {
@@ -317,7 +339,9 @@ func TestImageLogPreservesFailedAndAbortedResponsesWithoutPolling(t *testing.T) 
 		aborted                     bool
 	}{
 		{"upstream failure", `{"error":{"message":"provider rejected image","api_key":"private-key"}}`, "application/json", 400, false},
+		{"JSON error in HTTP 200", `{"error":{"message":"provider rejected image"}}`, "application/json", 200, false},
 		{"stream error", "data: {\"type\":\"error\",\"error\":{\"message\":\"failed\"}}\n\n", "text/event-stream", 200, false},
+		{"image event error", "data: {\"type\":\"image_generation.completed\",\"error\":{\"message\":\"failed\"}}\n\n", "text/event-stream", 200, false},
 		{"client abort", "data: {\"type\":\"image_generation.partial_image\",\"b64_json\":\"cGFydGlhbA==\"}\n\n", "text/event-stream", 200, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

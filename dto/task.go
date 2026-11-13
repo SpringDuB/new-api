@@ -61,6 +61,7 @@ type TaskDto struct {
 	RequestMode             string          `json:"request_mode,omitempty"`
 	DetailID                string          `json:"detail_id,omitempty"`
 	ImageArtifactsAvailable bool            `json:"image_artifacts_available,omitempty"`
+	ArtifactArchiveStatus   string          `json:"artifact_archive_status,omitempty"`
 }
 
 type TaskPluginInfo struct {

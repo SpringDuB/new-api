@@ -27,8 +27,9 @@ import (
 )
 
 type ossArtifactStore struct {
-	client *oss.Client
-	config system_setting.TaskArtifactStoreConfig
+	client   *oss.Client
+	config   system_setting.TaskArtifactStoreConfig
+	readOnly bool
 }
 
 var ossProbeCodePattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9]{0,63}$`)
@@ -53,11 +54,14 @@ func newOSSArtifactStore(config system_setting.TaskArtifactStoreConfig, client *
 	return &ossArtifactStore{client: oss.NewClient(settings), config: config}, nil
 }
 
-func (*ossArtifactStore) Enabled() bool { return true }
+func (s *ossArtifactStore) Enabled() bool { return !s.readOnly }
 
 // Probe creates and removes an isolated object only when root explicitly
 // requests a connection test. It verifies read, write and delete permissions.
 func (s *ossArtifactStore) Probe(ctx context.Context) error {
+	if s.readOnly {
+		return ErrTaskArtifactStoreDisabled
+	}
 	key := path.Join(s.config.OSSPrefix, ".connection-test", fmt.Sprint(time.Now().UnixNano()))
 	_, err := s.client.PutObject(ctx, &oss.PutObjectRequest{Bucket: oss.Ptr(s.config.OSSBucket), Key: oss.Ptr(key), Body: strings.NewReader("new-api OSS connection test"), Acl: oss.ObjectACLPrivate, ForbidOverwrite: oss.Ptr("true")})
 	if err != nil {
@@ -142,10 +146,13 @@ func (s *ossArtifactStore) Resolve(task *model.Task, artifactKey string) (*Store
 		}
 		return nil, errors.New("OSS object lookup failed")
 	}
-	return &StoredArtifactRef{Backend: "oss", Bucket: s.config.OSSBucket, ObjectKey: key, ArtifactKey: artifactKey, MimeType: oss.ToString(result.ContentType), Size: result.ContentLength}, nil
+	return &StoredArtifactRef{Backend: "oss", Endpoint: s.config.OSSEndpoint, Region: s.config.OSSRegion, Bucket: s.config.OSSBucket, Prefix: s.config.OSSPrefix, ObjectKey: key, ArtifactKey: artifactKey, MimeType: oss.ToString(result.ContentType), Size: result.ContentLength}, nil
 }
 
 func (s *ossArtifactStore) Persist(ctx context.Context, task *model.Task, artifact types.TaskArtifact, content io.Reader) (*StoredArtifactRef, error) {
+	if s.readOnly {
+		return nil, ErrTaskArtifactStoreDisabled
+	}
 	key, err := s.objectKey(task, artifact.Key)
 	if err != nil {
 		return nil, err
@@ -178,7 +185,7 @@ func (s *ossArtifactStore) Persist(ctx context.Context, task *model.Task, artifa
 		}
 		return nil, errors.New("OSS object upload failed")
 	}
-	return &StoredArtifactRef{Backend: "oss", Bucket: s.config.OSSBucket, ObjectKey: key, ArtifactKey: artifact.Key, MimeType: mimeType, Size: size}, nil
+	return &StoredArtifactRef{Backend: "oss", Endpoint: s.config.OSSEndpoint, Region: s.config.OSSRegion, Bucket: s.config.OSSBucket, Prefix: s.config.OSSPrefix, ObjectKey: key, ArtifactKey: artifact.Key, MimeType: mimeType, Size: size}, nil
 }
 
 func (s *ossArtifactStore) SignedURL(ctx context.Context, task *model.Task, ref *StoredArtifactRef, method string) (string, error) {

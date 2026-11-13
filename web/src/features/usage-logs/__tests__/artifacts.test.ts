@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import assert from 'node:assert/strict'
 
-import { describe, test } from 'vitest'
+import { describe, expect, test } from 'vitest'
 
 import {
   getSafePluginAuthorUrl,
@@ -422,5 +422,50 @@ describe('legacy Suno audio clips', () => {
       parseTaskArtifactsResponse({ success: true, data: { artifacts: [] } }),
       { artifacts: [] }
     )
+  })
+})
+
+describe('dashboard archival projection', () => {
+  test.each(['pending', 'archiving', 'completed', 'failed'])(
+    'preserves independent %s archival metadata and stable preview URLs',
+    (status) => {
+      const contentUrl = `${artifactContentUrl('image-1')}&archive=1`
+      expect(
+        parseTaskArtifactsResponse({
+          success: true,
+          data: {
+            archive_status: status,
+            artifacts: [
+              { key: 'image-1', type: 'image', content_url: contentUrl },
+            ],
+          },
+        })
+      ).toEqual({
+        archiveStatus: status,
+        artifacts: [{ key: 'image-1', type: 'image', content_url: contentUrl }],
+      })
+    }
+  )
+  test('rejects unknown archival states and duplicate archive selectors', () => {
+    expect(() =>
+      parseTaskArtifactsResponse({
+        success: true,
+        data: { archive_status: 'SUCCESS' },
+      })
+    ).toThrow(TaskArtifactApiError)
+    expect(() =>
+      parseTaskArtifactsResponse({
+        success: true,
+        data: {
+          artifacts: [
+            {
+              key: 'image-1',
+              type: 'image',
+              content_url: `${artifactContentUrl('image-1')}&archive=1&archive=0`,
+            },
+          ],
+        },
+      })
+    ).toThrow(TaskArtifactApiError)
   })
 })

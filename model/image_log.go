@@ -33,10 +33,53 @@ func UpdateTaskImageLog(ctx context.Context, task *Task) error {
 		}
 		current.PrivateData.ImageRequestMode = task.PrivateData.ImageRequestMode
 		if task.PrivateData.ImageArtifacts != nil && current.Status == task.Status {
+			for i := range task.PrivateData.ImageArtifacts {
+				for _, stored := range current.PrivateData.ImageArtifacts {
+					if stored.Key == task.PrivateData.ImageArtifacts[i].Key && stored.Stored {
+						task.PrivateData.ImageArtifacts[i].Stored = true
+					}
+				}
+			}
 			current.PrivateData.ImageArtifacts = task.PrivateData.ImageArtifacts
 		}
 		return tx.Model(&current).Update("private_data", current.PrivateData).Error
 	})
+}
+
+// UpdateTaskArtifactArchive merges only archival metadata against the latest
+// row, preserving concurrent response captures, plugin state and settlement.
+// A pending transition claims an unstarted archive exactly once.
+func UpdateTaskArtifactArchive(ctx context.Context, task *Task, archive TaskArtifactArchive) (bool, error) {
+	updated := false
+	err := DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var current Task
+		if err := lockForUpdate(tx).First(&current, task.ID).Error; err != nil {
+			return err
+		}
+		if current.Status != TaskStatusSuccess || archive.Status == TaskArchivePending && current.PrivateData.ArtifactArchive != nil {
+			if archive.Status == TaskArchivePending {
+				task.PrivateData.ArtifactArchive = current.PrivateData.ArtifactArchive
+			}
+			return nil
+		}
+		if archive.Artifacts == nil && current.PrivateData.ArtifactArchive != nil {
+			archive.Artifacts = current.PrivateData.ArtifactArchive.Artifacts
+		}
+		current.PrivateData.ArtifactArchive = &archive
+		for i := range current.PrivateData.ImageArtifacts {
+			for _, image := range task.PrivateData.ImageArtifacts {
+				if image.Key == current.PrivateData.ImageArtifacts[i].Key && image.Stored {
+					current.PrivateData.ImageArtifacts[i].Stored = true
+				}
+			}
+		}
+		if err := tx.Model(&current).Update("private_data", current.PrivateData).Error; err != nil {
+			return err
+		}
+		updated = true
+		return nil
+	})
+	return updated, err
 }
 
 type ImageLogQuery struct {

@@ -31,6 +31,8 @@ import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Dialog } from '@/components/dialog'
+import { ErrorState } from '@/components/error-state'
+import { LoadingState } from '@/components/loading-state'
 import {
   Alert,
   AlertAction,
@@ -311,6 +313,10 @@ export function TaskArtifacts(props: TaskArtifactsProps) {
     enabled: props.enabled,
     retry: false,
     staleTime: 30_000,
+    refetchInterval: (query) => {
+      const status = query.state.data?.archiveStatus
+      return status === 'pending' || status === 'archiving' ? 2000 : false
+    },
   })
 
   if (!props.enabled) return null
@@ -350,6 +356,19 @@ export function TaskArtifacts(props: TaskArtifactsProps) {
           </Button>
         </AlertAction>
       </Alert>
+    )
+  }
+
+  const archiveStatus = artifactsQuery.data.archiveStatus
+  if (archiveStatus === 'pending' || archiveStatus === 'archiving') {
+    return <LoadingState message={t('Artifacts are being archived')} />
+  }
+  if (archiveStatus === 'failed') {
+    return (
+      <ErrorState
+        title={t('Artifact archival failed')}
+        description={t('Generation succeeded. Artifact archival failed.')}
+      />
     )
   }
 

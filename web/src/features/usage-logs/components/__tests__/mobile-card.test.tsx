@@ -26,6 +26,8 @@ import { render, screen, within, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { expect, it, vi } from 'vitest'
 
+import { DataTableView } from '@/components/data-table'
+
 import { usageLogSchema, type UsageLog } from '../../data/schema'
 import type { TaskLog } from '../../types'
 import { useCommonLogsColumns } from '../columns/common-logs-columns'
@@ -99,22 +101,28 @@ function renderLogs(props: Parameters<typeof Fixture>[0] = {}) {
   )
 }
 
-function DrawingFixture() {
-  const columns = useTaskLogsColumns(false, false, true)
+function TaskLogsFixture(props: {
+  category?: 'drawing' | 'task'
+  desktop?: boolean
+  model?: string
+}) {
+  const category = props.category ?? 'drawing'
+  const imageLogs = category === 'drawing'
+  const columns = useTaskLogsColumns(false, false, imageLogs)
   const data: TaskLog[] = [
     {
       id: 1,
       user_id: 7,
-      platform: 'image',
-      task_id: 'task-sync-image',
-      action: 'image_generation',
+      platform: imageLogs ? 'image' : 'video',
+      task_id: imageLogs ? 'task-sync-image' : 'task-video',
+      action: imageLogs ? 'image_generation' : 'video_generation',
       channel_id: 1,
       group: 'default',
       quota: 0,
       submit_time: 1788840000,
       status: 'SUCCESS',
-      request_mode: 'synchronous',
-      properties: { origin_model_name: 'gpt-image-1' },
+      request_mode: imageLogs ? 'synchronous' : 'asynchronous',
+      properties: { origin_model_name: props.model ?? 'gpt-image-1' },
       image_artifacts_available: true,
     },
   ]
@@ -123,14 +131,17 @@ function DrawingFixture() {
     columns,
     getCoreRowModel: getCoreRowModel(),
   })
-  return <UsageLogsMobileList table={table} logCategory='drawing' />
+  if (props.desktop) {
+    return <DataTableView table={table} />
+  }
+  return <UsageLogsMobileList table={table} logCategory={category} />
 }
 
 it('drawing mobile cards expose synchronous model requests, results and details', () => {
   render(
     <QueryClientProvider client={new QueryClient()}>
       <UsageLogsProvider>
-        <DrawingFixture />
+        <TaskLogsFixture />
       </UsageLogsProvider>
     </QueryClientProvider>
   )
@@ -140,6 +151,48 @@ it('drawing mobile cards expose synchronous model requests, results and details'
   expect(screen.getByRole('button', { name: 'View details' })).toBeVisible()
   expect(screen.getByRole('button', { name: 'Artifacts' })).toBeVisible()
 })
+
+it.each([false, true])(
+  'shows the saved video model in task logs (desktop: %s)',
+  (desktop) => {
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <UsageLogsProvider>
+          <TaskLogsFixture
+            category='task'
+            desktop={desktop}
+            model='mf-gemini-omni-1-2-flash'
+          />
+        </UsageLogsProvider>
+      </QueryClientProvider>
+    )
+    expect(screen.getByText('Model')).toBeVisible()
+    expect(screen.getByText('mf-gemini-omni-1-2-flash')).toBeVisible()
+    expect(screen.queryByText('Request type')).not.toBeInTheDocument()
+  }
+)
+
+it.each([false, true])(
+  'shows a placeholder for historical task logs without a model (desktop: %s)',
+  (desktop) => {
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <UsageLogsProvider>
+          <TaskLogsFixture category='task' desktop={desktop} model='' />
+        </UsageLogsProvider>
+      </QueryClientProvider>
+    )
+    const label = screen.getByText('Model')
+    if (desktop) {
+      const modelColumn = screen
+        .getAllByRole('columnheader')
+        .indexOf(screen.getByRole('columnheader', { name: 'Model' }))
+      expect(screen.getAllByRole('cell')[modelColumn]).toHaveTextContent('-')
+    } else {
+      expect(label.parentElement).toHaveTextContent('-')
+    }
+  }
+)
 
 it('shows model mismatch evidence when tapping the mobile model badge', async () => {
   const user = userEvent.setup()

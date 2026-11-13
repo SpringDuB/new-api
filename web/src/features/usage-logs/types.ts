@@ -331,6 +331,7 @@ export interface TaskLog {
   detail_id?: string
   request_mode?: 'synchronous' | 'asynchronous'
   image_artifacts_available?: boolean
+  artifact_archive_status?: TaskArtifactArchiveStatus
   action: string // MUSIC, LYRICS, GENERATE, TEXT_GENERATE, etc.
   channel_id: number
   group: string
@@ -421,6 +422,12 @@ export interface TaskResponseResponse {
   retention: 'task_lifetime'
 }
 
+export type TaskArtifactArchiveStatus =
+  | 'pending'
+  | 'archiving'
+  | 'completed'
+  | 'failed'
+
 export type TaskArtifactType = 'image' | 'video' | 'audio' | 'file'
 
 export interface TaskArtifact {
@@ -446,6 +453,7 @@ export interface AudioClip {
 }
 
 export interface TaskArtifactProjection {
+  archiveStatus?: TaskArtifactArchiveStatus
   artifacts: TaskArtifact[]
   legacyContentUrl?: string
   legacyAudioClips?: AudioClip[]
@@ -456,6 +464,7 @@ export interface TaskArtifactsResponse {
   message?: string
   code?: string
   data?: {
+    archive_status?: unknown
     artifacts?: unknown
     legacy_content_url?: unknown
     legacy_audio_clips?: unknown
