@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -11,9 +12,12 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"regexp"
 	"strings"
 	"time"
 
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/QuantumNous/new-api/types"
@@ -26,6 +30,9 @@ type ossArtifactStore struct {
 	client *oss.Client
 	config system_setting.TaskArtifactStoreConfig
 }
+
+var ossProbeCodePattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9]{0,63}$`)
+var ossProbeRequestIDPattern = regexp.MustCompile(`^[A-Fa-f0-9]{16,64}$`)
 
 func newOSSArtifactStore(config system_setting.TaskArtifactStoreConfig, client *http.Client) (TaskArtifactStore, error) {
 	if client == nil {
@@ -54,14 +61,62 @@ func (s *ossArtifactStore) Probe(ctx context.Context) error {
 	key := path.Join(s.config.OSSPrefix, ".connection-test", fmt.Sprint(time.Now().UnixNano()))
 	_, err := s.client.PutObject(ctx, &oss.PutObjectRequest{Bucket: oss.Ptr(s.config.OSSBucket), Key: oss.Ptr(key), Body: strings.NewReader("new-api OSS connection test"), Acl: oss.ObjectACLPrivate, ForbidOverwrite: oss.Ptr("true")})
 	if err != nil {
-		return errors.New("OSS connection test failed")
+		return taskArtifactOSSProbeError(ctx, "PutObject", err)
 	}
 	_, headErr := s.client.HeadObject(ctx, &oss.HeadObjectRequest{Bucket: oss.Ptr(s.config.OSSBucket), Key: oss.Ptr(key)})
 	_, deleteErr := s.client.DeleteObject(ctx, &oss.DeleteObjectRequest{Bucket: oss.Ptr(s.config.OSSBucket), Key: oss.Ptr(key)})
-	if headErr != nil || deleteErr != nil {
-		return errors.New("OSS connection test failed")
+	if deleteErr != nil {
+		cleanupErr := taskArtifactOSSProbeError(ctx, "DeleteObject", deleteErr)
+		if headErr == nil {
+			return cleanupErr
+		}
+	}
+	if headErr != nil {
+		return taskArtifactOSSProbeError(ctx, "HeadObject", headErr)
 	}
 	return nil
+}
+
+// Preserve diagnostic identifiers only. SDK error text, XML snapshots and
+// request targets may contain credentials and are never logged or returned.
+func taskArtifactOSSProbeError(ctx context.Context, operation string, err error) error {
+	status := 0
+	code, requestID := "RequestFailed", "-"
+	var upstream *oss.ServiceError
+	var dns *net.DNSError
+	var certificate *tls.CertificateVerificationError
+	var network net.Error
+	switch {
+	case errors.As(err, &upstream):
+		status = upstream.StatusCode
+		code = "UnknownServiceError"
+		if ossProbeCodePattern.MatchString(upstream.Code) {
+			code = upstream.Code
+		} else if text := http.StatusText(status); text != "" {
+			code = strings.ReplaceAll(text, " ", "")
+		}
+		id := upstream.RequestID
+		if id == "" {
+			id = upstream.Headers.Get("X-Oss-Request-Id")
+		}
+		if ossProbeRequestIDPattern.MatchString(id) {
+			requestID = id
+		}
+	case errors.Is(err, context.DeadlineExceeded), errors.As(err, &network) && network.Timeout():
+		code = "RequestTimeout"
+	case errors.As(err, &dns):
+		code = "DNSLookupFailed"
+	case errors.As(err, &certificate):
+		code = "TLSCertificateInvalid"
+	case errors.Is(err, context.Canceled):
+		code = "RequestCanceled"
+	case errors.As(err, &network):
+		code = "NetworkError"
+	}
+	logger.LogWarn(ctx, common.LogText("task artifact OSS probe failed operation=%s http=%d code=%s request_id=%s", operation, status, code, requestID))
+	return common.NewMessage("OSS connection test failed at {{operation}} (HTTP {{status}}, code {{code}}, request ID {{request_id}})", map[string]any{
+		"operation": operation, "status": status, "code": code, "request_id": requestID,
+	})
 }
 
 func (s *ossArtifactStore) objectKey(task *model.Task, artifactKey string) (string, error) {

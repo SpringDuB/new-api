@@ -26,10 +26,12 @@ import { toast } from 'sonner'
 import { ErrorState } from '@/components/error-state'
 import { LoadingState } from '@/components/loading-state'
 import { PasswordInput } from '@/components/password-input'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import {
   Form,
   FormControl,
+  FormDescription,
   FormField,
   FormItem,
   FormLabel,
@@ -37,7 +39,10 @@ import {
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
 import { api } from '@/lib/api'
-import { requireServerSuccess } from '@/lib/server-error-message'
+import {
+  getServerErrorMessage,
+  requireServerSuccess,
+} from '@/lib/server-error-message'
 
 import {
   SettingsForm,
@@ -108,10 +113,12 @@ export function TaskArtifactStoreSection() {
       queryClient.setQueryData(settingsKey, data)
       form.reset({ ...data, access_key: '', secret_key: '' })
       setTestPassed(false)
+      probe.reset()
       toast.success(t('Setting updated successfully'))
     },
   })
   const probe = useMutation({
+    meta: { errorToast: false },
     mutationFn: async () =>
       requireServerSuccess(
         (await api.post('/api/option/task_artifact_store/test')).data
@@ -171,6 +178,13 @@ export function TaskArtifactStoreSection() {
                       }
                     />
                   </FormControl>
+                  {name === 'region' ? (
+                    <FormDescription>
+                      {t(
+                        'Use a region ID such as cn-shanghai, without the oss- prefix'
+                      )}
+                    </FormDescription>
+                  ) : null}
                   <FormMessage />
                 </FormItem>
               )}
@@ -263,6 +277,14 @@ export function TaskArtifactStoreSection() {
             <p role='status' className='text-sm'>
               {t('OSS connection test passed')}
             </p>
+          ) : null}
+          {probe.isError ? (
+            <Alert variant='destructive'>
+              <AlertTitle>{t('Connection failed')}</AlertTitle>
+              <AlertDescription>
+                {getServerErrorMessage(probe.error)}
+              </AlertDescription>
+            </Alert>
           ) : null}
         </SettingsForm>
       </Form>

@@ -72,8 +72,8 @@ func TestTaskArtifactStoreConnection(c *gin.Context) {
 	}
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
 	defer cancel()
-	if probe.Probe(ctx) != nil {
-		common.ApiErrorT(c, "OSS connection test failed; check endpoint, bucket and permissions")
+	if err := probe.Probe(ctx); err != nil {
+		common.ApiError(c, err)
 		return
 	}
 	common.ApiSuccessT(c, "OSS connection test passed", nil)

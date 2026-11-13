@@ -145,6 +145,14 @@ test('a rejected connection test does not report success and can be retried', as
         success: false,
         message:
           'OSS connection test failed; check endpoint, bucket and permissions',
+        message_key:
+          'OSS connection test failed at {{operation}} (HTTP {{status}}, code {{code}}, request ID {{request_id}})',
+        message_params: {
+          operation: 'PutObject',
+          status: 403,
+          code: 'AccessDenied',
+          request_id: 'request-test-123',
+        },
       },
     })
     .mockResolvedValueOnce({ data: { success: true } })
@@ -153,6 +161,11 @@ test('a rejected connection test does not report success and can be retried', as
     await screen.findByRole('button', { name: 'Test connection' })
   )
   await waitFor(() => expect(post).toHaveBeenCalledTimes(1))
+  const failure = await screen.findByRole('alert')
+  expect(failure).toHaveTextContent('PutObject')
+  expect(failure).toHaveTextContent('403')
+  expect(failure).toHaveTextContent('AccessDenied')
+  expect(failure).toHaveTextContent('request-test-123')
   await waitFor(() =>
     expect(
       screen.getByRole('button', { name: 'Test connection' })
@@ -163,4 +176,5 @@ test('a rejected connection test does not report success and can be retried', as
   ).not.toBeInTheDocument()
   fireEvent.click(screen.getByRole('button', { name: 'Test connection' }))
   expect(await screen.findByText('OSS connection test passed')).toBeVisible()
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument()
 })

@@ -3,14 +3,18 @@ package service
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/QuantumNous/new-api/types"
@@ -37,6 +41,94 @@ func TestDisabledTaskArtifactStoreHasNoStorageBehavior(t *testing.T) {
 }
 
 var _ TaskArtifactStore = disabledArtifactStore{}
+
+func TestOSSArtifactStoreProbeReportsFailedOperationWithoutSecrets(t *testing.T) {
+	var logs bytes.Buffer
+	previous := gin.DefaultErrorWriter
+	gin.DefaultErrorWriter = &logs
+	t.Cleanup(func() { gin.DefaultErrorWriter = previous })
+	for _, test := range []struct {
+		name      string
+		operation string
+		method    string
+		code      string
+		wantCode  string
+	}{
+		{"invalid access key", "PutObject", http.MethodPut, "InvalidAccessKeyId", "InvalidAccessKeyId"},
+		{"read denied", "HeadObject", http.MethodHead, "AccessDenied", "BadErrorResponse"},
+		{"delete denied", "DeleteObject", http.MethodDelete, "AccessDenied", "AccessDenied"},
+		{"unsafe error metadata", "PutObject", http.MethodPut, "https://secret.example/?signature=signature-canary", "Forbidden"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			logs.Reset()
+			methods := make([]string, 0, 3)
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				methods = append(methods, r.Method)
+				w.Header().Set("X-Oss-Request-Id", "0123456789ABCDEF01234567")
+				if r.Method == test.method {
+					w.Header().Set("Content-Type", "application/xml")
+					w.WriteHeader(http.StatusForbidden)
+					_, _ = fmt.Fprintf(w, `<Error><Code>%s</Code><Message>credential-canary https://secret.example/?signature=signature-canary</Message><RequestId>0123456789ABCDEF01234567</RequestId></Error>`, test.code)
+					return
+				}
+				w.Header().Set("ETag", `"test"`)
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer server.Close()
+			store, err := newOSSArtifactStore(system_setting.TaskArtifactStoreConfig{Mode: "oss", OSSEndpoint: server.URL, OSSRegion: "cn-shanghai", OSSBucket: "results", OSSAccessKey: "access-canary", OSSSecretKey: "secret-canary", OSSPrefix: "tasks/v1"}, server.Client())
+			require.NoError(t, err)
+			err = store.(interface{ Probe(context.Context) error }).Probe(t.Context())
+			require.Error(t, err)
+			var message *common.Message
+			require.True(t, errors.As(err, &message), "the web console receives a translatable diagnostic")
+			assert.Equal(t, test.operation, message.Params["operation"])
+			assert.Equal(t, http.StatusForbidden, message.Params["status"])
+			assert.Equal(t, "0123456789ABCDEF01234567", message.Params["request_id"])
+			assert.Equal(t, test.wantCode, message.Params["code"])
+			for _, secret := range []string{"access-canary", "secret-canary", "credential-canary", "signature-canary", "secret.example", server.URL} {
+				assert.NotContains(t, err.Error(), secret)
+				assert.NotContains(t, logs.String(), secret)
+			}
+			if test.operation == "HeadObject" {
+				assert.Equal(t, []string{http.MethodPut, http.MethodHead, http.MethodDelete}, methods, "read failures still clean up the test object")
+			}
+		})
+	}
+}
+
+func TestOSSArtifactStoreProbeClassifiesTransportFailuresWithoutSecrets(t *testing.T) {
+	var logs bytes.Buffer
+	previous := gin.DefaultErrorWriter
+	gin.DefaultErrorWriter = &logs
+	t.Cleanup(func() { gin.DefaultErrorWriter = previous })
+	for _, test := range []struct {
+		name string
+		err  error
+		code string
+	}{
+		{"timeout", context.DeadlineExceeded, "RequestTimeout"},
+		{"DNS", &net.DNSError{Err: "credential-canary", Name: "secret.example", IsNotFound: true}, "DNSLookupFailed"},
+		{"certificate", &tls.CertificateVerificationError{Err: errors.New("credential-canary")}, "TLSCertificateInvalid"},
+		{"canceled", context.Canceled, "RequestCanceled"},
+		{"network", &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("credential-canary")}, "NetworkError"},
+		{"request", &url.Error{Op: "Put", URL: "https://secret.example/?signature=signature-canary", Err: errors.New("credential-canary")}, "NetworkError"},
+		{"unknown", errors.New("credential-canary https://secret.example/?signature=signature-canary"), "RequestFailed"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			logs.Reset()
+			err := taskArtifactOSSProbeError(t.Context(), "PutObject", fmt.Errorf("request: %w", test.err))
+			var message *common.Message
+			require.ErrorAs(t, err, &message)
+			assert.Equal(t, test.code, message.Params["code"])
+			assert.Equal(t, 0, message.Params["status"])
+			assert.Equal(t, "-", message.Params["request_id"])
+			for _, secret := range []string{"secret.example", "signature-canary", "credential-canary"} {
+				assert.NotContains(t, err.Error(), secret)
+				assert.NotContains(t, logs.String(), secret)
+			}
+		})
+	}
+}
 
 func TestOSSArtifactStorePersistsPrivateObjectsAndSignsClientMethods(t *testing.T) {
 	var object []byte
