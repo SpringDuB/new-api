@@ -16,11 +16,15 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useCallback, useMemo, useState } from 'react'
+import { lazy, Suspense, useCallback, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { PublicLayout } from '@/components/layout'
+import { LoadingState } from '@/components/loading-state'
 import { PageTransition } from '@/components/page-transition'
+import { Button } from '@/components/ui/button'
+import { ROLE } from '@/lib/roles'
+import { useAuthStore } from '@/stores/auth-store'
 
 import {
   LoadingSkeleton,
@@ -36,14 +40,23 @@ import { EXCLUDED_GROUPS, VIEW_MODES } from './constants'
 import { useFilters } from './hooks/use-filters'
 import { usePricingData } from './hooks/use-pricing-data'
 
+const ModelSquareManager = lazy(
+  () => import('./components/model-square-manager')
+)
+
 export function Pricing() {
   const { t } = useTranslation()
+  const canManage = useAuthStore(
+    (state) => (state.auth.user?.role ?? 0) >= ROLE.ADMIN
+  )
+  const [managerOpen, setManagerOpen] = useState(false)
   const [selectedModelName, setSelectedModelName] = useState<string | null>(
     null
   )
 
   const {
     models,
+    catalogModels,
     vendors,
     groupRatio,
     usableGroup,
@@ -200,6 +213,16 @@ export function Pricing() {
               )}
               className='mx-auto mt-4 max-w-2xl sm:mt-6'
             />
+            {canManage && (
+              <Button
+                variant='outline'
+                size='sm'
+                className='mt-4'
+                onClick={() => setManagerOpen(true)}
+              >
+                {t('Manage display')}
+              </Button>
+            )}
           </header>
 
           <div className='grid gap-4 xl:grid-cols-[280px_minmax(0,1fr)]'>
@@ -281,6 +304,16 @@ export function Pricing() {
               tokenUnit={tokenUnit}
               showRechargePrice={showRechargePrice}
             />
+          )}
+          {canManage && managerOpen && (
+            <Suspense fallback={<LoadingState />}>
+              <ModelSquareManager
+                models={catalogModels}
+                priceRate={priceRate}
+                usdExchangeRate={usdExchangeRate}
+                onClose={() => setManagerOpen(false)}
+              />
+            </Suspense>
           )}
         </PageTransition>
       </div>

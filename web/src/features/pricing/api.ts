@@ -18,7 +18,24 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { api } from '@/lib/api'
 
+import type { ModelSquareDisplay } from './lib/model-square-display'
 import type { PricingData } from './types'
+
+export type ModelSquareDisplayResponse = {
+  success: boolean
+  message?: string
+  data: ModelSquareDisplay
+}
+
+export async function getModelSquareDisplay(): Promise<ModelSquareDisplayResponse> {
+  return (await api.get('/api/models/display')).data
+}
+
+export async function saveModelSquareDisplay(
+  display: ModelSquareDisplay
+): Promise<ModelSquareDisplayResponse> {
+  return (await api.put('/api/models/display', display)).data
+}
 
 // ----------------------------------------------------------------------------
 // Pricing APIs

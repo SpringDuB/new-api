@@ -38,11 +38,13 @@ import {
 } from '../lib/dynamic-price'
 import { parseTags } from '../lib/filters'
 import { isTokenBasedModel } from '../lib/model-helpers'
+import { MODEL_SQUARE_COLORS } from '../lib/model-square-display'
 import { formatPrice, formatRequestPrice } from '../lib/price'
 import { taskPriceLabel, taskUsageUnitLabel } from '../lib/task-price-display'
 import type { PricingModel, PriceType, TokenUnit } from '../types'
 import { ModelBillingModeBadge } from './model-billing-mode-badge'
 import { ModelPerfBadge, type ModelPerfBadgeData } from './model-perf-badge'
+import { ModelPromotionBadge } from './model-promotion-badge'
 
 export interface ModelCardProps {
   model: PricingModel
@@ -267,7 +269,18 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
   }
 
   return (
-    <Card className='hover:ring-foreground/20 h-full min-w-0 gap-3 transition-colors'>
+    <Card
+      className={cn(
+        'hover:ring-foreground/20 h-full min-w-0 gap-3 transition-colors',
+        props.model.square_display?.highlight &&
+          MODEL_SQUARE_COLORS[props.model.square_display.color ?? 'red'].ring
+      )}
+    >
+      {props.model.square_display?.badge && (
+        <div className='px-4 pb-1'>
+          <ModelPromotionBadge decoration={props.model.square_display} />
+        </div>
+      )}
       <CardHeader className='flex flex-row items-start gap-3'>
         <div
           aria-hidden
@@ -343,6 +356,17 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
           <div className='grid grid-cols-[repeat(auto-fit,minmax(88px,1fr))] gap-x-3 gap-y-2'>
             {priceSummary}
           </div>
+          {props.model.square_display?.note && (
+            <p
+              className={cn(
+                'text-sm font-semibold break-words',
+                MODEL_SQUARE_COLORS[props.model.square_display.color ?? 'red']
+                  .note
+              )}
+            >
+              {props.model.square_display.note}
+            </p>
+          )}
         </div>
         {(groups.length > 0 || endpoints.length > 0) && (
           <dl

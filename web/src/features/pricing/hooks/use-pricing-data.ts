@@ -23,6 +23,7 @@ import { useStatus } from '@/hooks/use-status'
 import { requireServerSuccess } from '@/lib/server-error-message'
 
 import { getPricing } from '../api'
+import { applyModelSquareDisplay } from '../lib/model-square-display'
 
 export function usePricingData(enabled = true) {
   const { status } = useStatus()
@@ -44,7 +45,7 @@ export function usePricingData(enabled = true) {
     [status?.usd_exchange_rate, priceRate]
   )
 
-  const models = useMemo(() => {
+  const catalogModels = useMemo(() => {
     if (!data?.data || !data?.vendors) return []
 
     const vendorMap = new Map(data.vendors.map((v) => [v.id, v]))
@@ -64,8 +65,14 @@ export function usePricingData(enabled = true) {
     })
   }, [data])
 
+  const models = useMemo(
+    () => applyModelSquareDisplay(catalogModels, data?.model_square_display),
+    [catalogModels, data?.model_square_display]
+  )
+
   return {
     models,
+    catalogModels,
     vendors: data?.vendors ?? [],
     groupRatio: data?.group_ratio ?? {},
     usableGroup: data?.usable_group ?? {},

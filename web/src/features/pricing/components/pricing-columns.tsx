@@ -27,12 +27,15 @@ import {
 import { GroupBadge } from '@/components/group-badge'
 import { StatusBadge } from '@/components/status-badge'
 import { getLobeIcon } from '@/lib/lobe-icon'
+import { cn } from '@/lib/utils'
 
 import { parseTags } from '../lib/filters'
+import { MODEL_SQUARE_COLORS } from '../lib/model-square-display'
 import type { PricingModel } from '../types'
 import { CachedPriceCell } from './cached-price-cell'
 import { ModelBillingModeBadge } from './model-billing-mode-badge'
 import { ModelPriceCell, type ModelPriceCellOptions } from './model-price-cell'
+import { ModelPromotionBadge } from './model-promotion-badge'
 
 // ----------------------------------------------------------------------------
 // Pricing Table Columns
@@ -59,11 +62,24 @@ export function usePricingColumns(
         const modelIcon = modelIconKey ? getLobeIcon(modelIconKey, 14) : null
 
         return (
-          <div className='flex max-w-full min-w-0 items-center gap-2'>
-            {modelIcon}
-            <span className='truncate font-mono text-sm font-medium'>
-              {model.model_name}
-            </span>
+          <div className='flex max-w-full min-w-0 flex-col items-start gap-1.5'>
+            <ModelPromotionBadge decoration={model.square_display} compact />
+            <div className='flex max-w-full min-w-0 items-center gap-2'>
+              {modelIcon}
+              <span className='truncate font-mono text-sm font-medium'>
+                {model.model_name}
+              </span>
+            </div>
+            {model.square_display?.note && (
+              <span
+                className={cn(
+                  'text-xs break-words',
+                  MODEL_SQUARE_COLORS[model.square_display.color ?? 'red'].note
+                )}
+              >
+                {model.square_display.note}
+              </span>
+            )}
           </div>
         )
       },

@@ -55,7 +55,9 @@ export function filterBySearch(
     (m) =>
       m.model_name?.toLowerCase().includes(lowerQuery) ||
       m.description?.toLowerCase().includes(lowerQuery) ||
-      m.tags?.toLowerCase().includes(lowerQuery) ||
+      (Array.isArray(m.tags) ? m.tags.join(',') : m.tags)
+        ?.toLowerCase()
+        .includes(lowerQuery) ||
       m.vendor_name?.toLowerCase().includes(lowerQuery)
   )
 }
@@ -251,11 +253,12 @@ export function filterAndSortModels(
 }
 
 /**
- * Parse tags from comma-separated string
+ * Parse legacy catalog text while keeping normalized display labels intact.
  */
-export function parseTags(tagsString?: string): string[] {
-  if (!tagsString) return []
-  return tagsString
+export function parseTags(tags?: string | string[]): string[] {
+  if (!tags) return []
+  if (Array.isArray(tags)) return tags
+  return tags
     .split(/[,;|\s]+/)
     .map((t) => t.trim())
     .filter(Boolean)

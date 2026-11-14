@@ -12,9 +12,11 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
@@ -110,6 +112,124 @@ func modelManagementRequest(t *testing.T, handler gin.HandlerFunc, method, path 
 		require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), output), recorder.Body.String())
 	}
 	return recorder
+}
+
+func TestModelSquareDisplayDatabaseMatrix(t *testing.T) {
+	for _, dialect := range []struct{ kind, env string }{{"sqlite", ""}, {"mysql", "TEST_MYSQL_DSN"}, {"postgres", "TEST_POSTGRES_DSN"}} {
+		t.Run(dialect.kind, func(t *testing.T) {
+			if dialect.env != "" && os.Getenv(dialect.env) == "" {
+				t.Skip("set " + dialect.env + " to run this database")
+			}
+			db := modelManagementDB(t, dialect.kind, os.Getenv(dialect.env))
+			var response struct {
+				Success bool
+				Data    model.ModelSquareDisplay
+			}
+			modelManagementRequest(t, GetModelSquareDisplay, http.MethodGet, "/api/models/display", nil, &response)
+			require.True(t, response.Success)
+			assert.Empty(t, response.Data.Order)
+			assert.Empty(t, response.Data.Models)
+
+			display := model.ModelSquareDisplay{
+				Order: []string{"visible-model", "hidden-model"},
+				Models: map[string]model.ModelSquareDecoration{
+					"visible-model": {Badge: "站长推荐", BadgeStyle: "burst", Color: "red", Highlight: true, Note: "全天稳定", Tags: []string{"视频", "推荐"}},
+					"hidden-model":  {Badge: "Private catalog entry"},
+				},
+			}
+			for range 2 {
+				modelManagementRequest(t, UpdateModelSquareDisplay, http.MethodPut, "/api/models/display", display, &response)
+				require.True(t, response.Success)
+				assert.Equal(t, display, response.Data)
+			}
+			var stored model.Option
+			require.NoError(t, db.First(&stored, model.Option{Key: model.ModelSquareDisplayOption}).Error)
+			var persisted model.ModelSquareDisplay
+			require.NoError(t, common.UnmarshalJsonStr(stored.Value, &persisted))
+			assert.Equal(t, display, persisted)
+			var count int64
+			require.NoError(t, db.Model(&model.Option{}).Where(model.Option{Key: model.ModelSquareDisplayOption}).Count(&count).Error)
+			assert.EqualValues(t, 1, count)
+			assert.Equal(t, model.ModelSquareDisplay{
+				Order:  []string{"visible-model"},
+				Models: map[string]model.ModelSquareDecoration{"visible-model": display.Models["visible-model"]},
+			}, model.GetModelSquareDisplay().ForModels([]string{"visible-model", "new-model"}))
+			model.RefreshPricing()
+			var publicResponse struct {
+				Success bool
+				Display model.ModelSquareDisplay `json:"model_square_display"`
+			}
+			modelManagementRequest(t, GetPricing, http.MethodGet, "/api/pricing", nil, &publicResponse)
+			require.True(t, publicResponse.Success)
+			assert.Empty(t, publicResponse.Display.Order, "a public catalog with no accessible models must not expose saved model names")
+			assert.Empty(t, publicResponse.Display.Models)
+
+			for _, invalid := range []model.ModelSquareDisplay{
+				{Order: []string{"duplicate", "duplicate"}},
+				{Order: []string{" "}},
+				{Models: map[string]model.ModelSquareDecoration{"test": {Badge: strings.Repeat("字", 25)}}},
+				{Models: map[string]model.ModelSquareDecoration{"test": {Note: strings.Repeat("a", 121)}}},
+				{Models: map[string]model.ModelSquareDecoration{"test": {Color: "unknown"}}},
+				{Models: map[string]model.ModelSquareDecoration{"test": {BadgeStyle: "unknown"}}},
+				{Models: map[string]model.ModelSquareDecoration{"test": {Tags: []string{strings.Repeat("a", 33)}}}},
+			} {
+				modelManagementRequest(t, UpdateModelSquareDisplay, http.MethodPut, "/api/models/display", invalid, &response)
+				assert.False(t, response.Success)
+				assert.Equal(t, display, model.GetModelSquareDisplay())
+			}
+			require.Error(t, model.UpdateOptionsBulk(map[string]string{model.ModelSquareDisplayOption: `{"order":["x","x"]}`}))
+			assert.Equal(t, display, model.GetModelSquareDisplay())
+			cleared := model.ModelSquareDisplay{Order: []string{}, Models: map[string]model.ModelSquareDecoration{}}
+			modelManagementRequest(t, UpdateModelSquareDisplay, http.MethodPut, "/api/models/display", cleared, &response)
+			require.True(t, response.Success)
+			assert.Equal(t, cleared, model.GetModelSquareDisplay())
+			require.NoError(t, db.First(&stored, model.Option{Key: model.ModelSquareDisplayOption}).Error)
+			persisted = model.ModelSquareDisplay{}
+			require.NoError(t, common.UnmarshalJsonStr(stored.Value, &persisted))
+			assert.Empty(t, persisted.Order)
+			assert.Empty(t, persisted.Models)
+
+			connection, err := db.DB()
+			require.NoError(t, err)
+			require.NoError(t, connection.Close())
+			modelManagementRequest(t, UpdateModelSquareDisplay, http.MethodPut, "/api/models/display", display, &response)
+			assert.False(t, response.Success, "failed persistence must not report success")
+			assert.Equal(t, cleared, model.GetModelSquareDisplay(), "failed persistence must not publish new settings")
+		})
+	}
+	t.Run("authorization", func(t *testing.T) {
+		previousOptions := common.OptionMap
+		common.OptionMap = map[string]string{}
+		t.Cleanup(func() { common.OptionMap = previousOptions })
+		admin, _ := setupAccessTokenAudit(t)
+		readToken, _ := createScopedAccessToken(t, admin.Id, 0, "model:read")
+		writeToken, _ := createScopedAccessToken(t, admin.Id, 0, "model:write")
+		expiredToken, _ := createScopedAccessToken(t, admin.Id, time.Now().Unix()-1, "model:write")
+		user := model.User{Username: "square-user", Password: "placeholder", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, Group: "default", AuthVersion: 1, AffCode: "square-user"}
+		require.NoError(t, model.DB.Create(&user).Error)
+		userToken, _ := createScopedAccessToken(t, user.Id, 0, "model:write")
+		_, browserToken := createAccessTokenTestSession(t, admin.Id, "square-admin-session")
+		engine := gin.New()
+		engine.GET("/api/models/display", middleware.AdminAuth(), GetModelSquareDisplay)
+		engine.PUT("/api/models/display", middleware.AdminAuth(), UpdateModelSquareDisplay)
+		for _, test := range []struct {
+			name, method, credential string
+			status                   int
+		}{
+			{"anonymous", http.MethodPut, "", http.StatusUnauthorized},
+			{"ordinary user cannot edit", http.MethodPut, userToken, http.StatusForbidden},
+			{"read scope can read", http.MethodGet, readToken, http.StatusOK},
+			{"read scope cannot edit", http.MethodPut, readToken, http.StatusForbidden},
+			{"write scope can edit", http.MethodPut, writeToken, http.StatusOK},
+			{"expired token cannot edit", http.MethodPut, expiredToken, http.StatusUnauthorized},
+			{"administrator browser session can edit", http.MethodPut, browserToken, http.StatusOK},
+		} {
+			t.Run(test.name, func(t *testing.T) {
+				response := accessTokenRequest(engine, test.method, "/api/models/display", test.credential, "", `{"order":[],"models":{}}`)
+				assert.Equal(t, test.status, response.Code)
+			})
+		}
+	})
 }
 
 func TestModelPricingConversionDatabaseMatrix(t *testing.T) {

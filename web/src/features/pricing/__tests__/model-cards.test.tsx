@@ -38,6 +38,7 @@ import {
 import { CachedPriceCell } from '../components/cached-price-cell'
 import { ModelCard } from '../components/model-card'
 import { ModelCardGrid } from '../components/model-card-grid'
+import { applyModelSquareDisplay } from '../lib/model-square-display'
 import type { PricingModel } from '../types'
 
 function pricingModel(overrides: Partial<PricingModel> = {}): PricingModel {
@@ -88,6 +89,41 @@ afterEach(() => {
 })
 
 describe('model cards', () => {
+  it('shows a compound additional tag as one label alongside the original catalog tag', () => {
+    const label = 'High quality; text|image'
+    const [model] = applyModelSquareDisplay([pricingModel({ tags: 'chat' })], {
+      order: [],
+      models: { 'example-model': { tags: [label] } },
+    })
+    render(<ModelCard model={model} onClick={vi.fn()} />)
+
+    const tags = screen.getByRole('group', { name: 'Tags' })
+    expect(within(tags).getByText(`chat, ${label}`)).toBeVisible()
+    expect(within(tags).queryByText(/^\+/)).not.toBeInTheDocument()
+  })
+
+  it('shows a configured promotion as text with its border and notice while retaining long badge wrapping', () => {
+    render(
+      <ModelCard
+        model={pricingModel({
+          square_display: {
+            badge: '<strong>Site choice</strong>',
+            note: 'Available all day',
+            highlight: true,
+            color: 'red',
+            badge_style: 'burst',
+          },
+        })}
+        onClick={vi.fn()}
+      />
+    )
+    const badge = screen.getByText('<strong>Site choice</strong>')
+    expect(badge).toBeVisible()
+    expect(badge.querySelector('strong')).toBeNull()
+    expect(badge).toHaveClass('whitespace-normal')
+    expect(badge.closest('[data-slot="card"]')).toHaveClass('ring-2')
+    expect(screen.getByText('Available all day')).toBeVisible()
+  })
   it('shows separate generic and image cache prices including a free image cache', () => {
     render(
       <CachedPriceCell
