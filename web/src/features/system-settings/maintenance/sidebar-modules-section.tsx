@@ -66,8 +66,8 @@ export function SidebarModulesSection({
 
   const sectionMeta: Record<string, { title: string; description: string }> = {
     chat: {
-      title: t('Chat area'),
-      description: t('Playground experiments and live conversations.'),
+      title: t('Online Use'),
+      description: t('Playground, chat, and Infinite Canvas.'),
     },
     console: {
       title: t('Console area'),
@@ -95,6 +95,10 @@ export function SidebarModulesSection({
       chat: {
         title: t('Chat'),
         description: t('Access previous conversations and start new ones.'),
+      },
+      canvas: {
+        title: t('Infinite Canvas'),
+        description: t('Open Infinite Canvas in a new tab.'),
       },
     },
     console: {

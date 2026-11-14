@@ -25,6 +25,7 @@ import { Button } from '@/components/ui/button'
 import { useStatus } from '@/hooks/use-status'
 
 import { HeroTerminalDemo } from '../hero-terminal-demo'
+import { InfiniteCanvasCard } from '../infinite-canvas-card'
 
 interface HeroProps {
   className?: string
@@ -168,6 +169,8 @@ export function Hero(props: HeroProps) {
               </>
             )}
           </div>
+
+          <InfiniteCanvasCard />
 
           {/* Supported Apps (参考图二样式，进行卡片化和信息扩充设计，增加视觉高度) */}
           <div

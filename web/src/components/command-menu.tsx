@@ -70,6 +70,16 @@ export function CommandMenu() {
                         key={`${navItem.title}-${navItem.url}`}
                         value={navItem.title}
                         onSelect={() => {
+                          if (navItem.external) {
+                            runCommand(() =>
+                              window.open(
+                                navItem.url,
+                                '_blank',
+                                'noopener,noreferrer'
+                              )
+                            )
+                            return
+                          }
                           runCommand(() => navigate({ to: navItem.url }))
                         }}
                       >
