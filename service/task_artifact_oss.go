@@ -37,7 +37,7 @@ var ossProbeRequestIDPattern = regexp.MustCompile(`^[A-Fa-f0-9]{16,64}$`)
 
 func newOSSArtifactStore(config system_setting.TaskArtifactStoreConfig, client *http.Client) (TaskArtifactStore, error) {
 	if client == nil {
-		client = &http.Client{Timeout: 120 * time.Second}
+		client = &http.Client{Timeout: TaskArtifactTransferTimeout()}
 	}
 	noRedirects := *client
 	noRedirects.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
@@ -153,6 +153,8 @@ func (s *ossArtifactStore) Persist(ctx context.Context, task *model.Task, artifa
 	if s.readOnly {
 		return nil, ErrTaskArtifactStoreDisabled
 	}
+	ctx, cancel := context.WithTimeout(ctx, TaskArtifactTransferTimeout())
+	defer cancel()
 	key, err := s.objectKey(task, artifact.Key)
 	if err != nil {
 		return nil, err

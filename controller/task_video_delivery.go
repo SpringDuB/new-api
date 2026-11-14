@@ -71,7 +71,7 @@ func resolveTaskVideoDelivery(ctx context.Context, task *model.Task) (map[string
 }
 
 func taskVideoDelivery(ctx context.Context, task *model.Task, artifact relaychannel.TaskArtifact, store service.TaskArtifactStore) (service.TaskVideoDelivery, error) {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	ctx, cancel := context.WithTimeout(ctx, service.TaskArtifactTransferTimeout())
 	defer cancel()
 	// The shared download owns its snapshot; a caller may leave while another
 	// request still waits for the same artifact.

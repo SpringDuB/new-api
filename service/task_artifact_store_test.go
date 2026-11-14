@@ -13,6 +13,8 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"testing/synctest"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
@@ -41,6 +43,89 @@ func TestDisabledTaskArtifactStoreHasNoStorageBehavior(t *testing.T) {
 }
 
 var _ TaskArtifactStore = disabledArtifactStore{}
+
+type taskArtifactUploadTransport func(*http.Request) (*http.Response, error)
+
+func (f taskArtifactUploadTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	return f(request)
+}
+
+func TestOSSArtifactTransferAllowsSlowUploadsAndHonorsDeadlines(t *testing.T) {
+	for _, test := range []struct {
+		name           string
+		configured     string
+		uploadDuration time.Duration
+		callerTimeout  time.Duration
+		wantFailure    bool
+	}{
+		{name: "default permits upload beyond 120 seconds", uploadDuration: 121 * time.Second},
+		{name: "configured transfer permits upload beyond five minutes", configured: "600", uploadDuration: 6 * time.Minute},
+		{name: "transfer deadline cancels upload", configured: "180", uploadDuration: 181 * time.Second, wantFailure: true},
+		{name: "caller deadline still applies", configured: "600", uploadDuration: 121 * time.Second, callerTimeout: 30 * time.Second, wantFailure: true},
+		{name: "zero uses bounded default", configured: "0", uploadDuration: 121 * time.Second},
+		{name: "oversized value uses bounded default", configured: "86401", uploadDuration: 121 * time.Second},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("TASK_ARTIFACT_TRANSFER_TIMEOUT_SECONDS", test.configured)
+			synctest.Test(t, func(t *testing.T) {
+				var uploaded []byte
+				previousTransport := http.DefaultTransport
+				http.DefaultTransport = taskArtifactUploadTransport(func(request *http.Request) (*http.Response, error) {
+					status := http.StatusNotFound
+					if request.Method == http.MethodPut {
+						timer := time.NewTimer(test.uploadDuration)
+						defer timer.Stop()
+						select {
+						case <-request.Context().Done():
+							return nil, request.Context().Err()
+						case <-timer.C:
+						}
+						var err error
+						uploaded, err = io.ReadAll(request.Body)
+						if err != nil {
+							return nil, err
+						}
+						status = http.StatusOK
+					}
+					return &http.Response{StatusCode: status, Header: http.Header{}, Body: io.NopCloser(strings.NewReader("")), Request: request}, nil
+				})
+				t.Cleanup(func() { http.DefaultTransport = previousTransport })
+				config := system_setting.TaskArtifactStoreConfig{Mode: "oss", OSSEndpoint: "https://oss-cn-shanghai.aliyuncs.com", OSSRegion: "cn-shanghai", OSSBucket: "task-results", OSSAccessKey: "test-access", OSSSecretKey: "test-secret", OSSPrefix: "tasks/v1", OSSMaxBytes: 1024}
+				store, err := newOSSArtifactStore(config, nil)
+				require.NoError(t, err)
+				ctx := t.Context()
+				if test.callerTimeout > 0 {
+					var cancel context.CancelFunc
+					ctx, cancel = context.WithTimeout(ctx, test.callerTimeout)
+					defer cancel()
+				}
+				ref, err := store.Persist(ctx, &model.Task{ID: 7, TaskID: "task-slow-upload", UserId: 12}, types.TaskArtifact{Key: "video", Type: "video", MimeType: "video/mp4"}, strings.NewReader("video-bytes"))
+				if test.wantFailure {
+					require.Error(t, err)
+					assert.Nil(t, ref, "a canceled transfer must not publish a stored resource")
+					assert.Empty(t, uploaded)
+					return
+				}
+				require.NoError(t, err)
+				require.NotNil(t, ref)
+				assert.Equal(t, []byte("video-bytes"), uploaded)
+				assert.EqualValues(t, len(uploaded), ref.Size)
+			})
+		})
+	}
+}
+
+func TestTaskArtifactArchiveStatusUsesTransferBudget(t *testing.T) {
+	t.Setenv("TASK_ARTIFACT_TRANSFER_TIMEOUT_SECONDS", "1800")
+	for _, status := range []string{model.TaskArchivePending, model.TaskArchiveRunning} {
+		t.Run(status, func(t *testing.T) {
+			task := &model.Task{PrivateData: model.TaskPrivateData{ArtifactArchive: &model.TaskArtifactArchive{Status: status, UpdatedAt: time.Now().Add(-10 * time.Minute).Unix()}}}
+			assert.Equal(t, status, TaskArtifactArchiveStatus(task), "a slow transfer within budget must not appear failed")
+			task.PrivateData.ArtifactArchive.UpdatedAt = time.Now().Add(-32 * time.Minute).Unix()
+			assert.Equal(t, model.TaskArchiveFailed, TaskArtifactArchiveStatus(task), "abandoned transfers must still expire")
+		})
+	}
+}
 
 func TestOSSArtifactStoreProbeReportsFailedOperationWithoutSecrets(t *testing.T) {
 	var logs bytes.Buffer

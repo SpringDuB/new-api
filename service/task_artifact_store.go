@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting/system_setting"
@@ -95,6 +96,16 @@ var taskArtifactArchiveSlots = make(chan struct{}, 2)
 var taskArtifactArchiveQueue = make(chan struct{}, 8)
 var taskArtifactArchiveJobs sync.Map
 
+// TaskArtifactTransferTimeout bounds complete media transfers, including the
+// download and OSS upload. Cross-region uploads can take several minutes.
+func TaskArtifactTransferTimeout() time.Duration {
+	seconds := common.GetEnvOrDefault("TASK_ARTIFACT_TRANSFER_TIMEOUT_SECONDS", 30*60)
+	if seconds <= 0 || seconds > 24*60*60 {
+		seconds = 30 * 60
+	}
+	return time.Duration(seconds) * time.Second
+}
+
 // AcquireTaskArtifactTransfer bounds media downloads and spooling for both
 // request-driven delivery and background archival.
 func AcquireTaskArtifactTransfer(ctx context.Context) (func(), error) {
@@ -154,7 +165,7 @@ func ScheduleTaskArtifactArchive(task *model.Task) {
 			<-taskArtifactArchiveQueue
 			taskArtifactArchiveJobs.Delete(snapshot.ID)
 		}()
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		ctx, cancel := context.WithTimeout(context.Background(), TaskArtifactTransferTimeout())
 		defer cancel()
 		status := model.TaskArchiveFailed
 		defer func() {
@@ -221,7 +232,8 @@ func TaskArtifactArchiveStatus(task *model.Task) string {
 	if archive == nil {
 		return ""
 	}
-	if (archive.Status == model.TaskArchivePending || archive.Status == model.TaskArchiveRunning) && time.Now().Unix()-archive.UpdatedAt > 6*60 {
+	staleAfter := int64((TaskArtifactTransferTimeout() + time.Minute) / time.Second)
+	if (archive.Status == model.TaskArchivePending || archive.Status == model.TaskArchiveRunning) && time.Now().Unix()-archive.UpdatedAt > staleAfter {
 		return model.TaskArchiveFailed
 	}
 	return archive.Status

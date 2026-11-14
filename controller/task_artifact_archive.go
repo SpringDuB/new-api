@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"time"
 
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
@@ -144,7 +143,7 @@ func archiveTaskArtifact(ctx context.Context, task *model.Task, artifact relaych
 		if ref, err := store.Resolve(task, artifact.Key); err != nil || ref != nil {
 			return ref, err
 		}
-		bounded, cancel := context.WithTimeout(ctx, 5*time.Minute)
+		bounded, cancel := context.WithTimeout(ctx, service.TaskArtifactTransferTimeout())
 		defer cancel()
 		release, err := service.AcquireTaskArtifactTransfer(bounded)
 		if err != nil {
