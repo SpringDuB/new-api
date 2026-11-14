@@ -78,7 +78,7 @@ func TestLecAPIBindsCatalogModelsToTheirMediaProtocol(t *testing.T) {
 	registry := jsplugin.NewRegistry()
 	plugin, err := registry.RegisterFactory(source, jsplugin.Options{Key: "lecapi"})
 	require.NoError(t, err)
-	require.Len(t, plugin.Meta.Models, 74)
+	require.Len(t, plugin.Meta.Models, 64)
 	assert.Contains(t, plugin.Meta.RequiredCapabilities, "submit-no-retry@1")
 	assert.True(t, plugin.Meta.SupportsUpstream(jsplugin.UpstreamKindNewAPI))
 	priced := 0
@@ -93,18 +93,35 @@ func TestLecAPIBindsCatalogModelsToTheirMediaProtocol(t *testing.T) {
 			assert.NotContains(t, description, "lec-")
 		}
 	}
-	assert.Equal(t, 70, priced)
+	assert.Equal(t, 63, priced)
+	for _, name := range []string{
+		"ap-seedance-2-0", "haya-seedance-2-0-vc-720p", "jl-wan-3-0-1055-720p", "mf-seedance-2-5-30ref",
+		"mj-seedance-2-5-bd-720p", "mj-seedance-2-5-zd", "mm-seedance-2-5", "mm-seedance-2-5-full", "nzt-wan-3-0-prime",
+		"vp-seedance-2-9-301010", "vv-seedance-2-5-r2", "vv-seedance-2-5-r2-plus", "image2", "nano-banana-2",
+		"hc-seedance-2-5-3010", "vg-seedance-2-0-full-933", "vg-seedance-2-0-mini-cc", "vg-seedance-2-5-pa",
+	} {
+		assert.NotContains(t, plugin.Meta.Models, name)
+		assert.NotContains(t, plugin.Meta.ModelDefaults, name)
+		for _, hook := range []string{"buildSubmitRequest", "extractUsage"} {
+			_, err := plugin.Engine.Call(t.Context(), hook, lecAPIContext(name, map[string]any{"prompt": "boat"}))
+			require.ErrorContains(t, err, "is no longer available", name)
+		}
+		_, err := plugin.Engine.CallPath(t.Context(), "native", []string{"createVideo"}, map[string]any{
+			"body": map[string]any{"kind": "json", "value": map[string]any{"model": name, "prompt": "boat"}},
+		})
+		require.ErrorContains(t, err, "is no longer available", name)
+	}
 	for _, tc := range []struct{ name, vendor string }{
 		{"aj-wan-3-0", "Wan"}, {"ms-minimax-h3", "Minimax"}, {"ac-image-2", "OpenAI"},
 		{"ac-seedream-5-0-lite", "ByteDance"}, {"gt-seedance-2-5-720p", "ByteDance"},
 		{"jm-seedance-2-5-flash", "ByteDance"},
-		{"nano-banana-2", "Google"}, {"sl-midjourney", "Midjourney"}, {"mf-video-upscale", ""},
+		{"nw-nano-banana-2-1", "Google"}, {"sl-midjourney", "Midjourney"}, {"mf-video-upscale", ""},
 	} {
 		assert.Equal(t, tc.vendor, plugin.Meta.ModelDefaults[tc.name].Vendor, tc.name)
 	}
 	schema, _ := plugin.Meta.UsageForModel("aj-wan-3-0")
 	assert.ElementsMatch(t, []string{"480p", "720p", "1080p"}, schema["resolution"].Enum)
-	for _, name := range []string{"image2", "nano-banana-2"} {
+	for _, name := range []string{"nw-nano-banana-2-1", "tinysnow-banana-3"} {
 		facts := lecAPIHook(t, plugin, "extractUsage", lecAPIContext(name, map[string]any{"prompt": "boat"}))
 		schema, _ := plugin.Meta.UsageForModel(name)
 		assert.Contains(t, schema["resolution"].Enum, facts["resolution"], "omitting an optional resolution must remain valid for %s", name)
@@ -118,7 +135,7 @@ func TestLecAPIBindsCatalogModelsToTheirMediaProtocol(t *testing.T) {
 		require.True(t, found)
 		assert.Equal(t, "lecapi", binding.Plugin.Meta.Key)
 	}
-	imageModels := []string{"ac-image-2-5-flare", "ac-image-2-5-sunburst", "ac-image-2", "nw-image-2", "nw-image-2-5", "nw-image-2-6", "nw-nano-banana-2-1", "sl-midjourney", "sl-midjourney-niji", "ac-seedream-5-0-lite", "ac-seedream-5-0-pro", "ty-seedream-5-pro", "tinysnow-banana-3-1", "tinysnow-banana-3", "tinysnow-image-2", "tinysnow-image-2-5-flare", "tinysnow-image-2-5-sunburst", "image-2", "image2", "nano-banana-2"}
+	imageModels := []string{"ac-image-2-5-flare", "ac-image-2-5-sunburst", "ac-image-2", "nw-image-2", "nw-image-2-5", "nw-image-2-6", "nw-nano-banana-2-1", "sl-midjourney", "sl-midjourney-niji", "ac-seedream-5-0-lite", "ac-seedream-5-0-pro", "ty-seedream-5-pro", "tinysnow-banana-3-1", "tinysnow-banana-3", "tinysnow-image-2", "tinysnow-image-2-5-flare", "tinysnow-image-2-5-sunburst", "image-2", "ty-seedream-5-5"}
 	for _, modelName := range plugin.Meta.Models {
 		path, protocol := "/v1/videos", "openai_video"
 		for _, imageModel := range imageModels {
@@ -134,9 +151,13 @@ func TestLecAPIBindsCatalogModelsToTheirMediaProtocol(t *testing.T) {
 	for _, tc := range []struct{ model, path, protocol string }{
 		{"ac-image-2-5-flare", "/v1/images/generations", "openai_image"},
 		{"ty-seedream-5-pro", "/v1/images/generations", "openai_image"},
-		{"image2", "/v1/images/generations", "openai_image"},
-		{"nano-banana-2", "/v1/images/generations", "openai_image"},
-		{"vp-seedance-2-9-301010", "/v1/videos", "openai_video"},
+		{"ty-seedream-5-5", "/v1/images/generations", "openai_image"},
+		{"jl-seedance-2-0-fast-auto", "/v1/videos", "openai_video"},
+		{"jl-seedance-2-0-full", "/v1/videos", "openai_video"},
+		{"mf-seedance-2-5-t1", "/v1/videos", "openai_video"},
+		{"mg-seedance-2-5", "/v1/videos", "openai_video"},
+		{"ty-seedance-2-5-1050-flxd", "/v1/videos", "openai_video"},
+		{"vw-seedance-2-0-fast", "/v1/videos", "openai_video"},
 		{"ms-minimax-h3-upscale", "/v1/videos", "openai_video"},
 	} {
 		binding, found := registry.Generation().LookupEndpoint("POST", tc.path, tc.model)
@@ -148,7 +169,7 @@ func TestLecAPIBindsCatalogModelsToTheirMediaProtocol(t *testing.T) {
 func TestLecAPIPublicModelsPreserveVendorRoutingAndGatewayChaining(t *testing.T) {
 	plugin := loadLecAPIPlugin(t)
 	for _, tc := range []struct{ public, vendor string }{
-		{"aj-wan-3-0", "lec-aj-wan-3-0"}, {"ac-image-2", "lec-ac-image-2"}, {"image-2", "lec-image-2"}, {"image2", "image2"}, {"nano-banana-2", "nano-banana-2"},
+		{"aj-wan-3-0", "lec-aj-wan-3-0"}, {"ac-image-2", "lec-ac-image-2"}, {"image-2", "lec-image-2"}, {"ty-seedream-5-5", "lec-ty-seedream-5-5"},
 		{"jm-seedance-2-5-flash", "lec-jm-seedance-2-5-flash"},
 	} {
 		ctx := lecAPIContext(tc.public, map[string]any{"prompt": "boat"})
@@ -314,18 +335,18 @@ func TestLecAPIConvertsImageSizesWithoutChangingGenerationSettings(t *testing.T)
 	}
 	for _, tc := range []struct{ model, size, resolution string }{
 		{"tinysnow-image-2", "4k", "4K"}, {"tinysnow-image-2", "1536x1024", "1K"},
-		{"image2", "3840x2160", "4K"}, {"nano-banana-2", "3840x2160", "4K"},
+		{"image-2", "3840x2160", "4K"}, {"ac-seedream-5-0-pro", "3840x2160", "4K"},
 		{"aj-wan-3-0", "1080p", "1080p"},
 	} {
 		request := map[string]any{"prompt": "boat", "size": tc.size}
-		if tc.model == "image2" || tc.model == "nano-banana-2" {
+		if tc.model == "image-2" || tc.model == "ac-seedream-5-0-pro" {
 			request["resolution"] = "4k"
 		}
 		ctx := lecAPIContext(tc.model, request)
 		body := lecAPIHook(t, plugin, "buildSubmitRequest", ctx)["body"].(map[string]any)
 		assert.Equal(t, tc.resolution, body["resolution"], "%s must retain its resolution rules", tc.model)
 		assert.Equal(t, tc.resolution, lecAPIHook(t, plugin, "extractUsage", ctx)["resolution"])
-		if tc.model == "image2" || tc.model == "nano-banana-2" {
+		if tc.model == "image-2" || tc.model == "ac-seedream-5-0-pro" {
 			assert.Equal(t, "16:9", body["aspect_ratio"])
 			assert.NotContains(t, body, "size")
 		}
@@ -374,10 +395,24 @@ func TestLecAPIEnforcesModelSpecificMaterialsAndOptions(t *testing.T) {
 		{"sl-midjourney", map[string]any{"prompt": "boat", "action": "blend"}},
 		{"sl-midjourney", map[string]any{"prompt": "boat", "version": "8.2", "draft": true}},
 		{"tinysnow-image-2", map[string]any{"prompt": "boat", "n": 11}},
+		{"ap-muse-video-720-10s", map[string]any{"prompt": "boat", "duration": 5}},
+		{"jl-seedance-2-0-fast-auto", map[string]any{"prompt": "boat"}},
+		{"jl-seedance-2-0-full", map[string]any{"prompt": strings.Repeat("船", 8001), "images": []any{"https://media.example/source.png"}}},
+		{"jl-seedance-2-0-full", map[string]any{"prompt": "boat", "images": []any{"https://media.example/source.png"}, "duration": 16}},
+		{"mf-seedance-2-5-t1", map[string]any{"prompt": "boat", "resolution": "1080p"}},
+		{"mg-seedance-2-5", map[string]any{"prompt": "boat", "duration": 4}},
+		{"ty-seedance-2-5-1050-flxd", map[string]any{"prompt": "boat"}},
+		{"ty-seedance-2-5-1050-flxd", map[string]any{"prompt": "boat", "images": []any{"https://media.example/source.png"}, "videos": []any{"https://media.example/source.mp4"}}},
+		{"ty-seedream-5-5", map[string]any{"prompt": "boat", "resolution": "4K"}},
+		{"vw-seedance-2-0-fast", map[string]any{"prompt": "boat"}},
+		{"vw-seedance-2-0-fast", map[string]any{"prompt": "boat", "images": []any{"https://media.example/source.png"}, "duration": 14}},
+		{"vw-seedance-2-0-fast", map[string]any{"prompt": "boat", "last_frame_url": "https://media.example/source.png"}},
 		{"ty-seedream-5-pro", map[string]any{"prompt": "boat", "images": []any{"https://media.example/1.png", "https://media.example/2.png", "https://media.example/3.png", "https://media.example/4.png", "https://media.example/5.png", "https://media.example/6.png", "https://media.example/7.png", "https://media.example/8.png", "https://media.example/9.png"}}},
 	} {
-		_, err := plugin.Engine.Call(t.Context(), "buildSubmitRequest", lecAPIContext(tc.model, tc.body))
-		require.Error(t, err, "%s: %v", tc.model, tc.body)
+		for _, hook := range []string{"buildSubmitRequest", "extractUsage"} {
+			_, err := plugin.Engine.Call(t.Context(), hook, lecAPIContext(tc.model, tc.body))
+			require.Error(t, err, "%s %s", hook, tc.model)
+		}
 	}
 	ctx := lecAPIContext("sl-midjourney", map[string]any{"prompt": "boat", "seed": 0, "stylize": 0, "style": false, "hd": false})
 	body := lecAPIHook(t, plugin, "buildSubmitRequest", ctx)["body"].(map[string]any)
@@ -385,6 +420,47 @@ func TestLecAPIEnforcesModelSpecificMaterialsAndOptions(t *testing.T) {
 	assert.Equal(t, float64(0), body["stylize"])
 	assert.Equal(t, false, body["style"])
 	assert.Equal(t, false, body["hd"])
+}
+
+func TestLecAPICurrentModelParametersAndDescriptions(t *testing.T) {
+	plugin := loadLecAPIPlugin(t)
+	images := []any{"https://media.example/first.png", "https://media.example/second.png"}
+	for _, tc := range []struct {
+		model      string
+		duration   float64
+		resolution string
+	}{
+		{"ap-muse-video-720-10s", 10, "720p"},
+		{"jl-seedance-2-0-fast-auto", 5, "720p"},
+		{"jl-seedance-2-0-full", 5, "720p"},
+		{"mf-seedance-2-5-t1", 4, "720p"},
+		{"mg-seedance-2-5", 5, "720p"},
+		{"ty-seedance-2-5-1050-flxd", 5, "480p"},
+		{"vw-seedance-2-0-fast", 15, "720p"},
+	} {
+		ctx := lecAPIContext(tc.model, map[string]any{"prompt": "boat", "images": images})
+		body := lecAPIHook(t, plugin, "buildSubmitRequest", ctx)["body"].(map[string]any)
+		assert.Equal(t, "lec-"+tc.model, body["model"])
+		assert.Equal(t, tc.duration, body["duration"], tc.model)
+		assert.Equal(t, tc.resolution, body["resolution"], tc.model)
+		assert.Equal(t, images, body["images"], "reference order must survive normalization")
+		facts := lecAPIHook(t, plugin, "extractUsage", ctx)
+		assert.Equal(t, tc.duration, facts["seconds"], tc.model)
+		assert.Equal(t, tc.resolution, facts["resolution"], tc.model)
+	}
+	description := plugin.Meta.ModelDefaults["ad-minimax-h3-replace-multi"].Description["zh"]
+	for _, text := range []string{
+		"prompt：提示词，字符串类型，用来描述生成内容",
+		"subjects：主体列表，数组类型，支持 1–9 个主体",
+		"duration：生成时长，整数类型，支持 5–25 秒，默认 5 秒",
+		"aspect_ratio：画面比例，可选 16:9 / 9:16，默认 9:16",
+		"images：参考图片，数组类型，必填，支持 1–9 张，链接须使用公网 HTTPS 地址",
+		"videos：参考视频，数组类型，必填，需传入 1 段，链接须使用公网 HTTPS 地址",
+		"参考素材按传入顺序使用，请保持顺序",
+	} {
+		assert.Contains(t, description, text)
+	}
+	assert.NotContains(t, description, "* 为必填")
 }
 
 func TestLecAPIMidjourneySelectsAndBillsActionsFromReferenceImages(t *testing.T) {
@@ -484,10 +560,18 @@ func TestLecAPIImageRoutesRetainOnlyAsyncJobs(t *testing.T) {
 			assert.False(t, *route.RetainResult, "synchronous Base64 results may exceed persisted task limits")
 		}
 	}
-	ctx := lecAPIContext("ty-seedream-5-pro", map[string]any{"prompt": "boat"})
-	ctx["upstream"] = map[string]any{"kind": "new_api"}
-	assert.Equal(t, "https://lec.example/lecapi/v1/images/tasks", lecAPIHook(t, plugin, "buildSubmitRequest", ctx)["url"])
-	ctx = lecAPIContext("ac-image-2", map[string]any{"prompt": "boat"})
+	for _, name := range []string{"ty-seedream-5-pro", "ty-seedream-5-5"} {
+		ctx := lecAPIContext(name, map[string]any{"prompt": "boat"})
+		parsed := lecAPIHook(t, plugin, "parseSubmitResponse", ctx, map[string]any{"body": map[string]any{"id": "seedream-job", "status": "queued"}})
+		assert.Equal(t, "seedream-job", parsed["taskId"])
+		assert.Equal(t, true, parsed["state"].(map[string]any)["queryable"])
+		assert.NotContains(t, parsed, "immediate")
+		ctx["upstream"] = map[string]any{"kind": "new_api"}
+		assert.Equal(t, "https://lec.example/lecapi/v1/images/tasks", lecAPIHook(t, plugin, "buildSubmitRequest", ctx)["url"])
+		ctx["taskId"] = parsed["taskId"]
+		assert.Equal(t, "https://lec.example/lecapi/v1/images/seedream-job", lecAPIHook(t, plugin, "buildQueryRequest", ctx)["url"])
+	}
+	ctx := lecAPIContext("ac-image-2", map[string]any{"prompt": "boat"})
 	parsed := lecAPIHook(t, plugin, "parseSubmitResponse", ctx, map[string]any{"body": map[string]any{"data": []any{map[string]any{"url": "https://media.example/image.png"}}}})
 	content := map[string]any{"model": "ac-image-2", "upstreamModel": "ac-image-2", "baseUrl": "https://lec.example", "artifactKey": "image-1", "upstreamTaskId": parsed["taskId"], "state": parsed["state"], "data": parsed["taskData"]}
 	descriptor := lecAPIHook(t, plugin, "buildContentRequest", content)
@@ -529,6 +613,14 @@ func TestLecAPIPollingRejectsUnknownAndMissingArtifacts(t *testing.T) {
 	assert.Equal(t, "task_upstream", parsed["taskId"])
 	ctx["upstream"] = map[string]any{"kind": "new_api"}
 	assert.Equal(t, "https://lec.example/lecapi/v1/videos/upstream%2Fid", lecAPIHook(t, plugin, "buildQueryRequest", ctx)["url"])
+	for _, name := range []string{"hc-seedance-2-5-3010", "vg-seedance-2-0-full-933", "vg-seedance-2-0-mini-cc", "vg-seedance-2-5-pa"} {
+		ctx["model"], ctx["upstreamModel"] = "historical-video-alias", "lec-"+name
+		assert.Equal(t, "https://lec.example/lecapi/v1/videos/upstream%2Fid", lecAPIHook(t, plugin, "buildQueryRequest", ctx)["url"])
+		result := lecAPIHook(t, plugin, "parseTaskResult", ctx, map[string]any{"status": "completed", "url": "https://media.example/video.mp4"})
+		assert.Equal(t, "SUCCESS", result["status"], "retiring a model must preserve historical task polling: %s", name)
+		facts := lecAPIHook(t, plugin, "extractUsageOnComplete", ctx, result, map[string]any{"seconds": 5})
+		assert.Equal(t, float64(5), facts["seconds"], "historical tasks must retain completion usage: %s", name)
+	}
 }
 
 func TestLecAPIChargesThePublishedBillingUnit(t *testing.T) {
@@ -550,6 +642,15 @@ func TestLecAPIChargesThePublishedBillingUnit(t *testing.T) {
 		{"vp-seedance-2-5-301010-49", map[string]any{"prompt": "boat", "duration": 7}, 6.6},
 		{"ms-minimax-h3", map[string]any{"prompt": "boat", "duration": 16, "resolution": "480p"}, 2.688},
 		{"ms-minimax-h3", map[string]any{"prompt": "boat", "duration": 16, "resolution": "768P"}, 3.84},
+		{"ap-muse-video-720-10s", map[string]any{"prompt": "boat"}, 0.6},
+		{"jl-seedance-2-0-fast-auto", map[string]any{"prompt": "boat", "images": []any{"https://media.example/ref.png"}, "resolution": "480p"}, 1.8},
+		{"jl-seedance-2-0-full", map[string]any{"prompt": "boat", "images": []any{"https://media.example/ref.png"}}, 3.6},
+		{"mf-seedance-2-5-t1", map[string]any{"prompt": "boat", "duration": 30}, 9},
+		{"mg-seedance-2-5", map[string]any{"prompt": "boat", "duration": 30}, 6.6},
+		{"ty-seedance-2-5-1050-flxd", map[string]any{"prompt": "boat", "images": []any{"https://media.example/ref.png"}}, 4.8},
+		{"ty-seedream-5-5", map[string]any{"prompt": "boat", "resolution": "2K"}, 0.156},
+		{"vw-seedance-2-0-fast", map[string]any{"prompt": "boat", "images": []any{"https://media.example/ref.png"}}, 1.56},
+		{"ac-seedream-5-0-pro", map[string]any{"prompt": "boat", "resolution": "4K"}, 0.18},
 	} {
 		facts := lecAPIHook(t, plugin, "extractUsage", lecAPIContext(tc.model, tc.body))
 		defaults, ok := plugin.Meta.DefaultsForModel(tc.model)
@@ -559,7 +660,7 @@ func TestLecAPIChargesThePublishedBillingUnit(t *testing.T) {
 		require.NoError(t, err)
 		assert.InDelta(t, tc.want, cost, 1e-12)
 	}
-	for _, modelName := range []string{"ac-seedance-2-0-fast-2-720p", "image2", "nano-banana-2", "vp-seedance-2-9-301010"} {
+	for _, modelName := range []string{"ac-seedance-2-0-fast-2-720p"} {
 		defaults, ok := plugin.Meta.DefaultsForModel(modelName)
 		require.True(t, ok)
 		assert.Empty(t, defaults.BillingExpr, "unpublished prices must not be guessed: %s", modelName)
@@ -625,9 +726,19 @@ func TestLecAPIMaterialUploadsKeepFileRefsAndRejectCountBypasses(t *testing.T) {
 	ctx["files"].([]any)[0].(map[string]any)["size"] = 52428800
 	_, err := plugin.Engine.Call(t.Context(), "buildSubmitRequest", ctx)
 	require.ErrorContains(t, err, "size limit")
-	ctx = lecAPIContext("mf-seedance-2-5-30ref", map[string]any{"prompt": "boat", "images": strings.Split(strings.Repeat("https://media.example/a.png,", 30), ",")[:30], "audios": []any{"https://media.example/a.mp3"}})
+	materials := map[string]any{"prompt": "boat"}
+	for field, count := range map[string]int{"images": 10, "videos": 5, "audios": 5, "documents": 1} {
+		items := make([]string, count)
+		for i := range items {
+			items[i] = "https://media.example/reference"
+		}
+		materials[field] = items
+	}
+	ctx = lecAPIContext("am-wan-3-0", materials)
 	_, err = plugin.Engine.Call(t.Context(), "buildSubmitRequest", ctx)
 	require.ErrorContains(t, err, "combined reference")
+	delete(materials, "documents")
+	assert.Len(t, lecAPIHook(t, plugin, "buildSubmitRequest", ctx)["body"].(map[string]any)["images"], 10)
 }
 
 func TestLecAPIOmitsHostCountForModelsWithoutAnUpstreamCountParameter(t *testing.T) {
@@ -771,9 +882,18 @@ func TestLecAPIContentRefreshRejectsInvalidResults(t *testing.T) {
 func TestLecAPISourceVideoBillingUsesMeasuredDuration(t *testing.T) {
 	plugin := loadLecAPIPlugin(t)
 	video := yueqiReferenceVideoFixture(t, 3.5)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	longVideo := yueqiReferenceVideoFixture(t, 1000.25)
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Empty(t, r.Header.Get("Authorization"))
 		w.Header().Set("Content-Type", "video/mp4")
+		if r.URL.Path == "/broken.mp4" {
+			_, _ = w.Write([]byte("invalid video"))
+			return
+		}
+		if r.URL.Path == "/long.mp4" {
+			_, _ = w.Write(longVideo)
+			return
+		}
 		_, _ = w.Write(video)
 	}))
 	defer server.Close()
@@ -782,6 +902,10 @@ func TestLecAPISourceVideoBillingUsesMeasuredDuration(t *testing.T) {
 	fetch.EnableSSRFProtection = false
 	service.InitHttpClient()
 	t.Cleanup(func() { *fetch = previous; service.InitHttpClient() })
+	client := service.GetHttpClient()
+	previousTransport := client.Transport
+	client.Transport = server.Client().Transport
+	t.Cleanup(func() { client.Transport = previousTransport })
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", nil)
 	c.Set("task_request", map[string]any{"resolution": "1080p", "videos": []any{server.URL + "/source.mp4"}})
@@ -796,6 +920,45 @@ func TestLecAPISourceVideoBillingUsesMeasuredDuration(t *testing.T) {
 	cost, _, err := billingexpr.RunExprWithRequest(defaults.BillingExpr, billingexpr.TokenParams{}, billingexpr.RequestInput{Usage: facts})
 	require.NoError(t, err)
 	assert.InDelta(t, 0.288, cost, 1e-12)
+	for _, tc := range []struct {
+		model string
+		price float64
+	}{
+		{"aj-wan-3-0", 0.384}, {"aj-wan-3-0-prime", 0.6},
+	} {
+		t.Run(tc.model, func(t *testing.T) {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", nil)
+			c.Set("task_request", map[string]any{"prompt": "boat", "metadata": map[string]any{
+				"duration": 7, "videos": []any{server.URL + "/first.mp4", server.URL + "/second.mp4"},
+			}})
+			info := &relaycommon.RelayInfo{TaskRelayInfo: &relaycommon.TaskRelayInfo{}, OriginModelName: "local-wan-alias", ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: tc.model, ApiKey: "test-key", ChannelBaseUrl: "https://lec.example"}}
+			adaptor := taskplugin.New(plugin)
+			adaptor.Init(info)
+			facts, err := adaptor.ExtractUsageFactsValidated(c, info)
+			require.NoError(t, err)
+			assert.Equal(t, float64(7), facts["seconds"])
+			assert.Equal(t, float64(8), facts["reference_seconds"], "each 3.5-second clip rounds up separately")
+			defaults, ok := plugin.Meta.DefaultsForModel(tc.model)
+			require.True(t, ok)
+			cost, _, err := billingexpr.RunExprWithRequest(defaults.BillingExpr, billingexpr.TokenParams{}, billingexpr.RequestInput{Usage: facts})
+			require.NoError(t, err)
+			assert.InDelta(t, tc.price*15, cost, 1e-12)
+			completion := lecAPIHook(t, plugin, "extractUsageOnComplete", lecAPIContext(tc.model, nil), map[string]any{"status": "SUCCESS"}, map[string]any{"seconds": 5})
+			maps.Copy(facts, completion)
+			cost, _, err = billingexpr.RunExprWithRequest(defaults.BillingExpr, billingexpr.TokenParams{}, billingexpr.RequestInput{Usage: facts})
+			require.NoError(t, err)
+			assert.InDelta(t, tc.price*13, cost, 1e-12, "completion preserves the frozen reference duration")
+			for _, videos := range [][]any{
+				{server.URL + "/broken.mp4"},
+				{server.URL + "/long.mp4", server.URL + "/long.mp4", server.URL + "/long.mp4", server.URL + "/long.mp4"},
+			} {
+				c.Set("task_request", map[string]any{"prompt": "boat", "videos": videos})
+				_, err := adaptor.ExtractUsageFactsValidated(c, info)
+				require.Error(t, err, "unmeasurable or excessive reference duration must fail before reservation")
+			}
+		})
+	}
 }
 
 type lecAPIFixtureTransport func(*http.Request) (*http.Response, error)
@@ -838,7 +1001,7 @@ func TestLecAPIHostReservesAndSettlesDefaultPricesWithoutSavedConfiguration(t *t
 			pinned := jsplugin.PinnedPlugin{Plugin: plugin, Generation: jsplugin.DefaultRegistry.Generation()}
 			if tc.update {
 				updated := strings.Replace(source, "price * 1.2", "price * 2.4", 1)
-				updated = strings.Replace(updated, `version: "1.0.6"`, `version: "1.0.7"`, 1)
+				updated = strings.Replace(updated, `version: "1.1.0"`, `version: "1.1.1"`, 1)
 				newPlugin, err := jsplugin.DefaultRegistry.Register(updated, jsplugin.Options{Key: "lecapi"})
 				require.NoError(t, err)
 				t.Cleanup(func() { require.NoError(t, jsplugin.DefaultRegistry.Unregister("lecapi")) })
