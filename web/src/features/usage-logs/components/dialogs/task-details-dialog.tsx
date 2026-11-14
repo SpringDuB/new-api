@@ -36,6 +36,7 @@ import { TaskArtifacts } from '../task-artifacts'
 import {
   TaskClientRequestDetails,
   TaskResponseDetails,
+  TaskUpstreamResponseDetails,
 } from '../task-client-request'
 
 function DetailRow(props: {
@@ -263,6 +264,10 @@ export function TaskDetailsDialog(props: TaskDetailsDialogProps) {
                 ) : null}
               </>
             ) : null}
+            <TaskUpstreamResponseDetails
+              taskId={props.log.detail_id || props.log.task_id}
+              open={props.open}
+            />
           </DetailSection>
         ) : null}
 

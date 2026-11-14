@@ -13,6 +13,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
@@ -502,6 +503,20 @@ func videoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *d
 	}
 
 	isOpenAIVideoAPI := strings.HasPrefix(c.Request.RequestURI, "/v1/videos/")
+	if !isOpenAIVideoAPI && originTask.Status == model.TaskStatusSuccess && service.GetTaskArtifactStore().Enabled() {
+		defer func() {
+			if taskResp != nil || len(respBody) == 0 {
+				return
+			}
+			value, err := service.ApplyTaskVideoDelivery(c.Request.Context(), originTask, common.RawMessage(respBody))
+			if err == nil {
+				respBody = value.(common.RawMessage)
+			}
+			if err != nil {
+				taskResp = service.TaskErrorWrapperLocal(errors.New(i18n.T(c, i18n.MsgRelayVideoDeliveryFailed)), "video_delivery_failed", http.StatusBadGateway)
+			}
+		}()
+	}
 
 	// Gemini/Vertex 支持实时查询：用户 fetch 时直接从上游拉取最新状态
 	if realtimeResp := tryRealtimeFetch(originTask, isOpenAIVideoAPI); len(realtimeResp) > 0 {
@@ -519,6 +534,10 @@ func videoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *d
 		if converter, ok := adaptor.(channel.OpenAIVideoConverter); ok {
 			openAIVideoData, err := converter.ConvertToOpenAIVideo(originTask)
 			if err != nil {
+				if errors.Is(err, service.ErrTaskVideoDelivery) {
+					taskResp = service.TaskErrorWrapperLocal(errors.New(i18n.T(c, i18n.MsgRelayVideoDeliveryFailed)), "video_delivery_failed", http.StatusBadGateway)
+					return
+				}
 				taskResp = service.TaskErrorWrapper(err, "convert_to_openai_video_failed", http.StatusInternalServerError)
 				return
 			}

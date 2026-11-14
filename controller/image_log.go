@@ -14,6 +14,7 @@ import (
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
+	pluginruntime "github.com/QuantumNous/new-api/pkg/jsplugin"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/service"
@@ -110,7 +111,7 @@ func (w *imageLogResponseWriter) captureEvent(data []byte) {
 	w.streamError = w.streamError || eventError
 	// Ignore text/reasoning/tool completion events. Ark partial_succeeded is
 	// a complete image, unlike progressive partial_image or delta events.
-	relevant := eventError || typ == "image_generation.partial_succeeded" || typ == "image_generation.completed" || typ == "image_edit.completed" ||
+	relevant := eventError || typ == "response.completed" || typ == "response.incomplete" || typ == "image_generation.partial_succeeded" || typ == "image_generation.completed" || typ == "image_edit.completed" ||
 		bytes.Contains(data, []byte(`"image_generation_call"`)) && bytes.Contains(data, []byte(`"result"`)) ||
 		bytes.Contains(data, []byte(`"b64_json"`)) || bytes.Contains(data, []byte(`"image_url"`)) ||
 		bytes.Contains(data, []byte(`"inlineData"`)) || bytes.Contains(data, []byte(`"inline_data"`)) ||
@@ -177,15 +178,26 @@ func beginImageLogCapture(c *gin.Context) func() {
 		taskValue, _ := c.Get(imageLogTaskContextKey)
 		task, _ := taskValue.(*model.Task)
 		intent := imageLogRequestIntent(c) || task != nil && model.IsImageTaskAction(task.Action)
-		if task != nil && !intent {
+		if task != nil && (!intent || task.Status != model.TaskStatusSuccess && task.Status != model.TaskStatusFailure) {
+			snapshot := service.BuildTaskResponseSnapshot(c, body, writer.Status(), writer.Header().Get("Content-Type"), kind)
+			if writer.omitted {
+				snapshot.Body = nil
+				snapshot.BodyOmitted = "size_limit"
+			}
+			submission := task.Status != model.TaskStatusSuccess && task.Status != model.TaskStatusFailure
+			if value, ok := c.Get(pluginruntime.ContextKeyProtocolRequest); ok {
+				if protocol, ok := value.(pluginruntime.ProtocolRequestContext); ok && protocol.Protocol == "openai_responses" {
+					submission = task.PrivateData.ResponsesBackground && !writer.stream
+				}
+			}
+			if err := model.UpdateTaskResponseLog(context.WithoutCancel(c.Request.Context()), task, snapshot, submission); err != nil {
+				logger.LogError(c, "Failed to capture task client response")
+			}
 			return
 		}
 		artifacts := service.ExtractImageResponseArtifacts(body, intent)
 		if !intent && len(artifacts) == 0 {
 			return
-		}
-		if task != nil && task.Status != model.TaskStatusSuccess && task.Status != model.TaskStatusFailure {
-			return // the task poller owns the mutable result; expose it on demand
 		}
 		infoValue, _ := c.Get(imageLogRelayInfoContextKey)
 		info, _ := infoValue.(*relaycommon.RelayInfo)
@@ -322,8 +334,16 @@ func GetDashboardTaskResponse(c *gin.Context) {
 	}
 	snapshot := task.PrivateData.Response
 	source := "client_response"
-	if snapshot == nil && len(task.Data) > 0 {
+	queryPath := ""
+	generatedAt := int64(0)
+	unavailable := false
+	if c.Query("source") == "upstream_result" {
+		if c.GetInt("token_id") != 0 || c.GetInt("role") < common.RoleAdminUser {
+			writeTaskArtifactError(c, http.StatusForbidden, "forbidden", "Administrator access required")
+			return
+		}
 		source = "upstream_result"
+		snapshot = nil
 		secrets := []string{task.PrivateData.Key}
 		if channel, channelErr := model.CacheGetChannel(task.ChannelId); channelErr == nil {
 			for key := range strings.SplitSeq(channel.Key, "\n") {
@@ -332,9 +352,29 @@ func GetDashboardTaskResponse(c *gin.Context) {
 				}
 			}
 		}
-		snapshot = service.BuildTaskResponseSnapshot(c, task.Data, 0, "application/json", "json", secrets...)
+		if len(task.Data) > 0 {
+			snapshot = service.BuildTaskResponseSnapshot(c, task.Data, 0, "application/json", "json", secrets...)
+			snapshot.CapturedAt = 0 // The original upstream capture time was not recorded.
+		}
+	} else if snapshot == nil {
+		source = "current_platform_result"
+		snapshot, queryPath, err = buildDashboardTaskQueryResponse(c, task)
+		if err != nil {
+			unavailable = true
+			logger.LogWarn(c, "Task platform response is unavailable")
+		}
+		if snapshot != nil {
+			generatedAt = time.Now().Unix()
+		}
 	}
-	common.ApiSuccess(c, gin.H{"recorded": snapshot != nil, "snapshot": snapshot, "source": source, "max_bytes": service.MaxTaskClientRequestSnapshotBytes, "retention": "task_lifetime"})
+	response := gin.H{"recorded": snapshot != nil, "snapshot": snapshot, "source": source, "max_bytes": service.MaxTaskClientRequestSnapshotBytes, "retention": "task_lifetime"}
+	if source != "upstream_result" {
+		response["submission_snapshot"] = task.PrivateData.SubmissionResponse
+		response["query_path"] = queryPath
+		response["generated_at"] = generatedAt
+		response["unavailable"] = unavailable
+	}
+	common.ApiSuccess(c, response)
 }
 
 func GetAllImageLogs(c *gin.Context)  { getImageLogs(c, true) }

@@ -1,13 +1,136 @@
-// LecAPI public media catalog and documentation snapshot: 2026-11-12.
+// LecAPI public media catalog and documentation snapshot: 2026-11-14.
 // Sources: https://api.lecapi.net/api/media-models/catalog, /api/pricing, and /docs.
 // Static media kinds take precedence over inconsistent /v1/models labels.
 // User pricing policy: published CNY price +20%, platform CNY/USD units 1:1.
 // Each expression contains the final marked-up numeric coefficient, with no FX
 // conversion or hidden multiplier. Rounding only removes binary float noise.
-// MF30ref uses its explicit 720p tier (5.5), rather than the stale 5-CNY summary.
+// Retired profiles remain readable for historical tasks but cannot accept new submissions.
 // TinySnow Image 2 follows its Base64-only docs rather than the url capability.
 // Missing or unverifiable prices remain unconfigured.
 const MODELS = {
+  "lec-hc-seedance-2-5-3010": {
+    retired: true,
+    kind: "video",
+    name: "Seedance 2.5 3010（HC）",
+    icon: "Doubao.Color",
+    tags: ["3010", "multi", "per_request", "native", "image", "audio"],
+    parameters: {
+      prompt: { type: "string", required: true, maxLength: 5000 },
+      duration: { type: "integer", required: true, default: 5, min: 4, max: 30, step: 1 },
+      resolution: { type: "enum", default: "720p", values: ["480p", "720p"] },
+      aspect_ratio: { type: "enum", default: "16:9", values: ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"] },
+      images: { type: "array", constraints: { max_items: 30, url_schemes: ["https"] } },
+      audios: { type: "array", constraints: { max_items: 10, url_schemes: ["https"] } },
+    },
+    billing: { billing_unit: "request", price_per_request: 6, resolution_prices: { "480p": 4, "720p": 6 } },
+  },
+  "lec-jl-seedance-2-0-fast-auto": {
+    kind: "video",
+    name: "Seedance 2.0 Fast 933（JL）",
+    icon: "Doubao.Color",
+    tags: ["933", "per_request", "native", "image", "video", "audio"],
+    parameters: {
+      prompt: { type: "string", required: true },
+      duration: { type: "integer", required: true, default: 5, min: 4, max: 15, step: 1 },
+      resolution: { type: "enum", default: "720p", values: ["480p", "720p"] },
+      aspect_ratio: { type: "enum", default: "16:9", values: ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"] },
+      images: { type: "array", required: true, constraints: { min_items: 1, max_items: 9 } },
+      videos: { type: "array", constraints: { max_items: 3 } },
+      audios: { type: "array", constraints: { max_items: 3 } },
+    },
+    billing: { billing_unit: "request", price_per_request: 2, resolution_prices: { "480p": 1.5, "720p": 2 } },
+  },
+  "lec-jl-seedance-2-0-full": {
+    kind: "video",
+    name: "Seedance 2.0 满血 933（JL）",
+    icon: "Doubao.Color",
+    tags: ["933", "per_request", "native", "image", "video", "audio"],
+    parameters: {
+      prompt: { type: "string", required: true, maxLength: 8000 },
+      duration: { type: "integer", required: true, default: 5, min: 4, max: 15, step: 1 },
+      resolution: { type: "enum", default: "720p", values: ["480p", "720p"] },
+      aspect_ratio: { type: "enum", default: "16:9", values: ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"] },
+      images: { type: "array", required: true, constraints: { min_items: 1, max_items: 9 } },
+      videos: { type: "array", constraints: { max_items: 3 } },
+      audios: { type: "array", constraints: { max_items: 3 } },
+    },
+    billing: { billing_unit: "request", price_per_request: 3, resolution_prices: { "480p": 2, "720p": 3 } },
+  },
+  "lec-mf-seedance-2-5-t1": {
+    kind: "video",
+    name: "Seedance 2.5 T1（MF）",
+    icon: "Doubao.Color",
+    tags: ["t1", "per_request", "480p", "720p", "native", "image", "video", "audio"],
+    parameters: {
+      prompt: { type: "string", required: true, maxLength: 5000 },
+      duration: { type: "integer", default: 4, min: 4, max: 30, step: 1 },
+      aspect_ratio: { type: "enum", default: "16:9", values: ["16:9", "9:16", "1:1", "4:3", "3:4"] },
+      resolution: { type: "enum", default: "720p", values: ["480p", "720p"] },
+      images: { type: "array", constraints: { max_items: 30, url_schemes: ["https"] } },
+      videos: { type: "array", constraints: { max_items: 10, url_schemes: ["https"] } },
+      audios: { type: "array", constraints: { max_items: 10, url_schemes: ["https"] } },
+    },
+    billing: { billing_unit: "request", price_per_request: 7.5, resolution_prices: { "480p": 4.5, "720p": 7.5 } },
+  },
+  "lec-mg-seedance-2-5": {
+    kind: "video",
+    name: "Seedance 2.5（MG）",
+    icon: "Doubao.Color",
+    tags: ["720p", "image", "video", "audio", "native", "per_request"],
+    parameters: {
+      prompt: { type: "string", required: true },
+      duration: { type: "integer", required: true, default: 5, min: 5, max: 30, step: 1 },
+      aspect_ratio: { type: "enum", default: "16:9", values: ["21:9", "16:9", "4:3", "1:1", "3:4", "9:16"] },
+      images: { type: "array", constraints: { max_items: 30, url_schemes: ["https"] } },
+      videos: { type: "array", constraints: { max_items: 10, url_schemes: ["https"] } },
+      audios: { type: "array", constraints: { max_items: 10, url_schemes: ["https"] } },
+      resolution: { type: "enum", default: "720p", values: ["720p"] },
+    },
+    billing: { billing_unit: "request", price_per_request: 5.5, resolution_prices: { "720p": 5.5 } },
+  },
+  "lec-ty-seedance-2-5-1050-flxd": {
+    kind: "video",
+    name: "Seedance 2.5 1050 FLXD（TY）",
+    icon: "Doubao.Color",
+    tags: ["full", "1050", "multi", "image", "audio", "native", "per_request"],
+    parameters: {
+      prompt: { type: "string", required: true },
+      duration: { type: "integer", required: true, default: 5, min: 5, max: 30, step: 1 },
+      aspect_ratio: { type: "enum", default: "16:9", values: ["16:9", "9:16"] },
+      resolution: { type: "enum", default: "480p", values: ["480p", "720p"] },
+      images: { type: "array", required: true, constraints: { min_items: 1, max_items: 10, url_schemes: ["http", "https"] } },
+      videos: { type: "array", constraints: { max_items: 0, url_schemes: ["http", "https"] } },
+      audios: { type: "array", constraints: { max_items: 5, url_schemes: ["http", "https"] } },
+    },
+    billing: { billing_unit: "request", price_per_request: 4, resolution_prices: { "480p": 4, "720p": 6 } },
+  },
+  "lec-ty-seedream-5-5": {
+    kind: "image",
+    name: "Seedream 5.5（TY）",
+    icon: "Doubao.Color",
+    tags: ["image", "aspect_ratio", "per_request"],
+    parameters: {
+      prompt: { type: "string", required: true },
+      resolution: { type: "enum", default: "1K", values: ["1K", "2K"] },
+      aspect_ratio: { type: "enum", default: "1:1", values: ["16:9", "9:16", "1:1", "4:3", "3:4"] },
+      images: { type: "array", constraints: { max_items: 8, url_schemes: ["http", "https"] } },
+    },
+    billing: { billing_unit: "request", price: 0.13 },
+  },
+  "lec-vw-seedance-2-0-fast": {
+    kind: "video",
+    name: "Seedance 2.0 Fast（VW）",
+    icon: "Doubao.Color",
+    tags: ["fast", "image", "per_request"],
+    parameters: {
+      prompt: { type: "string", required: true },
+      aspect_ratio: { type: "enum", default: "auto", values: ["auto", "16:9", "9:16", "1:1", "4:3", "3:4", "21:9"] },
+      images: { type: "array", required: true, constraints: { min_items: 1, max_items: 9, url_schemes: ["https"], max_bytes: 15728640 } },
+      resolution: { type: "enum", default: "720p", values: ["720p"] },
+      duration: { type: "integer", default: 15, values: [15], min: 15, max: 15 },
+    },
+    billing: { billing_unit: "request", price_per_request: 1.3 },
+  },
   "lec-ac-image-2-5-flare": {
     kind: "image",
     name: "Image 2.5 Flare（AC）",
@@ -114,6 +237,7 @@ const MODELS = {
   },
   "lec-aj-wan-3-0": {
     kind: "video",
+    bill_reference_videos: true,
     name: "Wan 3.0（AJ）",
     icon: "AlibabaCloud.Color",
     tags: ["fast", "multi", "image", "video", "audio", "per_second"],
@@ -130,6 +254,7 @@ const MODELS = {
   },
   "lec-aj-wan-3-0-prime": {
     kind: "video",
+    bill_reference_videos: true,
     name: "Wan 3.0 Prime（AJ）",
     icon: "AlibabaCloud.Color",
     tags: ["full", "multi", "image", "video", "audio", "per_second"],
@@ -170,7 +295,8 @@ const MODELS = {
     tags: ["per_second", "720p", "image"],
     parameters: {
       prompt: { type: "string", required: true, maxLength: 10000 },
-      duration: { type: "integer", required: true, default: 5, values: [5, 10, 20, 30, 40, 50, 60], min: 5, max: 60 },
+      duration: { type: "integer", required: true, default: 10, values: [10, 20, 30, 40, 50, 60], min: 10, max: 60 },
+      aspect_ratio: { type: "enum", required: true, default: "16:9", values: ["1:1", "16:9", "9:16"] },
       images: { type: "array", constraints: { max_items: 4, url_schemes: ["https"] } },
       first_frame: { type: "string", constraints: { url_schemes: ["https"] } },
       last_frame: { type: "string", constraints: { url_schemes: ["https"] } },
@@ -181,6 +307,7 @@ const MODELS = {
     billing: { billing_unit: "second", resolution_prices: { "720p": 0.05 }, equivalent_second_price: 0.05 },
   },
   "lec-ap-seedance-2-0": {
+    retired: true,
     kind: "video",
     name: "Seedance 2.0（AP）",
     icon: "Doubao.Color",
@@ -212,6 +339,7 @@ const MODELS = {
     billing: { billing_unit: "second", resolution_prices: { "1080p": 1.75, "480p": 0.32, "720p": 0.45 }, equivalent_second_price: 0.32 },
   },
   "lec-haya-seedance-2-0-vc-720p": {
+    retired: true,
     kind: "video",
     name: "Seedance 2.0 VC（HAYA）",
     icon: "Doubao.Color",
@@ -293,6 +421,7 @@ const MODELS = {
     billing: { billing_unit: "request", resolution_prices: { "720p": 3.5 }, price_per_request: 3.5 },
   },
   "lec-jl-wan-3-0-1055-720p": {
+    retired: true,
     kind: "video",
     name: "Wan 3.0 1055（JL）",
     icon: "AlibabaCloud.Color",
@@ -354,6 +483,7 @@ const MODELS = {
     billing: { billing_unit: "request", resolution_prices: { "1080p": 1.5, "360p": 1.5, "4k": 1.5, "720p": 1.5 }, price_per_request: 1.5 },
   },
   "lec-mf-seedance-2-5-30ref": {
+    retired: true,
     kind: "video",
     name: "Seedance 2.5 30参（MF）",
     icon: "Doubao.Color",
@@ -401,6 +531,7 @@ const MODELS = {
     billing: { billing_unit: "second", resolution_prices: { "480p": 0.3, "720p": 0.37 }, equivalent_second_price: 0.37 },
   },
   "lec-mm-seedance-2-5": {
+    retired: true,
     kind: "video",
     name: "Seedance 2.5（MM）",
     icon: "Doubao.Color",
@@ -418,6 +549,7 @@ const MODELS = {
     max_reference_total: 50,
   },
   "lec-mm-seedance-2-5-full": {
+    retired: true,
     kind: "video",
     name: "Seedance 2.5 满血（MM）",
     icon: "Doubao.Color",
@@ -499,6 +631,7 @@ const MODELS = {
     billing: { billing_unit: "request", price_per_request: 0.132, price_per_image: 0.132 },
   },
   "lec-nzt-wan-3-0-prime": {
+    retired: true,
     kind: "video",
     name: "Wan 3.0 Prime（NZT）",
     icon: "AlibabaCloud.Color",
@@ -787,6 +920,7 @@ const MODELS = {
     billing: { billing_unit: "request", resolution_prices: { "720p": 4 }, price_per_request: 4 },
   },
   "lec-vg-seedance-2-0-full-933": {
+    retired: true,
     kind: "video",
     name: "Seedance 2.0 满血 933（VG）",
     icon: "Doubao.Color",
@@ -834,6 +968,7 @@ const MODELS = {
     billing: { billing_unit: "request", resolution_prices: { "720p": 2.5 }, price_per_request: 2.5 },
   },
   "lec-vg-seedance-2-0-mini-cc": {
+    retired: true,
     kind: "video",
     name: "Seedance 2.0 Mini（VG）",
     icon: "Doubao.Color",
@@ -865,6 +1000,7 @@ const MODELS = {
     billing: { billing_unit: "request", resolution_prices: { "720p": 3 }, price_per_request: 3 },
   },
   "lec-vg-seedance-2-5-pa": {
+    retired: true,
     kind: "video",
     name: "Seedance 2.5 PA（VG）",
     icon: "Doubao.Color",
@@ -927,6 +1063,7 @@ const MODELS = {
     billing: { billing_unit: "request", resolution_prices: { "720p": 4 }, price_per_request: 4 },
   },
   "lec-mj-seedance-2-5-bd-720p": {
+    retired: true,
     kind: "video",
     name: "Seedance 2.5（MJ）",
     icon: "Doubao.Color",
@@ -943,6 +1080,7 @@ const MODELS = {
     billing: { billing_unit: "request", resolution_prices: { "720p": 5.5 }, price_per_request: 5.5 },
   },
   "lec-mj-seedance-2-5-zd": {
+    retired: true,
     kind: "video",
     name: "Seedance 2.5（MJ）",
     icon: "Doubao.Color",
@@ -1059,7 +1197,7 @@ const MODELS = {
     parameters: {
       prompt: { type: "string", required: true },
       aspect_ratio: { type: "enum", default: "16:9", values: ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"] },
-      resolution: { type: "enum", default: "1K", values: ["1K", "2K"] },
+      resolution: { type: "enum", default: "1K", values: ["1K", "2K", "4K"] },
       output_format: { type: "enum", default: "jpeg", values: ["jpeg", "png"] },
       images: {
         type: "array",
@@ -1180,6 +1318,7 @@ const MODELS = {
     billing: { billing_unit: "request", price_per_image: 0.05, price_per_request: 0.05 },
   },
   "lec-vv-seedance-2-5-r2": {
+    retired: true,
     kind: "video",
     name: "Seedance 2.5 R2（VV）",
     icon: "Doubao.Color",
@@ -1199,6 +1338,7 @@ const MODELS = {
     billing: { billing_unit: "request", resolution_prices: { "480p": 5.3 }, price_per_request: 5.3 },
   },
   "lec-vv-seedance-2-5-r2-plus": {
+    retired: true,
     kind: "video",
     name: "Seedance 2.5 R2 Plus（VV）",
     icon: "Doubao.Color",
@@ -1268,6 +1408,7 @@ const MODELS = {
     billing: { billing_unit: "request", price_per_request: 0.1 },
   },
   image2: {
+    retired: true,
     kind: "image",
     name: "Image generation",
     icon: "OpenAI.Color",
@@ -1283,6 +1424,7 @@ const MODELS = {
     billing: {},
   },
   "nano-banana-2": {
+    retired: true,
     kind: "image",
     name: "Image generation Pro",
     icon: "Gemini.Color",
@@ -1297,6 +1439,7 @@ const MODELS = {
     billing: {},
   },
   "lec-vp-seedance-2-9-301010": {
+    retired: true,
     kind: "video",
     name: "Seedance 2.9 301010 (VP)",
     icon: "Doubao.Color",
@@ -1329,7 +1472,7 @@ for (const vendorModel of Object.keys(MODELS)) {
   // Reuse the exact spelling already shared by Hailuo's host binding.
   const publicModel = vendorModel === "lec-minimax-h3" ? "MiniMax-H3" : vendorModel.startsWith("lec-") ? vendorModel.slice(4) : vendorModel;
   if (Object.prototype.hasOwnProperty.call(MODEL_MAPPING, publicModel)) throw new Error("LecAPI public model id collision: " + publicModel);
-  MODEL_MAPPING[publicModel] = vendorModel;
+  if (!MODELS[vendorModel].retired) MODEL_MAPPING[publicModel] = vendorModel;
   PUBLIC_MODEL_NAMES[vendorModel] = publicModel;
   for (const name of [publicModel, vendorModel]) {
     const lookup = name.toLowerCase();
@@ -1340,7 +1483,7 @@ for (const vendorModel of Object.keys(MODELS)) {
 }
 const IMAGE_NAMES = Object.keys(MODEL_MAPPING).filter((name) => MODELS[MODEL_MAPPING[name]].kind === "image");
 const VIDEO_NAMES = Object.keys(MODEL_MAPPING).filter((name) => MODELS[MODEL_MAPPING[name]].kind === "video");
-const ASYNC_IMAGE_MODELS = ["lec-sl-midjourney", "lec-sl-midjourney-niji", "lec-ty-seedream-5-pro"];
+const ASYNC_IMAGE_MODELS = ["lec-sl-midjourney", "lec-sl-midjourney-niji", "lec-ty-seedream-5-pro", "lec-ty-seedream-5-5"];
 const ASYNC_IMAGE_NAMES = ASYNC_IMAGE_MODELS.map((name) => PUBLIC_MODEL_NAMES[name]);
 const SYNC_IMAGE_NAMES = IMAGE_NAMES.filter((name) => !ASYNC_IMAGE_NAMES.includes(name));
 const CONTAINERS = ["metadata", "extra", "parameters", "values"];
@@ -1384,7 +1527,15 @@ function defaultExpression(profile) {
   const billing = profile.billing;
   const quantity = billing.price_per_image !== undefined ? "image_count" : billing.billing_unit === "second" ? "seconds" : "requests";
   const priceWithFee = (price) => Number((price * 1.2).toFixed(12));
-  const leaf = (name, price) => "tier(" + JSON.stringify(name) + ", u(" + JSON.stringify(quantity) + ") * " + priceWithFee(price) + ")";
+  const leaf = (name, price) =>
+    "tier(" +
+    JSON.stringify(name) +
+    ", u(" +
+    JSON.stringify(quantity) +
+    ") * " +
+    priceWithFee(price) +
+    (profile.bill_reference_videos ? ' + u("reference_seconds") * ' + priceWithFee(price) : "") +
+    ")";
   if (billing.duration_prices) {
     const branches = [];
     for (const resolution of Object.keys(billing.duration_prices)) {
@@ -1450,58 +1601,197 @@ function defaultExpression(profile) {
   return price === undefined ? "" : leaf(quantity, price);
 }
 
+const PARAMETER_LABELS = {
+  prompt: ["Prompt", "提示词"],
+  subjects: ["Subject names", "主体列表"],
+  duration: ["Output duration", "生成时长"],
+  aspect_ratio: ["Aspect ratio", "画面比例"],
+  resolution: ["Output resolution", "输出分辨率"],
+  images: ["Reference images", "参考图片"],
+  videos: ["Reference videos", "参考视频"],
+  audios: ["Reference audio", "参考音频"],
+  documents: ["Reference documents", "参考文档"],
+  first_frame: ["First frame image", "首帧图片"],
+  last_frame: ["Last frame image", "尾帧图片"],
+  output_format: ["Output image format", "输出图片格式"],
+  response_format: ["Result format", "结果返回格式"],
+  n: ["Output image count", "生成图片数量"],
+  size: ["Output dimensions", "输出尺寸"],
+  quality: ["Image quality", "图片质量"],
+  audio: ["Generate audio", "是否生成音频"],
+  fps: ["Frame rate", "输出帧率"],
+  action: ["Image operation", "图片操作"],
+  version: ["Model version", "模型版本"],
+  image_size: ["Image size tier", "图片尺寸档位"],
+  style: ["Enable raw style", "是否启用原始风格"],
+  hd: ["Enable HD generation", "是否启用高清生成"],
+  draft: ["Enable draft mode", "是否启用草稿模式"],
+  tile: ["Generate a tileable pattern", "是否生成可平铺图案"],
+  seed: ["Random seed", "随机种子"],
+  stylize: ["Stylization strength", "风格化强度"],
+  chaos: ["Composition variation", "构图变化程度"],
+  weird: ["Creative variation", "创意偏离程度"],
+  original_task_id: ["Original task ID", "原始任务编号"],
+  source_task_id: ["Source task ID", "来源任务编号"],
+  index: ["Original image index", "原图序号"],
+  reference_video_seconds: ["Reference video duration", "参考视频合计时长"],
+  process_face: ["Enable face processing", "是否启用人脸处理"],
+  mode: ["Face processing mode", "人脸处理模式"],
+};
+const PARAMETER_VALUE_LABELS = {
+  auto: "自动",
+  adaptive: "自适应",
+  true: "开启",
+  false: "关闭",
+  url: "图片链接",
+  b64_json: "Base64 图片",
+  imagine: "生成图片",
+  edits: "编辑图片",
+  blend: "融合图片",
+  hd_upscale: "高清放大",
+  low: "低",
+  medium: "中",
+  high: "高",
+};
+
 function modelDescription(profile) {
   const english = [],
     chinese = [];
+  const types = { string: "字符串类型", integer: "整数类型", number: "数字类型", boolean: "布尔类型", array: "数组类型" };
   for (const [field, parameter] of Object.entries(profile.parameters)) {
-    let details =
-      parameter.values?.join(" / ") ||
-      (parameter.min !== undefined || parameter.max !== undefined ? String(parameter.min ?? 0) + "–" + String(parameter.max ?? "") : parameter.type);
-    if (parameter.default !== undefined) details += " [" + parameter.default + "]";
-    if (parameter.required) details += " *";
-    const constraints = parameter.constraints;
-    if (constraints) {
-      if (constraints.max_items !== undefined) details += "; " + (constraints.min_items || 0) + "–" + constraints.max_items;
-      if (constraints.url_schemes) details += "; " + constraints.url_schemes.join("/").toUpperCase();
-      if (constraints.allow_data_url) details += "; data URL";
-      if (constraints.allow_files) details += "; multipart";
-      if (constraints.mime_types) details += "; " + constraints.mime_types.join(", ");
-      if (constraints.max_bytes) details += "; ≤" + constraints.max_bytes + " bytes";
+    const labels = PARAMETER_LABELS[field] || [field, field];
+    const en = [labels[0]],
+      zh = [labels[1]];
+    if (parameter.type !== "enum") {
+      en.push(parameter.type);
+      zh.push(types[parameter.type] || parameter.type);
     }
-    if (parameter.maxLength) details += "; ≤" + parameter.maxLength + " characters";
-    english.push(field + ": " + details);
-    chinese.push(field + ": " + details.replace("characters", "字").replace("bytes", "字节"));
+    if (parameter.required) {
+      en.push("required");
+      zh.push("必填");
+    }
+    if (field === "prompt") {
+      en.push("describe the content to generate");
+      zh.push("用来描述生成内容");
+    }
+    const seconds = ["duration", "reference_video_seconds"].includes(field);
+    if (parameter.values) {
+      en.push("options: " + parameter.values.join(" / ") + (seconds ? " seconds" : ""));
+      zh.push(
+        "可选 " +
+          parameter.values.map((value) => String(value) + (PARAMETER_VALUE_LABELS[value] ? "（" + PARAMETER_VALUE_LABELS[value] + "）" : "")).join(" / ") +
+          (seconds ? " 秒" : "")
+      );
+    } else if (parameter.min !== undefined || parameter.max !== undefined) {
+      const range =
+        parameter.min !== undefined && parameter.max !== undefined
+          ? parameter.min + "–" + parameter.max
+          : parameter.min !== undefined
+            ? "≥" + parameter.min
+            : "≤" + parameter.max;
+      en.push(range + (seconds ? " seconds" : ""));
+      zh.push("支持 " + range + (seconds ? " 秒" : ""));
+    } else if (parameter.type === "boolean") {
+      en.push("true to enable, false to disable");
+      zh.push("true 为开启，false 为关闭");
+    }
+    if (parameter.default !== undefined) {
+      en.push("default " + parameter.default + (seconds ? " seconds" : ""));
+      zh.push(
+        "默认 " +
+          parameter.default +
+          (PARAMETER_VALUE_LABELS[parameter.default] ? "（" + PARAMETER_VALUE_LABELS[parameter.default] + "）" : "") +
+          (seconds ? " 秒" : "")
+      );
+    }
+    const constraints = parameter.constraints || {};
+    if (parameter.type === "array" && constraints.max_items !== undefined) {
+      const units = { images: "张", videos: "段", audios: "段", documents: "份", subjects: "个主体" };
+      const unit = units[field] || "项";
+      const minimum = constraints.min_items || (parameter.required ? 1 : 0);
+      const maximum = constraints.max_items;
+      if (maximum === 0) {
+        en.push("not supported by this model");
+        zh.push("当前模型不支持此素材");
+      } else if (minimum === maximum) {
+        en.push("exactly " + maximum + " item(s)");
+        zh.push("需传入 " + maximum + " " + unit);
+      } else if (minimum > 0) {
+        en.push(minimum + "–" + maximum + " items");
+        zh.push("支持 " + minimum + "–" + maximum + " " + unit);
+      } else {
+        en.push("up to " + maximum + " items");
+        zh.push("最多 " + maximum + " " + unit);
+      }
+    }
+    if (MEDIA_FIELDS.includes(field) && constraints.max_items !== 0) {
+      const schemes = (constraints.url_schemes || ["https"]).join("/").toUpperCase();
+      en.push("public " + schemes + " URLs");
+      zh.push("链接须使用公网 " + schemes + " 地址");
+      if (constraints.allow_data_url) {
+        en.push("also accepts Base64 data URLs");
+        zh.push("也支持 Base64 data URL");
+      }
+      if (constraints.allow_files) {
+        en.push("also accepts multipart file uploads");
+        zh.push("也支持 multipart 文件上传");
+      }
+      if (constraints.mime_types) {
+        en.push("formats: " + constraints.mime_types.join(" / "));
+        zh.push("文件格式支持 " + constraints.mime_types.join(" / "));
+      }
+      if (constraints.max_bytes) {
+        const bytes = constraints.max_bytes;
+        if ((bytes + 1) % 1048576 === 0) {
+          const size = (bytes + 1) / 1048576 + " MiB";
+          en.push("each file < " + size);
+          zh.push("每个文件小于 " + size);
+        } else {
+          const size = bytes % 1048576 === 0 ? bytes / 1048576 + " MiB" : bytes + " bytes";
+          en.push("each file ≤ " + size);
+          zh.push("每个文件不超过 " + size.replace("bytes", "字节"));
+        }
+      }
+    }
+    if (parameter.maxLength) {
+      en.push("up to " + parameter.maxLength + " characters");
+      zh.push("最多 " + parameter.maxLength + " 个字符");
+    }
+    if (field === "subjects") {
+      en.push("one English name per reference image, in the same order");
+      zh.push("每张参考图对应一个英文主体名，顺序须一致");
+    }
+    english.push(field + ": " + en.join(", "));
+    chinese.push(field + "：" + zh.join("，"));
   }
-  const suffix = profile.unverified
-    ? "; This model is listed by /v1/models but has no published parameter or pricing card; only a prompt can be submitted"
-    : "; * required; brackets show defaults; references retain their order";
-  const suffixZH = profile.unverified
-    ? "；该模型在 /v1/models 中可见，但没有公开参数或价格卡片，当前仅接受提示词"
-    : "；* 为必填，中括号为默认值，参考素材保持顺序";
   if (profile.max_reference_total) {
-    english.push("Combined references ≤" + profile.max_reference_total);
-    chinese.push("参考素材合计≤" + profile.max_reference_total);
+    english.push("Up to " + profile.max_reference_total + " reference materials in total");
+    chinese.push("参考素材合计最多 " + profile.max_reference_total + " 项");
   }
   if (profile.max_reference_video_seconds) {
-    english.push("Each reference video ≤" + profile.max_reference_video_seconds + "s");
-    chinese.push("单段参考视频≤" + profile.max_reference_video_seconds + "秒");
+    english.push("Each reference video may be up to " + profile.max_reference_video_seconds + " seconds");
+    chinese.push("每段参考视频最长 " + profile.max_reference_video_seconds + " 秒");
   }
-  return { en: english.join("; ") + suffix, zh: chinese.join("；") + suffixZH };
+  english.push("Reference materials are used in the order supplied");
+  chinese.push("参考素材按传入顺序使用，请保持顺序");
+  return { en: english.join("; "), zh: chinese.join("；") };
 }
 
 const MODEL_DEFAULTS = Object.fromEntries(
-  Object.entries(MODELS).map(([name, profile]) => {
-    const defaults = { displayName: profile.name, description: modelDescription(profile), icon: profile.icon, tags: [...new Set(profile.tags)] };
-    if (/seedance|seedream|face-processing/.test(name)) defaults.vendor = "ByteDance";
-    else if (/minimax|h3video/.test(name)) defaults.vendor = "Minimax";
-    else if (/wan-/.test(name)) defaults.vendor = "Wan";
-    else if (/banana|gemini|omni/.test(name)) defaults.vendor = "Google";
-    else if (/midjourney/.test(name)) defaults.vendor = "Midjourney";
-    else if (/image-2|^image2$/.test(name)) defaults.vendor = "OpenAI";
-    const expression = defaultExpression(profile);
-    if (expression) defaults.billingExpr = expression;
-    return [PUBLIC_MODEL_NAMES[name], defaults];
-  })
+  Object.entries(MODELS)
+    .filter(([, profile]) => !profile.retired)
+    .map(([name, profile]) => {
+      const defaults = { displayName: profile.name, description: modelDescription(profile), icon: profile.icon, tags: [...new Set(profile.tags)] };
+      if (/seedance|seedream|face-processing/.test(name)) defaults.vendor = "ByteDance";
+      else if (/minimax|h3video/.test(name)) defaults.vendor = "Minimax";
+      else if (/wan-/.test(name)) defaults.vendor = "Wan";
+      else if (/banana|gemini|omni/.test(name)) defaults.vendor = "Google";
+      else if (/midjourney/.test(name)) defaults.vendor = "Midjourney";
+      else if (/image-2|^image2$/.test(name)) defaults.vendor = "OpenAI";
+      const expression = defaultExpression(profile);
+      if (expression) defaults.billingExpr = expression;
+      return [PUBLIC_MODEL_NAMES[name], defaults];
+    })
 );
 
 export const meta = {
@@ -1509,7 +1799,7 @@ export const meta = {
   key: "lecapi",
   name: "LecAPI",
   icon: "text:LE",
-  version: "1.0.6",
+  version: "1.1.0",
   author: { name: "QuantumNous" },
   website: "https://api.lecapi.net/docs",
   baseUrl: "https://api.lecapi.net",
@@ -1523,13 +1813,15 @@ export const meta = {
   models: Object.keys(MODEL_MAPPING),
   modelDefaults: MODEL_DEFAULTS,
   usageSchema: VIDEO_USAGE_SCHEMA,
-  usageProfiles: Object.entries(MODELS).map(([name, profile]) => {
-    const schema = { ...(profile.kind === "image" ? IMAGE_USAGE_SCHEMA : VIDEO_USAGE_SCHEMA) };
-    const resolution = profile.parameters.resolution;
-    const resolutions = resolution?.values || [];
-    schema.resolution = { ...schema.resolution, enum: resolution?.default ? resolutions : ["unspecified", ...resolutions] };
-    return { models: [PUBLIC_MODEL_NAMES[name]], schema };
-  }),
+  usageProfiles: Object.entries(MODELS)
+    .filter(([, profile]) => !profile.retired)
+    .map(([name, profile]) => {
+      const schema = { ...(profile.kind === "image" ? IMAGE_USAGE_SCHEMA : VIDEO_USAGE_SCHEMA) };
+      const resolution = profile.parameters.resolution;
+      const resolutions = resolution?.values || [];
+      schema.resolution = { ...schema.resolution, enum: resolution?.default ? resolutions : ["unspecified", ...resolutions] };
+      return { models: [PUBLIC_MODEL_NAMES[name]], schema };
+    }),
   protocols: [
     { name: "openai_video", models: VIDEO_NAMES },
     { name: "openai_image", models: IMAGE_NAMES },
@@ -1681,6 +1973,7 @@ function materialValue(value, parameter, field) {
 function submission(ctx) {
   const profile = modelProfile(ctx),
     body = { model: ctx.upstream?.kind === "new_api" ? profile.publicModel : profile.vendorModel };
+  if (profile.retired) throw new Error(profile.publicModel + " is no longer available on LecAPI");
   const media = {},
     files = [];
   let requestedCount;
@@ -1723,6 +2016,7 @@ function submission(ctx) {
         continue;
       }
       let target = field === "audio" && !profile.parameters.audio ? "audios" : aliases[field] || field;
+      if (profile.vendorModel === "lec-vw-seedance-2-0-fast" && target === "last_frame") throw new Error("last_frame is not supported by this model");
       if (["first_frame", "last_frame"].includes(target) && !profile.parameters[target]) target = "images";
       if (target === "size" && !profile.parameters.size && typeof value === "string") {
         value = value.trim();
@@ -1812,7 +2106,12 @@ function submission(ctx) {
   }
   let seconds = body.duration || 0,
     referenceSeconds = 0;
-  if (profile.source_duration || (profile.vendorModel === "lec-ms-minimax-h3" && videoCount) || profile.max_reference_video_seconds) {
+  if (
+    profile.source_duration ||
+    profile.bill_reference_videos ||
+    (profile.vendorModel === "lec-ms-minimax-h3" && videoCount) ||
+    profile.max_reference_video_seconds
+  ) {
     for (const reference of media.videos || []) {
       const duration = typeof reference === "object" ? utils.mediaDuration({ fileRef: reference.__fileRef }) : utils.mediaDuration({ url: reference });
       if (
@@ -1822,9 +2121,11 @@ function submission(ctx) {
         (profile.max_reference_video_seconds && duration > profile.max_reference_video_seconds)
       )
         throw new Error("reference video duration is outside the supported range");
-      referenceSeconds += duration;
+      // AJ rounds each reference clip separately before adding it to output time.
+      referenceSeconds += profile.bill_reference_videos ? Math.ceil(duration) : duration;
     }
     referenceSeconds = Math.ceil(referenceSeconds);
+    if (referenceSeconds > 3600) throw new Error("combined reference video duration exceeds 3600 seconds");
     if (profile.source_duration) seconds = referenceSeconds;
     if (profile.vendorModel === "lec-ms-minimax-h3" && videoCount) {
       if (referenceSeconds < 1 || referenceSeconds > 15) throw new Error("reference videos must total at most 15 seconds");
@@ -1886,7 +2187,7 @@ export function extractUsage(ctx) {
   return {
     requests: 1,
     seconds: request.seconds,
-    reference_seconds: request.profile.vendorModel === "lec-ms-minimax-h3" ? request.referenceSeconds : 0,
+    reference_seconds: request.profile.vendorModel === "lec-ms-minimax-h3" || request.profile.bill_reference_videos ? request.referenceSeconds : 0,
     extra_images: request.profile.vendorModel === "lec-ms-minimax-h3" ? Math.max(request.imageCount - 5, 0) : 0,
     resolution: request.body.resolution || "unspecified",
     duration_tier: request.seconds > 15 ? "long" : "short",
@@ -2123,6 +2424,7 @@ function decodeRequest(ctx, kind, nativeRoute) {
   const vendorModel = vendorModelName(requestedModel);
   const model = ctx.model || (vendorModel ? PUBLIC_MODEL_NAMES[vendorModel] : requestedModel);
   if (typeof model !== "string" || !model.trim()) throw new Error("model is required");
+  if (vendorModel && MODELS[vendorModel].retired) throw new Error(PUBLIC_MODEL_NAMES[vendorModel] + " is no longer available on LecAPI");
   if (vendorModel && MODELS[vendorModel].kind !== kind) throw new Error("model does not support this media endpoint");
   // Image response_format belongs to the host presenter. The vendor still
   // receives its documented default; the host converts URLs when requested.

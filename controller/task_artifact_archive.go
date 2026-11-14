@@ -25,22 +25,36 @@ func init() {
 			return err
 		}
 		var failures []error
-		task.PrivateData.ArtifactArchive.Artifacts = make([]model.TaskArchivedArtifact, 0, len(artifacts))
-		for _, artifact := range artifacts {
+		archive := *task.PrivateData.ArtifactArchive
+		archive.Artifacts = make([]model.TaskArchivedArtifact, len(artifacts))
+		for i, artifact := range artifacts {
+			archive.Artifacts[i] = taskArchivedArtifact(artifact, nil)
+		}
+		defer func() { task.PrivateData.ArtifactArchive = &archive }()
+		for i, artifact := range artifacts {
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
-			task.PrivateData.ArtifactArchive.Artifacts = append(task.PrivateData.ArtifactArchive.Artifacts, taskArchivedArtifact(artifact, nil))
 			if artifact.Type != "video" && artifact.Type != "image" {
 				continue
 			}
-			ref, err := archiveTaskArtifact(ctx, task, artifact, store)
-			if err != nil || ref == nil {
+			var ref *service.StoredArtifactRef
+			if artifact.Type == "video" {
+				delivery, deliveryErr := taskVideoDelivery(ctx, task, artifact, store)
+				ref, err = delivery.Ref, deliveryErr
+			} else {
+				ref, err = archiveTaskArtifact(ctx, task, artifact, store)
+			}
+			if err != nil || ref == nil && artifact.Type != "video" {
 				logger.LogTaskArtifactFailure(ctx, task.TaskID, "storage", 0)
 				failures = append(failures, errors.New("artifact archival failed"))
 				continue
 			}
-			task.PrivateData.ArtifactArchive.Artifacts[len(task.PrivateData.ArtifactArchive.Artifacts)-1] = taskArchivedArtifact(artifact, ref)
+			if ref == nil {
+				archive.Artifacts[i].Direct = true
+				continue
+			}
+			archive.Artifacts[i] = taskArchivedArtifact(artifact, ref)
 			for i := range task.PrivateData.ImageArtifacts {
 				if task.PrivateData.ImageArtifacts[i].Key == artifact.Key {
 					task.PrivateData.ImageArtifacts[i].Stored = true
@@ -132,6 +146,11 @@ func archiveTaskArtifact(ctx context.Context, task *model.Task, artifact relaych
 		}
 		bounded, cancel := context.WithTimeout(ctx, 5*time.Minute)
 		defer cancel()
+		release, err := service.AcquireTaskArtifactTransfer(bounded)
+		if err != nil {
+			return nil, err
+		}
+		defer release()
 		var descriptor *relaychannel.TaskContentRequest
 		for _, image := range task.PrivateData.ImageArtifacts {
 			if image.Key == artifact.Key {
@@ -159,7 +178,7 @@ func archiveTaskArtifact(ctx context.Context, task *model.Task, artifact relaych
 		}
 		c := &gin.Context{Request: request}
 		var ref *service.StoredArtifactRef
-		err = consumeTaskMedia(c, task, descriptor, func(content io.Reader) error {
+		err = consumeTaskMedia(c, task, descriptor, func(content io.Reader, _ *http.Response) error {
 			var persistErr error
 			ref, persistErr = store.Persist(bounded, task, artifact, content)
 			return persistErr

@@ -505,7 +505,7 @@ func streamTaskPluginProtocol(
 				loadElapsed.Milliseconds(),
 			)
 		}
-		view, viewErr := service.BuildTaskPluginView(task)
+		view, viewErr := service.BuildTaskPluginDeliveryView(observationContext, task)
 		if viewErr != nil {
 			logger.LogError(c, common.LogText("build task protocol view failed: %s", viewErr.Error()))
 			writeTaskPluginProtocolFailure(c, machine, lastStatus)
@@ -518,7 +518,7 @@ func streamTaskPluginProtocol(
 			return
 		}
 		hookStarted := deps.now()
-		rendererContext, contextErr := taskPluginProtocolRendererContext(protocolRequest, pinned, task, deps.artifactContentURL)
+		rendererContext, contextErr := taskPluginProtocolRendererContext(observationContext, protocolRequest, pinned, task, deps.artifactContentURL)
 		if contextErr != nil {
 			logger.LogError(c, common.LogText("build task protocol renderer context failed"))
 			writeTaskPluginProtocolFailure(c, machine, lastStatus)
@@ -851,7 +851,7 @@ func renderTaskPluginProtocolFinalResponse(
 	machine *relay.PluginResponsesMachine,
 	deps pluginProtocolBridgeDeps,
 ) (map[string]any, time.Duration, error) {
-	view, err := service.BuildTaskPluginView(task)
+	view, err := service.BuildTaskPluginDeliveryView(ctx, task)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -860,6 +860,7 @@ func renderTaskPluginProtocolFinalResponse(
 		return nil, 0, err
 	}
 	rendererContext, err := taskPluginProtocolRendererContext(
+		ctx,
 		protocolRequest,
 		pinned,
 		task,
@@ -896,7 +897,7 @@ func renderTaskPluginProtocolEventsResponse(
 	machine *relay.PluginResponsesMachine,
 	deps pluginProtocolBridgeDeps,
 ) (map[string]any, time.Duration, error) {
-	view, err := service.BuildTaskPluginView(task)
+	view, err := service.BuildTaskPluginDeliveryView(ctx, task)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -905,6 +906,7 @@ func renderTaskPluginProtocolEventsResponse(
 		return nil, 0, err
 	}
 	rendererContext, err := taskPluginProtocolRendererContext(
+		ctx,
 		protocolRequest,
 		pinned,
 		task,
@@ -1169,6 +1171,7 @@ func taskPluginProtocolJSONValue(view dto.TaskView) (any, error) {
 }
 
 func taskPluginProtocolRendererContext(
+	ctx context.Context,
 	request pluginruntime.ProtocolRequestContext,
 	pinned pluginruntime.PinnedEndpoint,
 	task *model.Task,
@@ -1181,7 +1184,7 @@ func taskPluginProtocolRendererContext(
 	if pinned.Plugin == nil {
 		return nil, errors.New("task artifact projection is unavailable")
 	}
-	artifacts, err := taskjsplugin.RendererArtifacts(pinned.Plugin, task, artifactContentURL)
+	artifacts, err := taskjsplugin.RendererArtifacts(ctx, pinned.Plugin, task, artifactContentURL)
 	if err != nil {
 		return nil, err
 	}

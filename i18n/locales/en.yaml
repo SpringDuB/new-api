@@ -39,6 +39,7 @@ relay.group_upstream_saturated: "The upstream of the current group is at capacit
 relay.retry_get_channel_failed: "Failed to get available channel for model {{.Model}} under group {{.Group}} (retry): {{.Error}}"
 relay.retry_no_available_channel: "No available channel for model {{.Model}} under group {{.Group}} (retry)"
 relay.access_token_unsupported: "Access tokens are not supported here"
+relay.video_delivery_failed: "Failed to fetch or store the video. Please try again later."
 
 # Emails and the name of the token created at registration
 user.default_token_name: "{{.Username}}'s initial token"

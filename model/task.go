@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql/driver"
 	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -12,6 +13,7 @@ import (
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	commonRelay "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
+	"gorm.io/gorm"
 )
 
 type TaskStatus string
@@ -118,9 +120,10 @@ type TaskPrivateData struct {
 	// ClientRequest is captured before plugin decoding. It is independent of
 	// mutable upstream Data/state, private by default, and retained only for
 	// the lifetime of this task row (including its normal deletion/backups).
-	ClientRequest    *TaskClientRequestSnapshot `json:"client_request,omitempty"`
-	Response         *TaskResponseSnapshot      `json:"response,omitempty"`
-	ImageRequestMode string                     `json:"image_request_mode,omitempty"`
+	ClientRequest      *TaskClientRequestSnapshot `json:"client_request,omitempty"`
+	Response           *TaskResponseSnapshot      `json:"response,omitempty"`
+	SubmissionResponse *TaskResponseSnapshot      `json:"submission_response,omitempty"`
+	ImageRequestMode   string                     `json:"image_request_mode,omitempty"`
 	// ImageArtifacts are host-managed results of synchronous image relays.
 	// Source URLs stay private; inline image binaries are only kept in OSS.
 	ImageArtifacts  []TaskImageArtifact  `json:"image_artifacts,omitempty"`
@@ -169,6 +172,7 @@ type TaskArchivedArtifact struct {
 	Key       string `json:"key"`
 	Type      string `json:"type"`
 	MimeType  string `json:"mime_type,omitempty"`
+	Direct    bool   `json:"direct,omitempty"` // The host verified anonymous video delivery without storage.
 	Backend   string `json:"backend,omitempty"`
 	Endpoint  string `json:"endpoint,omitempty"`
 	Region    string `json:"region,omitempty"`
@@ -193,6 +197,7 @@ type TaskClientRequestSnapshot struct {
 }
 
 type TaskResponseSnapshot struct {
+	CapturedAt    int64           `json:"captured_at,omitempty"`
 	StatusCode    int             `json:"status_code,omitempty"`
 	ContentType   string          `json:"content_type"`
 	BodyKind      string          `json:"body_kind"`
@@ -626,11 +631,29 @@ func (t *Task) UpdateQuota() error {
 // falls back to INSERT ON CONFLICT when the WHERE-guarded UPDATE matches
 // zero rows, which silently bypasses the CAS guard.
 func (t *Task) UpdateWithStatus(fromStatus TaskStatus) (bool, error) {
-	result := DB.Model(t).Where("status = ?", fromStatus).Select("*").Updates(t)
-	if result.Error != nil {
-		return false, result.Error
-	}
-	return result.RowsAffected > 0, nil
+	updated := false
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		var current Task
+		err := lockForUpdate(tx).Select("id", "private_data").Where("id = ? AND status = ?", t.ID, fromStatus).First(&current).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		// A submit response can be captured after this poll loaded the row.
+		// Preserve that immutable audit record when applying mutable poll state.
+		if current.PrivateData.SubmissionResponse != nil {
+			t.PrivateData.SubmissionResponse = current.PrivateData.SubmissionResponse
+		}
+		if current.PrivateData.Response != nil {
+			t.PrivateData.Response = current.PrivateData.Response
+		}
+		result := tx.Model(t).Where("status = ?", fromStatus).Select("*").Updates(t)
+		updated = result.RowsAffected > 0
+		return result.Error
+	})
+	return updated, err
 }
 
 // TaskBulkUpdateByID performs an unconditional bulk UPDATE by primary key IDs.

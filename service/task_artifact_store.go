@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net/http"
 	"sync"
 	"time"
 
@@ -40,6 +41,8 @@ type TaskArtifactStore interface {
 
 var ErrTaskArtifactStoreDisabled = errors.New("task artifact store is disabled")
 
+var ErrTaskVideoDelivery = errors.New("video delivery failed")
+
 type disabledArtifactStore struct{}
 
 func (disabledArtifactStore) Enabled() bool {
@@ -67,9 +70,41 @@ var taskArtifactStoreConfig system_setting.TaskArtifactStoreConfig
 // dependency. Archival runs after durable completion and never affects quota.
 var ArchiveTaskArtifacts func(context.Context, *model.Task, TaskArtifactStore) error
 
+// ResolveTaskVideoDelivery is registered by the host media downloader. Keys are
+// artifact identities; source URLs are replaced only in public presentation.
+var ResolveTaskVideoDelivery func(context.Context, *model.Task) (map[string]TaskVideoDelivery, error)
+
+type TaskVideoDelivery struct {
+	URL        string
+	SourceURLs []string
+	Store      TaskArtifactStore
+	Ref        *StoredArtifactRef
+}
+
+func (d TaskVideoDelivery) Serve(c *gin.Context, task *model.Task) error {
+	if d.Ref != nil {
+		return d.Store.Serve(c, task, d.Ref)
+	}
+	c.Header("Cache-Control", "private, no-store")
+	c.Header("Referrer-Policy", "no-referrer")
+	c.Redirect(http.StatusTemporaryRedirect, d.URL)
+	return nil
+}
+
 var taskArtifactArchiveSlots = make(chan struct{}, 2)
 var taskArtifactArchiveQueue = make(chan struct{}, 8)
 var taskArtifactArchiveJobs sync.Map
+
+// AcquireTaskArtifactTransfer bounds media downloads and spooling for both
+// request-driven delivery and background archival.
+func AcquireTaskArtifactTransfer(ctx context.Context) (func(), error) {
+	select {
+	case taskArtifactArchiveSlots <- struct{}{}:
+		return func() { <-taskArtifactArchiveSlots }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
 
 func ScheduleTaskArtifactArchive(task *model.Task) {
 	if task == nil || task.ID <= 0 || task.Status != model.TaskStatusSuccess || task.PrivateData.ArtifactArchive != nil || ArchiveTaskArtifacts == nil {
@@ -135,12 +170,6 @@ func ScheduleTaskArtifactArchive(task *model.Task) {
 				logger.LogTaskArtifactFailure(writeCtx, snapshot.TaskID, "archive_state", 0)
 			}
 		}()
-		select {
-		case taskArtifactArchiveSlots <- struct{}{}:
-			defer func() { <-taskArtifactArchiveSlots }()
-		case <-ctx.Done():
-			return
-		}
 		if _, err := model.UpdateTaskArtifactArchive(ctx, &snapshot, model.TaskArtifactArchive{Status: model.TaskArchiveRunning, UpdatedAt: time.Now().Unix()}); err != nil {
 			return
 		}

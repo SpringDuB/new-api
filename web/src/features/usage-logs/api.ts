@@ -204,11 +204,14 @@ export async function getTaskClientRequest(
 }
 
 export async function getTaskResponse(
-  taskId: string
+  taskId: string,
+  source?: 'upstream_result'
 ): Promise<TaskResponseResponse> {
   const response = await api.get<{
     success: boolean
     data: TaskResponseResponse
-  }>(`/api/task/${encodeURIComponent(taskId)}/response`)
+  }>(
+    `/api/task/${encodeURIComponent(taskId)}/response${source ? '?source=upstream_result' : ''}`
+  )
   return requireServerSuccess(response.data).data
 }

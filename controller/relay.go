@@ -809,7 +809,11 @@ func presentTaskSubmission(c *gin.Context, outcome *taskSubmissionOutcome) {
 	}
 	if pinnedValue, exists := c.Get(pluginruntime.ContextKeyPinnedRoute); exists {
 		if pinned, ok := pinnedValue.(pluginruntime.PinnedRoute); ok && pinned.Plugin != nil && pinned.Route.Render != "" {
-			view, err := service.BuildTaskPluginView(outcome.Task)
+			view, err := service.BuildTaskPluginDeliveryView(c.Request.Context(), outcome.Task)
+			if errors.Is(err, service.ErrTaskVideoDelivery) {
+				videoProxyError(c, http.StatusBadGateway, "video_delivery_failed", i18n.T(c, i18n.MsgRelayVideoDeliveryFailed))
+				return
+			}
 			requestValue, _ := c.Get(pluginruntime.ContextKeyRouteRequest)
 			requestContext, _ := requestValue.(pluginruntime.RouteRequestContext)
 			if err == nil {
