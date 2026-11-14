@@ -405,6 +405,7 @@ export interface TaskClientRequestResponse {
 }
 
 export interface TaskResponseSnapshot {
+  captured_at?: number
   status_code?: number
   content_type: string
   body_kind: 'json' | 'events'
@@ -417,7 +418,11 @@ export interface TaskResponseSnapshot {
 export interface TaskResponseResponse {
   recorded: boolean
   snapshot: TaskResponseSnapshot | null
-  source: 'client_response' | 'upstream_result'
+  source: 'client_response' | 'upstream_result' | 'current_platform_result'
+  submission_snapshot?: TaskResponseSnapshot | null
+  generated_at?: number
+  query_path?: string
+  unavailable?: boolean
   max_bytes: number
   retention: 'task_lifetime'
 }

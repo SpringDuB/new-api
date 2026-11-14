@@ -15,6 +15,9 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/jsplugin"
+	"github.com/QuantumNous/new-api/relay"
+	relaychannel "github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/helper"
 	kittypes "github.com/QuantumNous/new-api/relaykit/types"
@@ -266,7 +269,8 @@ func TestImageLogDoesNotMistakeVideoThumbnailsForImageGeneration(t *testing.T) {
 	finish()
 	var reloaded model.Task
 	require.NoError(t, model.DB.First(&reloaded, task.ID).Error)
-	assert.Nil(t, reloaded.PrivateData.Response)
+	require.NotNil(t, reloaded.PrivateData.Response)
+	assert.Contains(t, string(reloaded.PrivateData.Response.Body), "video_url")
 	assert.Empty(t, reloaded.PrivateData.ImageArtifacts)
 }
 
@@ -374,7 +378,7 @@ func TestImageLogResponseSnapshotSizeLimitAndAsyncResultRedaction(t *testing.T) 
 	task.PrivateData.Key = "private-channel-canary"
 	task.SetData(map[string]any{"message": "private-channel-canary", "data": []any{map[string]any{"url": "https://cdn.example/image?access=private-signature"}}, "authorization": "private-value"})
 	require.NoError(t, model.DB.Save(task).Error)
-	c, recorder := imageLogReadContext("/api/task/"+task.TaskID+"/response", task.TaskID, 7, common.RoleCommonUser)
+	c, recorder := imageLogReadContext("/api/task/"+task.TaskID+"/response?source=upstream_result", task.TaskID, 7, common.RoleAdminUser)
 	GetDashboardTaskResponse(c)
 	assert.Contains(t, recorder.Body.String(), `"source":"upstream_result"`)
 	assert.NotContains(t, recorder.Body.String(), "private-channel-canary")
@@ -387,6 +391,86 @@ func TestImageLogResponseSnapshotSizeLimitAndAsyncResultRedaction(t *testing.T) 
 	encoded, err := common.Marshal(snapshot)
 	require.NoError(t, err)
 	assert.LessOrEqual(t, len(encoded), service.MaxTaskClientRequestSnapshotBytes)
+}
+
+func TestDashboardTaskResponseUsesPlatformVideoRenderer(t *testing.T) {
+	task := setupGenericTaskTest(t)
+	source := `export const meta={apiVersion:1,key:"response-preview",name:"Preview",version:"1.0.0",author:{name:"Test"},models:["m"],fetchMode:"per_task",protocols:["openai_video"]};
+export function buildSubmitRequest(){return {}} export function parseSubmitResponse(){return {taskId:"vendor"}} export function buildQueryRequest(){return {}} export function parseTaskResult(){return {status:"SUCCESS"}}
+export function listArtifacts(){return []} export function buildContentRequest(){return {}}
+export const protocols={openai_video:{decodeRequest(){return {}},render(ctx,task){if(task.data.unavailable)throw new Error("renderer unavailable");return {id:"vendor",status:"provider-success",url:task.data.url,platform_field:true}}}};`
+	_, err := jsplugin.DefaultRegistry.RegisterFactory(source, jsplugin.Options{})
+	require.NoError(t, err)
+	t.Cleanup(func() { jsplugin.DefaultRegistry.Unregister("response-preview") })
+	task.Platform = "response-preview"
+	task.Properties.OriginModelName = "m"
+	task.PrivateData.Execution = &model.TaskExecutionSnapshot{RequestPath: "/v1/videos"}
+	task.SetData(map[string]any{"id": "vendor", "status": "provider-success", "url": "https://cdn.example/video.mp4"})
+	require.NoError(t, model.DB.Save(task).Error)
+	converter, ok := relay.GetTaskAdaptor(task.Platform).(relaychannel.OpenAIVideoConverter)
+	require.True(t, ok)
+	wire, err := converter.ConvertToOpenAIVideo(task)
+	require.NoError(t, err)
+	c, recorder := imageLogReadContext("/api/task/"+task.TaskID+"/response", task.TaskID, 7, common.RoleCommonUser)
+	GetDashboardTaskResponse(c)
+	var result struct {
+		Data struct {
+			Source      string                      `json:"source"`
+			Snapshot    *model.TaskResponseSnapshot `json:"snapshot"`
+			Unavailable bool                        `json:"unavailable"`
+			Submission  *model.TaskResponseSnapshot `json:"submission_snapshot"`
+		}
+	}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &result))
+	assert.Equal(t, "current_platform_result", result.Data.Source)
+	require.NotNil(t, result.Data.Snapshot)
+	assert.JSONEq(t, string(wire), string(result.Data.Snapshot.Body))
+	assert.NotContains(t, recorder.Body.String(), "upstream_result")
+	t.Run("failed projection keeps the submission available", func(t *testing.T) {
+		task.SetData(map[string]any{"unavailable": true, "raw": "upstream-canary"})
+		task.PrivateData.SubmissionResponse = &model.TaskResponseSnapshot{Body: []byte(`{"status":"queued"}`)}
+		require.NoError(t, model.DB.Save(task).Error)
+		c, recorder := imageLogReadContext("/api/task/"+task.TaskID+"/response", task.TaskID, 7, common.RoleCommonUser)
+		GetDashboardTaskResponse(c)
+		require.Equal(t, http.StatusOK, recorder.Code)
+		result.Data.Snapshot = nil
+		require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &result))
+		assert.True(t, result.Data.Unavailable)
+		assert.Nil(t, result.Data.Snapshot)
+		require.NotNil(t, result.Data.Submission)
+		assert.JSONEq(t, `{"status":"queued"}`, string(result.Data.Submission.Body))
+		assert.NotContains(t, recorder.Body.String(), "upstream-canary")
+	})
+}
+
+func TestDashboardTaskResponseNeverSubstitutesUpstreamForMissingPlatformResponse(t *testing.T) {
+	task := setupGenericTaskTest(t)
+	task.SetData(map[string]any{"raw": "upstream-canary"})
+	require.NoError(t, model.DB.Save(task).Error)
+	for _, test := range []struct {
+		query                       string
+		user, role, tokenID, status int
+		capability                  bool
+	}{
+		{query: "", user: 7, role: common.RoleCommonUser, status: 200},
+		{query: "?source=upstream_result", user: 7, role: common.RoleCommonUser, status: 403},
+		{query: "?source=upstream_result", user: 8, role: common.RoleCommonUser, status: 404},
+		{query: "?source=upstream_result", user: 8, role: common.RoleAdminUser, status: 200},
+		{query: "?source=upstream_result", user: 7, role: common.RoleAdminUser, tokenID: 1, status: 403},
+		{query: "?source=upstream_result", user: 7, role: common.RoleAdminUser, capability: true, status: 404},
+	} {
+		c, recorder := imageLogReadContext("/api/task/"+task.TaskID+"/response"+test.query, task.TaskID, test.user, test.role)
+		c.Set("token_id", test.tokenID)
+		if test.capability {
+			c.Set(middleware.TaskArtifactAccessContextKey, true)
+		}
+		GetDashboardTaskResponse(c)
+		assert.Equal(t, test.status, recorder.Code)
+		if test.query == "" {
+			assert.Contains(t, recorder.Body.String(), `"recorded":false`)
+		}
+		assert.Equal(t, test.query != "" && test.status == 200, strings.Contains(recorder.Body.String(), "upstream-canary"))
+	}
 }
 
 func imageLogReadContext(path, taskID string, userID, role int) (*gin.Context, *httptest.ResponseRecorder) {
@@ -425,6 +509,135 @@ func TestImageLogResponseIsOwnerAdminOnlyAndNeverExposesPrivateState(t *testing.
 			assert.NotContains(t, recorder.Body.String(), "upstream-state-secret")
 			if viewer.status == 200 {
 				assert.Contains(t, recorder.Body.String(), `"seed":0`)
+			}
+		})
+	}
+}
+
+func TestTaskSubmissionResponseSurvivesStalePollingAndKeepsUpstreamPrivate(t *testing.T) {
+	task := setupGenericTaskTest(t)
+	task.Status = model.TaskStatusQueued
+	task.Progress = "0%"
+	task.PrivateData.Execution = &model.TaskExecutionSnapshot{RequestPath: "/v1/videos"}
+	task.SetData(map[string]any{"upstream": "provider-snapshot"})
+	require.NoError(t, model.DB.Save(task).Error)
+	stale := *task
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", strings.NewReader(`{"model":"m"}`))
+	c.Set("id", task.UserId)
+	finish := beginImageLogCapture(c)
+	c.Set(imageLogTaskContextKey, task)
+	c.JSON(http.StatusOK, gin.H{"id": task.TaskID, "status": "queued"})
+	finish()
+	assert.Contains(t, recorder.Body.String(), `"status":"queued"`)
+	stale.Status = model.TaskStatusInProgress
+	stale.Progress = "50%"
+	won, err := stale.UpdateWithStatus(model.TaskStatusQueued)
+	require.NoError(t, err)
+	require.True(t, won)
+	reloaded, exists, err := model.GetByTaskId(task.UserId, task.TaskID)
+	require.NoError(t, err)
+	require.True(t, exists)
+	require.NotNil(t, reloaded.PrivateData.SubmissionResponse)
+	assert.JSONEq(t, `{"id":"task_generic","status":"queued"}`, string(reloaded.PrivateData.SubmissionResponse.Body))
+	assert.Greater(t, reloaded.PrivateData.SubmissionResponse.CapturedAt, int64(0))
+	assert.Equal(t, model.TaskStatus(model.TaskStatusInProgress), reloaded.Status)
+	assert.JSONEq(t, `{"upstream":"provider-snapshot"}`, string(reloaded.Data))
+	// A second response capture cannot replace the original submission.
+	require.NoError(t, model.UpdateTaskResponseLog(c, reloaded, &model.TaskResponseSnapshot{Body: []byte(`{"status":"replaced"}`)}, true))
+	reloaded, exists, err = model.GetByTaskId(task.UserId, task.TaskID)
+	require.NoError(t, err)
+	require.True(t, exists)
+	assert.JSONEq(t, `{"id":"task_generic","status":"queued"}`, string(reloaded.PrivateData.SubmissionResponse.Body))
+}
+
+func TestDashboardTaskResponseMatchesNativeAndResponsesProtocols(t *testing.T) {
+	task := setupGenericTaskTest(t)
+	source := `export const meta={apiVersion:1,key:"response-protocol",name:"Response",version:"1.0.0",author:{name:"Test"},models:["m"],fetchMode:"per_task",routes:[{method:"POST",path:"/vendor/jobs",type:"submit",decode:"create",render:"created"},{method:"GET",path:"/vendor/jobs/:task_id",type:"query",render:"query"}],protocols:[{name:"openai_responses",supports:["background"]}]};
+ export function buildSubmitRequest(){return {}} export function parseSubmitResponse(){return {taskId:"vendor"}} export function buildQueryRequest(){return {}} export function parseTaskResult(){return {status:"SUCCESS"}}
+ export const native={create(){return {kind:"submit",model:"m"}},created(ctx,task){return {id:task.task_id}},query(ctx,task){return {__status:202,__body:{id:task.task_id,state:task.status,query:ctx.params.task_id}}}};
+ export const protocols={openai_responses:{decodeRequest(){return {kind:"submit",model:"m"}},renderFinal(){return {output:[{type:"message",role:"assistant",status:"completed",content:[{type:"output_text",text:"platform-result",annotations:[],logprobs:[]}]}]}}}};`
+	plugin, err := jsplugin.DefaultRegistry.RegisterFactory(source, jsplugin.Options{})
+	require.NoError(t, err)
+	t.Cleanup(func() { jsplugin.DefaultRegistry.Unregister("response-protocol") })
+	task.Platform = "response-protocol"
+	task.Properties.OriginModelName = "m"
+	for _, path := range []string{"/vendor/jobs", "/v1/responses"} {
+		task.PrivateData.Execution = &model.TaskExecutionSnapshot{RequestPath: path}
+		for _, status := range []model.TaskStatus{model.TaskStatusQueued, model.TaskStatusSuccess, model.TaskStatusFailure} {
+			task.Status = status
+			task.SetData(map[string]any{"raw": "upstream-canary"})
+			require.NoError(t, model.DB.Save(task).Error)
+			c, recorder := imageLogReadContext("/api/task/"+task.TaskID+"/response", task.TaskID, 7, common.RoleCommonUser)
+			GetDashboardTaskResponse(c)
+			require.Equal(t, http.StatusOK, recorder.Code)
+			var result struct {
+				Data struct {
+					Source   string
+					Snapshot *model.TaskResponseSnapshot
+				}
+			}
+			require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &result))
+			require.NotNil(t, result.Data.Snapshot)
+			assert.Equal(t, "current_platform_result", result.Data.Source)
+			if path == "/v1/responses" {
+				wireContext, wire := newPluginProtocolRetrieveContext("resp_generic")
+				common.SetContextKey(wireContext, constant.ContextKeyUserId, task.UserId)
+				pinned := jsplugin.PinnedEndpoint{Plugin: plugin, Protocol: "openai_responses"}
+				retrieveTaskPluginResponse(wireContext, pluginProtocolRetrieveDeps(pinned, task, true, nil))
+				assert.JSONEq(t, wire.Body.String(), string(result.Data.Snapshot.Body))
+			} else {
+				assert.Equal(t, http.StatusAccepted, result.Data.Snapshot.StatusCode)
+				assert.JSONEq(t, `{"id":"task_generic","state":"`+string(status)+`","query":"task_generic"}`, string(result.Data.Snapshot.Body))
+			}
+			assert.NotContains(t, recorder.Body.String(), "upstream-canary")
+		}
+	}
+}
+
+func TestTaskClientResponseCaptureDistinguishesSynchronousAndBackgroundReplies(t *testing.T) {
+	for _, tc := range []struct {
+		name                                                string
+		terminal, responses, background, stream, submission bool
+	}{
+		{name: "synchronous native", terminal: true},
+		{name: "synchronous Responses", responses: true},
+		{name: "background Responses", responses: true, background: true, submission: true},
+		{name: "streamed Responses", responses: true, background: true, stream: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			task := setupGenericTaskTest(t)
+			task.Status = model.TaskStatusQueued
+			if tc.terminal {
+				task.Status = model.TaskStatusSuccess
+			}
+			task.PrivateData.ResponsesBackground = tc.background
+			require.NoError(t, model.DB.Save(task).Error)
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{}`))
+			c.Set("id", task.UserId)
+			if tc.responses {
+				c.Set(jsplugin.ContextKeyProtocolRequest, jsplugin.ProtocolRequestContext{Protocol: "openai_responses"})
+			}
+			finish := beginImageLogCapture(c)
+			c.Set(imageLogTaskContextKey, task)
+			if tc.stream {
+				c.Data(http.StatusOK, "text/event-stream", []byte("data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[]}}\n\n"))
+			} else {
+				c.JSON(http.StatusOK, gin.H{"status": "completed", "id": task.TaskID})
+			}
+			finish()
+			stored, exists, err := model.GetByTaskId(task.UserId, task.TaskID)
+			require.NoError(t, err)
+			require.True(t, exists)
+			if tc.submission {
+				require.NotNil(t, stored.PrivateData.SubmissionResponse)
+				assert.Nil(t, stored.PrivateData.Response)
+			} else {
+				require.NotNil(t, stored.PrivateData.Response)
+				assert.Contains(t, string(stored.PrivateData.Response.Body), `"completed"`)
+				assert.Nil(t, stored.PrivateData.SubmissionResponse)
 			}
 		})
 	}

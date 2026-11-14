@@ -25,20 +25,22 @@ import { api } from '@/lib/api'
 import {
   TaskClientRequestDetails,
   TaskResponseDetails,
+  TaskUpstreamResponseDetails,
 } from '../task-client-request'
 
-function renderRequest(open = true, response = false) {
+function renderRequest(open = true, response = false, upstream = false) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
+  let details = <TaskClientRequestDetails taskId='task-public' open={open} />
+  if (response) {
+    details = <TaskResponseDetails taskId='task-public' open={open} />
+  }
+  if (upstream) {
+    details = <TaskUpstreamResponseDetails taskId='task-public' open={open} />
+  }
   return render(
-    <QueryClientProvider client={client}>
-      {response ? (
-        <TaskResponseDetails taskId='task-public' open={open} />
-      ) : (
-        <TaskClientRequestDetails taskId='task-public' open={open} />
-      )}
-    </QueryClientProvider>
+    <QueryClientProvider client={client}>{details}</QueryClientProvider>
   )
 }
 
@@ -131,6 +133,31 @@ describe('task client request details', () => {
     expect(get).not.toHaveBeenCalled()
   })
 
+  test('upstream diagnostics request a separate response source', async () => {
+    const get = vi.spyOn(api, 'get').mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          recorded: true,
+          source: 'upstream_result',
+          snapshot: {
+            content_type: 'application/json',
+            body_kind: 'json',
+            body: { provider_status: 'done' },
+          },
+        },
+      },
+    })
+    renderRequest(true, true, true)
+    expect(await screen.findByText('Stored upstream result')).toBeVisible()
+    expect(get).toHaveBeenCalledWith(
+      '/api/task/task-public/response?source=upstream_result'
+    )
+    expect(
+      screen.queryByText('Current platform query result')
+    ).not.toBeInTheDocument()
+  })
+
   test('response results load on demand and show binary omission while remaining copyable', async () => {
     const snapshot = {
       status_code: 200,
@@ -156,7 +183,9 @@ describe('task client request details', () => {
       await screen.findByRole('button', { name: 'Copy to clipboard' })
     )
     await waitFor(() =>
-      expect(writeText).toHaveBeenCalledWith(JSON.stringify(snapshot, null, 2))
+      expect(writeText).toHaveBeenCalledWith(
+        JSON.stringify(snapshot.body, null, 2)
+      )
     )
     expect(get).toHaveBeenCalledWith('/api/task/task-public/response')
     expect(
@@ -165,13 +194,13 @@ describe('task client request details', () => {
     expect(screen.getAllByText('Client response').length).toBeGreaterThan(0)
   })
 
-  test('an asynchronous result is labelled as upstream output and marks the size limit', async () => {
+  test('an asynchronous result is labelled as a current platform result and marks the size limit', async () => {
     vi.spyOn(api, 'get').mockResolvedValue({
       data: {
         success: true,
         data: {
           recorded: true,
-          source: 'upstream_result',
+          source: 'current_platform_result',
           snapshot: {
             content_type: 'application/json',
             body_kind: 'json',
@@ -183,10 +212,68 @@ describe('task client request details', () => {
       },
     })
     renderRequest(true, true)
-    expect(await screen.findByText('Stored upstream result')).toBeVisible()
+    expect(
+      await screen.findByText('Current platform query result')
+    ).toBeVisible()
+    expect(screen.queryByText('Stored upstream result')).not.toBeInTheDocument()
     expect(screen.getByRole('status')).toHaveTextContent(
       'Response body omitted: size limit exceeded'
     )
+  })
+
+  test('asynchronous submission responses are shown separately from the current result', async () => {
+    vi.spyOn(api, 'get').mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          recorded: true,
+          source: 'current_platform_result',
+          snapshot: {
+            content_type: 'application/json',
+            body_kind: 'json',
+            body: { status: 'completed' },
+          },
+          submission_snapshot: {
+            content_type: 'application/json',
+            body_kind: 'json',
+            body: { status: 'queued' },
+          },
+        },
+      },
+    })
+    renderRequest(true, true)
+    expect(
+      await screen.findByText('Current platform query result')
+    ).toBeVisible()
+    expect(screen.getByText('Submission response')).toBeVisible()
+    expect(
+      screen.getAllByRole('button', { name: 'Copy to clipboard' })
+    ).toHaveLength(2)
+  })
+
+  test('a failed current projection keeps the recorded submission visible and allows retry', async () => {
+    vi.spyOn(api, 'get').mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          recorded: false,
+          snapshot: null,
+          source: 'current_platform_result',
+          unavailable: true,
+          submission_snapshot: {
+            content_type: 'application/json',
+            body_kind: 'json',
+            body: { status: 'queued' },
+          },
+        },
+      },
+    })
+    renderRequest(true, true)
+    expect(
+      await screen.findByText('Platform response is unavailable')
+    ).toBeVisible()
+    expect(screen.getByText('Submission response')).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeVisible()
   })
 
   test('streaming response snapshots disclose that only final events are retained', async () => {
@@ -210,7 +297,7 @@ describe('task client request details', () => {
     renderRequest(true, true)
     expect(
       await screen.findByText(
-        'Streaming logs retain final image and error events only'
+        'Streaming logs retain final result and error events only'
       )
     ).toBeVisible()
   })

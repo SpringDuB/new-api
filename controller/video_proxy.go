@@ -18,6 +18,7 @@ import (
 	"github.com/MoeForge/moego/ojson"
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
@@ -84,6 +85,27 @@ func VideoProxy(c *gin.Context) {
 			fmt.Sprintf("Task is not completed yet, current status: %s", task.Status))
 		return
 	}
+	deliveries, err := resolveTaskVideoDelivery(c.Request.Context(), task)
+	if err != nil {
+		writeTaskMediaProxyError(c, err)
+		return
+	}
+	primaryKey := ""
+	for key := range deliveries {
+		if key == "video" {
+			primaryKey = key
+			break
+		}
+		if primaryKey == "" || key < primaryKey {
+			primaryKey = key
+		}
+	}
+	if delivery, ok := deliveries[primaryKey]; ok {
+		if err := delivery.Serve(c, task); err != nil {
+			writeTaskMediaProxyError(c, err)
+		}
+		return
+	}
 
 	var descriptor *relaychannel.TaskContentRequest
 	if taskHasPluginExecution(task) {
@@ -137,7 +159,7 @@ func proxyTaskMedia(c *gin.Context, task *model.Task, descriptor *relaychannel.T
 
 // consumeTaskMedia applies the same SSRF and redirect policy to serving and
 // archiving. An archive consumer only receives a complete, non-range response.
-func consumeTaskMedia(c *gin.Context, task *model.Task, descriptor *relaychannel.TaskContentRequest, consume func(io.Reader) error) (mediaErr error) {
+func consumeTaskMedia(c *gin.Context, task *model.Task, descriptor *relaychannel.TaskContentRequest, consume func(io.Reader, *http.Response) error) (mediaErr error) {
 	upstreamStatus := 0
 	defer func() {
 		if mediaErr != nil {
@@ -171,7 +193,7 @@ func consumeTaskMedia(c *gin.Context, task *model.Task, descriptor *relaychannel
 			}
 			for _, encoding := range []*base64.Encoding{base64.StdEncoding, base64.RawStdEncoding, base64.URLEncoding, base64.RawURLEncoding} {
 				if _, err := encoding.ValidateString(payload); err == nil {
-					return consume(base64.NewDecoder(encoding, strings.NewReader(payload)))
+					return consume(base64.NewDecoder(encoding, strings.NewReader(payload)), nil)
 				}
 			}
 			return errors.New("invalid artifact base64")
@@ -319,7 +341,7 @@ func consumeTaskMedia(c *gin.Context, task *model.Task, descriptor *relaychannel
 		if resp.StatusCode != http.StatusOK {
 			return &taskMediaProxyError{status: http.StatusBadGateway, code: "artifact_upstream_error", message: "Artifact archive requires a complete media response"}
 		}
-		return consume(resp.Body)
+		return consume(resp.Body, resp)
 	}
 
 	switch resp.StatusCode {
@@ -372,7 +394,7 @@ type taskMediaHTTPResult struct {
 // ContentPath of the JSON reply. An operation that failed is an upstream
 // error, one not yet done is not ready, and one without the string, expired
 // or written to storage instead, no longer has the content.
-func writeTaskMediaContentPath(c *gin.Context, body io.Reader, descriptor *relaychannel.TaskContentRequest, consume func(io.Reader) error) error {
+func writeTaskMediaContentPath(c *gin.Context, body io.Reader, descriptor *relaychannel.TaskContentRequest, consume func(io.Reader, *http.Response) error) error {
 	limitMB := constant.MaxFileDownloadMB
 	if limitMB <= 0 {
 		limitMB = 64
@@ -444,7 +466,7 @@ func writeTaskMediaContentPath(c *gin.Context, body io.Reader, descriptor *relay
 	if consume != nil {
 		for _, encoding := range []*base64.Encoding{base64.StdEncoding, base64.RawStdEncoding, base64.URLEncoding, base64.RawURLEncoding} {
 			if _, err := encoding.ValidateString(content.Str); err == nil {
-				return consume(base64.NewDecoder(encoding, strings.NewReader(content.Str)))
+				return consume(base64.NewDecoder(encoding, strings.NewReader(content.Str)), nil)
 			}
 		}
 		return errors.New("invalid artifact base64")
@@ -533,6 +555,8 @@ func applyTaskMediaRequestHeaders(destination http.Header, headers map[string]st
 
 func taskMediaRedirectClient(base *http.Client, proxy string, c *gin.Context, clientHeaders map[string]string, credentialless bool) *http.Client {
 	cloned := *base
+	cloned.Jar = nil
+	stripped := credentialless
 	cloned.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 		if len(via) >= 10 {
 			return fmt.Errorf("%w: too many redirects", errTaskMediaRequestRejected)
@@ -547,16 +571,23 @@ func taskMediaRedirectClient(base *http.Client, proxy string, c *gin.Context, cl
 		if isSelfTaskMediaURL(c, req.URL) {
 			return fmt.Errorf("%w: proxy loop", errTaskMediaRequestRejected)
 		}
+		if len(via) > 0 && via[len(via)-1].URL.Scheme == "https" && req.URL.Scheme != "https" {
+			return fmt.Errorf("%w: insecure redirect", errTaskMediaRequestRejected)
+		}
 		if len(via) > 0 && !sameTaskMediaOrigin(via[len(via)-1].URL, req.URL) {
-			if !credentialless {
-				return fmt.Errorf("%w: credentialed cross-origin redirect", errTaskMediaRequestRejected)
+			if req.Method != http.MethodGet && req.Method != http.MethodHead || req.Body != nil && req.Body != http.NoBody {
+				return fmt.Errorf("%w: cross-origin body replay", errTaskMediaRequestRejected)
 			}
+			stripped = true
+		}
+		if stripped {
 			for name := range req.Header {
 				req.Header.Del(name)
 			}
 			req.Body = http.NoBody
 			req.GetBody = nil
 			req.ContentLength = 0
+			req.Host = ""
 		}
 		for name, value := range clientHeaders {
 			req.Header.Set(name, value)
@@ -688,7 +719,7 @@ func writeTaskMediaProxyError(c *gin.Context, err error) {
 	if !errors.As(err, &proxyErr) {
 		proxyErr = &taskMediaProxyError{
 			status: http.StatusBadGateway, code: "artifact_upstream_error",
-			message: "Failed to fetch artifact content", err: err,
+			message: i18n.T(c, i18n.MsgRelayVideoDeliveryFailed), err: err,
 		}
 	}
 	c.Header("Cache-Control", "private, no-store")

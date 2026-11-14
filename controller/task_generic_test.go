@@ -18,11 +18,14 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
+	"github.com/QuantumNous/new-api/relay"
 	relaychannel "github.com/QuantumNous/new-api/relay/channel"
 	taskjsplugin "github.com/QuantumNous/new-api/relay/channel/task/jsplugin"
+	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/gin-gonic/gin"
@@ -167,10 +170,9 @@ export function buildContentRequest(ctx){if(ctx.data.object==="operation")return
 	publicContext.Set("id", task.UserId)
 	publicContext.Params = gin.Params{{Key: "key", Value: task.TaskID}, {Key: "artifact_key", Value: "video"}}
 	TaskArtifactContent(publicContext)
-	assert.Equal(t, http.StatusOK, publicResponse.Code)
-	assert.Empty(t, publicResponse.Header().Get("Location"))
-	assert.Equal(t, "archived-media", publicResponse.Body.String())
-	assert.EqualValues(t, 3, mediaCalls.Load(), "public content continues using the original upstream")
+	assert.Equal(t, http.StatusTemporaryRedirect, publicResponse.Code)
+	assert.Contains(t, publicResponse.Header().Get("Location"), "x-oss-signature=")
+	assert.EqualValues(t, 2, mediaCalls.Load(), "a redirected upstream uses the stored video without fetching it again")
 	assert.EqualValues(t, 2, puts.Load())
 
 	view, err := service.BuildTaskPluginView(task)
@@ -369,6 +371,437 @@ export function buildContentRequest(ctx){if(ctx.data.object==="operation")return
 	require.NoError(t, model.DB.First(&newTask, newTask.ID).Error)
 	assert.Nil(t, newTask.PrivateData.ArtifactArchive, "disabled writes never schedule new archives")
 	assert.EqualValues(t, 6, puts.Load())
+}
+
+func TestTaskVideoDeliverySelectsDirectOrStoredURLs(t *testing.T) {
+	task := setupGenericTaskTest(t)
+	require.NoError(t, i18n.Init())
+	allowPrivateTaskMediaTest(t)
+	previousMemoryCache := common.MemoryCacheEnabled
+	common.MemoryCacheEnabled = false
+	t.Cleanup(func() { common.MemoryCacheEnabled = previousMemoryCache })
+	var mutex sync.Mutex
+	objects := map[string][]byte{}
+	var puts atomic.Int32
+	var failUpload atomic.Bool
+	ossServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mutex.Lock()
+		defer mutex.Unlock()
+		switch r.Method {
+		case http.MethodHead:
+			if content, ok := objects[r.URL.Path]; ok {
+				w.Header().Set("Content-Length", fmt.Sprint(len(content)))
+				w.Header().Set("Content-Type", "video/mp4")
+			} else {
+				w.WriteHeader(http.StatusNotFound)
+			}
+		case http.MethodPut:
+			if failUpload.Load() {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				return
+			}
+			content, err := io.ReadAll(r.Body)
+			assert.NoError(t, err)
+			objects[r.URL.Path] = content
+			puts.Add(1)
+		default:
+			t.Errorf("unexpected OSS method %s", r.Method)
+		}
+	}))
+	defer ossServer.Close()
+	previousTransport := http.DefaultTransport
+	http.DefaultTransport = ossServer.Client().Transport
+	t.Cleanup(func() { http.DefaultTransport = previousTransport })
+	config := system_setting.TaskArtifactStoreConfig{Mode: "oss", OSSEndpoint: ossServer.URL, OSSBucket: "delivery", OSSRegion: "cn-hangzhou", OSSAccessKey: "access", OSSSecretKey: "secret", OSSPrefix: "tasks", OSSPresignTTLSeconds: 900, OSSMaxBytes: 1024}
+	encoded, err := common.Marshal(config)
+	require.NoError(t, err)
+	common.OptionMapRWMutex.Lock()
+	if common.OptionMap == nil {
+		common.OptionMap = map[string]string{}
+	}
+	previousConfig := common.OptionMap[system_setting.TaskArtifactStoreOptionKey]
+	common.OptionMap[system_setting.TaskArtifactStoreOptionKey] = string(encoded)
+	common.OptionMapRWMutex.Unlock()
+	t.Cleanup(func() {
+		common.OptionMapRWMutex.Lock()
+		common.OptionMap[system_setting.TaskArtifactStoreOptionKey] = previousConfig
+		common.OptionMapRWMutex.Unlock()
+	})
+	var offline atomic.Bool
+	var blockedCalls atomic.Int32
+	var blockedReleases sync.Map
+	blockedStarted := make(chan string, 4)
+	media := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Empty(t, r.Header.Get("Authorization"))
+		assert.Empty(t, r.Header.Get("X-Vendor-Key"))
+		assert.Empty(t, r.Header.Get("Cookie"))
+		assert.Empty(t, r.Header.Get("Referer"))
+		assert.Empty(t, r.Header.Get("Range"), "archival always downloads the complete object")
+		w.Header().Set("Content-Type", "video/mp4")
+		if block := r.URL.Query().Get("block"); block != "" {
+			blockedCalls.Add(1)
+			_, _ = io.WriteString(w, "v")
+			w.(http.Flusher).Flush()
+			blockedStarted <- block
+			release, ok := blockedReleases.Load(block)
+			if !ok {
+				t.Errorf("missing blocked transfer fixture %q", block)
+				return
+			}
+			select {
+			case <-release.(chan struct{}):
+			case <-r.Context().Done():
+				return
+			}
+		}
+		if r.URL.Path == "/large" {
+			_, _ = io.WriteString(w, strings.Repeat("v", 1025))
+			return
+		}
+		_, _ = io.WriteString(w, "video-bytes")
+	}))
+	defer media.Close()
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method, "download capabilities are probed with GET rather than HEAD")
+		if offline.Load() {
+			w.WriteHeader(http.StatusGone)
+			return
+		}
+		switch r.URL.Path {
+		case "/direct":
+			w.Header().Set("Content-Type", "video/mp4")
+			_, _ = io.WriteString(w, "video-bytes")
+		case "/redirect", "/retry", "/multiple", "/proxy-result":
+			http.Redirect(w, r, media.URL+"/video?signature=media-secret", http.StatusFound)
+		case "/blocked":
+			http.Redirect(w, r, media.URL+"/video?block="+r.URL.Query().Get("block"), http.StatusFound)
+		case "/same-origin":
+			http.Redirect(w, r, "/direct", http.StatusFound)
+		case "/oversize":
+			http.Redirect(w, r, media.URL+"/large", http.StatusFound)
+		case "/protected":
+			if r.Header.Get("X-Vendor-Key") != "vendor-secret" {
+				w.WriteHeader(http.StatusForbidden)
+				return
+			}
+			http.Redirect(w, r, media.URL+"/video", http.StatusFound)
+		case "/html":
+			w.Header().Set("Content-Type", "text/html")
+			_, _ = io.WriteString(w, "<html>challenge</html>")
+		case "/empty":
+			w.Header().Set("Content-Type", "video/mp4")
+		default:
+			w.WriteHeader(http.StatusBadGateway)
+		}
+	}))
+	defer origin.Close()
+	source := `export const meta={apiVersion:1,key:"delivery-test",name:"Delivery",version:"1.0.0",author:{name:"Test"},models:["m"],fetchMode:"per_task",protocols:["openai_video"]};
+export function buildSubmitRequest(){return {}} export function parseSubmitResponse(){return {taskId:"vendor"}} export function buildQueryRequest(){return {}} export function parseTaskResult(){return {status:"SUCCESS"}}
+export function listArtifacts(task){if(task.data.image)return [{key:"video",type:"video",mimeType:"video/mp4"},{key:"image-1",type:"image",mimeType:"image/png"}];return task.data.extra?[{key:"video-alt",type:"video",mimeType:"video/mp4"},{key:"video",type:"video",mimeType:"video/mp4"}]:[{key:"video",type:"video",mimeType:"video/mp4"}]}
+export function buildContentRequest(ctx){let url=ctx.artifactKey==="video-alt"?ctx.data.extra:ctx.artifactKey==="image-1"?ctx.data.image:ctx.data.url;if(ctx.data.refresh)url=url.replace("signature=origin-secret","signature=refreshed-secret");return ctx.data.protected?{url,method:"GET",headers:{"X-Vendor-Key":"vendor-secret"}}:{url,method:"GET",credentialless:true}}
+export const protocols={openai_video:{decodeRequest(){return {}},render(ctx,task){return task.data}}};`
+	plugin, err := jsplugin.DefaultRegistry.RegisterFactory(source, jsplugin.Options{})
+	require.NoError(t, err)
+	t.Cleanup(func() { jsplugin.DefaultRegistry.Unregister("delivery-test") })
+	channel, err := model.GetChannelById(task.ChannelId, true)
+	require.NoError(t, err)
+	channel.BaseURL = &origin.URL
+	require.NoError(t, model.DB.Save(channel).Error)
+	task.Platform = "delivery-test"
+	task.PrivateData.Execution = &model.TaskExecutionSnapshot{TaskPlugin: &model.TaskPluginSnapshot{Key: "delivery-test"}}
+	for _, name := range []string{"direct", "redirect", "same-origin", "protected", "proxy-result", "multiple", "html", "empty", "missing", "oversize", "retry"} {
+		t.Run(name, func(t *testing.T) {
+			current := *task
+			current.TaskID += "_" + name
+			current.PrivateData.ResultURL = origin.URL + "/" + name + "?download=0&signature=origin-secret"
+			sourceURL := current.GetResultURL()
+			if name == "proxy-result" {
+				current.PrivateData.ResultURL = "https://gateway.example/v1/videos/" + current.TaskID + "/content"
+			}
+			if name == "retry" {
+				current.PrivateData.ArtifactArchive = &model.TaskArtifactArchive{Status: model.TaskArchiveFailed, UpdatedAt: time.Now().Unix()}
+			}
+			var extra string
+			expectedUploads := int32(1)
+			if name == "multiple" {
+				extra = origin.URL + "/same-origin?signature=second-secret"
+				expectedUploads = 2
+			}
+			current.SetData(map[string]any{"url": sourceURL, "nested": []any{map[string]any{"video_url": sourceURL}}, "metadata": "untouched", "protected": name == "protected", "extra": extra})
+			require.NoError(t, model.DB.Save(&current).Error)
+			original := bytes.Clone(current.Data)
+			before := puts.Load()
+			if name == "retry" {
+				failUpload.Store(true)
+				_, err := service.BuildTaskPluginDeliveryView(t.Context(), &current)
+				require.Error(t, err)
+				assert.NotContains(t, err.Error(), "signature=")
+				failUpload.Store(false)
+			}
+			view, err := service.BuildTaskPluginDeliveryView(t.Context(), &current)
+			if name == "html" || name == "empty" || name == "missing" || name == "oversize" {
+				require.Error(t, err)
+				assert.Equal(t, before, puts.Load())
+				if name == "missing" {
+					require.NoError(t, model.DB.Save(&current).Error)
+					c, _ := gin.CreateTestContext(httptest.NewRecorder())
+					c.Set("id", current.UserId)
+					c.Params = gin.Params{{Key: "task_id", Value: current.TaskID}}
+					c.Request = httptest.NewRequest(http.MethodGet, "/legacy/tasks/"+current.TaskID, nil)
+					c.Request.Header.Set("Accept-Language", "en")
+					failure := relay.RelayTaskFetch(c, relayconstant.RelayModeVideoFetchByID)
+					require.NotNil(t, failure)
+					assert.Equal(t, http.StatusBadGateway, failure.StatusCode)
+					assert.Equal(t, "video_delivery_failed", failure.Code)
+					assert.Equal(t, "Failed to fetch or store the video. Please try again later.", failure.Message)
+				}
+				return
+			}
+			require.NoError(t, err)
+			data := view.Data.(map[string]any)
+			link := data["url"].(string)
+			assert.Equal(t, "untouched", data["metadata"])
+			assert.Equal(t, link, data["nested"].([]any)[0].(map[string]any)["video_url"])
+			assert.Equal(t, original, []byte(current.Data), "upstream data stays available for refreshes")
+			if name == "direct" {
+				assert.Equal(t, current.GetResultURL(), link)
+				assert.Equal(t, before, puts.Load())
+			} else {
+				assert.Contains(t, link, ossServer.URL+"/delivery/tasks/")
+				assert.Contains(t, link, "x-oss-signature=")
+				assert.NotContains(t, link, "origin-secret")
+				assert.Equal(t, before+expectedUploads, puts.Load())
+				if name == "multiple" {
+					assert.Contains(t, data["extra"], "/video-alt?")
+					assert.NotEqual(t, link, data["extra"], "each video must keep its own stored object")
+				}
+				offline.Store(true)
+				deliveries, err := resolveTaskVideoDelivery(t.Context(), &current)
+				offline.Store(false)
+				require.NoError(t, err, "stored video survives expiration of the upstream URL")
+				assert.Contains(t, deliveries["video"].URL, "x-oss-signature=")
+			}
+			if name == "proxy-result" {
+				current.SetData(map[string]any{"url": sourceURL, "refresh": true, "variant": sourceURL + "&variant=thumbnail"})
+			}
+			cachedView, err := service.BuildTaskPluginDeliveryView(t.Context(), &current)
+			require.NoError(t, err)
+			cachedURL := cachedView.Data.(map[string]any)["url"].(string)
+			assert.Equal(t, strings.SplitN(link, "?", 2)[0], strings.SplitN(cachedURL, "?", 2)[0], "cached reads keep substituting the actual provider source")
+			if name == "proxy-result" {
+				assert.Equal(t, sourceURL+"&variant=thumbnail", cachedView.Data.(map[string]any)["variant"], "non-signature resource parameters stay significant")
+			}
+			expectedPuts := before + expectedUploads
+			if name == "direct" {
+				expectedPuts = before
+			}
+			assert.Equal(t, expectedPuts, puts.Load(), "delivery retries reuse existing objects")
+			if name == "multiple" {
+				t.Run("ambiguous signatures preserve distinct resources", func(t *testing.T) {
+					previous := service.ResolveTaskVideoDelivery
+					t.Cleanup(func() { service.ResolveTaskVideoDelivery = previous })
+					service.ResolveTaskVideoDelivery = func(context.Context, *model.Task) (map[string]service.TaskVideoDelivery, error) {
+						return map[string]service.TaskVideoDelivery{
+							"first":  {URL: "https://storage.example/first", SourceURLs: []string{"https://media.example/download?signature=first"}},
+							"second": {URL: "https://storage.example/second", SourceURLs: []string{"https://media.example/download?signature=second"}},
+						}, nil
+					}
+					presented, err := service.ApplyTaskVideoDelivery(t.Context(), &current, map[string]any{"first": "https://media.example/download?signature=first", "second": "https://media.example/download?signature=second", "other": "https://media.example/download?signature=other"})
+					require.NoError(t, err)
+					assert.Equal(t, map[string]any{"first": "https://storage.example/first", "second": "https://storage.example/second", "other": "https://media.example/download?signature=other"}, presented)
+				})
+			}
+			adaptor := taskjsplugin.New(plugin)
+			rendered, err := adaptor.ConvertToOpenAIVideo(&current)
+			require.NoError(t, err)
+			if name == "redirect" {
+				current.PrivateData.Execution.RequestPath = "/v1/videos"
+				previewContext, _ := imageLogReadContext("/api/task/"+current.TaskID+"/response", current.TaskID, current.UserId, common.RoleCommonUser)
+				preview, path, err := buildDashboardTaskQueryResponse(previewContext, &current)
+				require.NoError(t, err)
+				require.NotNil(t, preview)
+				assert.Equal(t, "/v1/videos/"+current.TaskID, path)
+				assert.Contains(t, string(preview.Body), strings.SplitN(link, "?", 2)[0])
+				assert.NotContains(t, string(preview.Body), "origin-secret")
+				assert.NotContains(t, string(preview.Body), sourceURL)
+				assert.Contains(t, string(preview.Body), `"status":"completed"`)
+				assert.Equal(t, before+expectedUploads, puts.Load(), "dashboard reuses the stored delivery")
+			}
+			var renderedVideo map[string]any
+			require.NoError(t, common.Unmarshal(rendered, &renderedVideo))
+			artifacts, err := taskjsplugin.RendererArtifacts(t.Context(), plugin, &current, service.BuildTaskArtifactContentURL)
+			require.NoError(t, err)
+			// The legacy task envelope also substitutes the delivery address and
+			// preserves opaque upstream numbers without a float64 round trip.
+			current.SetData(map[string]any{"url": sourceURL, "opaque_id": int64(9007199254740993), "protected": name == "protected", "extra": extra})
+			require.NoError(t, model.DB.Save(&current).Error)
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Set("id", current.UserId)
+			c.Params = gin.Params{{Key: "task_id", Value: current.TaskID}}
+			c.Request = httptest.NewRequest(http.MethodGet, "/legacy/tasks/"+current.TaskID, nil)
+			require.Nil(t, relay.RelayTaskFetch(c, relayconstant.RelayModeVideoFetchByID))
+			assert.Contains(t, recorder.Body.String(), `"opaque_id":9007199254740993`)
+			var envelope struct {
+				Data struct {
+					ResultURL string `json:"result_url"`
+					Data      struct {
+						URL string `json:"url"`
+					} `json:"data"`
+				} `json:"data"`
+			}
+			require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &envelope))
+			for _, actual := range []string{renderedVideo["url"].(string), artifacts["video"].(map[string]any)["url"].(string), envelope.Data.ResultURL, envelope.Data.Data.URL} {
+				if name == "direct" {
+					assert.Equal(t, link, actual)
+				} else {
+					assert.True(t, strings.HasPrefix(actual, strings.SplitN(link, "?", 2)[0]+"?"))
+					assert.Contains(t, actual, "x-oss-signature=")
+				}
+			}
+			if name == "direct" {
+				current.PrivateData.ArtifactArchive = &model.TaskArtifactArchive{Status: model.TaskArchiveRunning}
+				require.NoError(t, service.ArchiveTaskArtifacts(t.Context(), &current, service.GetTaskArtifactStore()))
+				assert.Equal(t, before, puts.Load(), "background archival also skips directly accessible videos")
+				require.Len(t, current.PrivateData.ArtifactArchive.Artifacts, 1)
+				assert.Empty(t, current.PrivateData.ArtifactArchive.Artifacts[0].Backend)
+			}
+			if name == "retry" {
+				var repaired model.Task
+				require.NoError(t, model.DB.First(&repaired, current.ID).Error)
+				require.Equal(t, model.TaskArchiveCompleted, repaired.PrivateData.ArtifactArchive.Status)
+				require.Len(t, repaired.PrivateData.ArtifactArchive.Artifacts, 1)
+				assert.Equal(t, "oss", repaired.PrivateData.ArtifactArchive.Artifacts[0].Backend)
+				assert.NotEmpty(t, repaired.PrivateData.ArtifactArchive.Artifacts[0].ObjectKey)
+				// A stale background failure must not undo the repaired manifest.
+				_, err = model.UpdateTaskArtifactArchive(t.Context(), &current, model.TaskArtifactArchive{Status: model.TaskArchiveFailed, UpdatedAt: time.Now().Unix(), Artifacts: []model.TaskArchivedArtifact{{Key: "video", Type: "video"}}})
+				require.NoError(t, err)
+				require.Equal(t, model.TaskArchiveCompleted, current.PrivateData.ArtifactArchive.Status)
+				previewContext, previewResponse := imageLogReadContext("/api/task/"+current.TaskID+"/artifacts", current.TaskID, current.UserId, common.RoleCommonUser)
+				GetDashboardTaskArtifacts(previewContext)
+				require.Equal(t, http.StatusOK, previewResponse.Code)
+				var projection struct {
+					Data struct {
+						Artifacts []taskArtifactResponse `json:"artifacts"`
+					} `json:"data"`
+				}
+				require.NoError(t, common.Unmarshal(previewResponse.Body.Bytes(), &projection))
+				require.Len(t, projection.Data.Artifacts, 1)
+				mediaContext, mediaResponse := imageLogReadContext(projection.Data.Artifacts[0].ContentURL, "", current.UserId, common.RoleCommonUser)
+				mediaContext.Params = gin.Params{{Key: "key", Value: current.TaskID}, {Key: "artifact_key", Value: "video"}}
+				TaskArtifactContent(mediaContext)
+				assert.Equal(t, http.StatusTemporaryRedirect, mediaResponse.Code, "dashboard reads recover after a successful on-demand retry")
+			}
+		})
+	}
+	t.Run("legacy-video-without-plugin", func(t *testing.T) {
+		current := *task
+		current.ID = 0
+		current.TaskID += "_legacy"
+		current.Platform = "legacy-video"
+		current.Action = constant.TaskActionTextToVideo
+		current.PrivateData.Execution = nil
+		current.PrivateData.ResultURL = origin.URL + "/redirect"
+		current.SetData(map[string]any{"url": current.GetResultURL()})
+		require.NoError(t, model.DB.Create(&current).Error)
+		view, err := service.BuildTaskPluginDeliveryView(t.Context(), &current)
+		require.NoError(t, err)
+		assert.Contains(t, view.Data.(map[string]any)["url"], "x-oss-signature=")
+		assert.Equal(t, model.TaskArchiveCompleted, current.PrivateData.ArtifactArchive.Status)
+	})
+	t.Run("partial-repair-keeps-stored-video-readable", func(t *testing.T) {
+		current := *task
+		current.ID = 0
+		current.TaskID += "_partial"
+		current.PrivateData.ResultURL = origin.URL + "/redirect"
+		current.PrivateData.ArtifactArchive = &model.TaskArtifactArchive{Status: model.TaskArchiveFailed, UpdatedAt: time.Now().Unix()}
+		current.SetData(map[string]any{"url": current.GetResultURL(), "extra": origin.URL + "/missing"})
+		require.NoError(t, model.DB.Create(&current).Error)
+		_, err := taskVideoDelivery(t.Context(), &current, relaychannel.TaskArtifact{Key: "video", Type: "video", MimeType: "video/mp4"}, service.GetTaskArtifactStore())
+		require.NoError(t, err)
+		assert.Equal(t, model.TaskArchiveFailed, current.PrivateData.ArtifactArchive.Status, "one successful video must not mark a missing second video complete")
+		for _, artifact := range []struct {
+			key    string
+			status int
+		}{{"video", http.StatusTemporaryRedirect}, {"video-alt", http.StatusServiceUnavailable}} {
+			c, response := imageLogReadContext("/v1/tasks/"+current.TaskID+"/artifacts/"+artifact.key+"/content?archive=1", "", current.UserId, common.RoleCommonUser)
+			c.Params = gin.Params{{Key: "key", Value: current.TaskID}, {Key: "artifact_key", Value: artifact.key}}
+			TaskArtifactContent(c)
+			assert.Equal(t, artifact.status, response.Code)
+		}
+	})
+	t.Run("first-video-delivery-preserves-image-archival", func(t *testing.T) {
+		current := *task
+		current.ID = 0
+		current.TaskID += "_mixed"
+		current.PrivateData.ResultURL = origin.URL + "/redirect"
+		current.SetData(map[string]any{"url": current.GetResultURL(), "image": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/lXcAAAAASUVORK5CYII="})
+		require.NoError(t, model.DB.Create(&current).Error)
+		_, err := taskVideoDelivery(t.Context(), &current, relaychannel.TaskArtifact{Key: "video", Type: "video", MimeType: "video/mp4"}, service.GetTaskArtifactStore())
+		require.NoError(t, err)
+		awaitTaskArtifactArchive(t, current.ID, model.TaskArchiveCompleted)
+		var archived model.Task
+		require.NoError(t, model.DB.First(&archived, current.ID).Error)
+		require.Len(t, archived.PrivateData.ArtifactArchive.Artifacts, 2)
+		for _, artifact := range archived.PrivateData.ArtifactArchive.Artifacts {
+			assert.Equal(t, "oss", artifact.Backend)
+			assert.NotEmpty(t, artifact.ObjectKey)
+		}
+	})
+	for _, tc := range []struct {
+		name   string
+		active int
+		shared bool
+	}{{"coalesces-background-and-request-downloads", 1, true}, {"bounds-background-and-request-downloads", 2, false}} {
+		t.Run(tc.name, func(t *testing.T) {
+			release := make(chan struct{})
+			var unblock sync.Once
+			defer unblock.Do(func() { close(release) })
+			blockedReleases.Store(tc.name, release)
+			defer blockedReleases.Delete(tc.name)
+			beforeDownloads, beforeUploads := blockedCalls.Load(), puts.Load()
+			tasks := make([]*model.Task, 0, tc.active)
+			for i := range tc.active {
+				current := *task
+				current.ID = 0
+				current.TaskID = fmt.Sprintf("task_delivery_%s_%d", tc.name, i)
+				current.PrivateData.ResultURL = origin.URL + "/blocked?block=" + tc.name
+				current.SetData(map[string]any{"url": current.GetResultURL()})
+				require.NoError(t, model.DB.Create(&current).Error)
+				service.ScheduleTaskArtifactArchive(&current)
+				tasks = append(tasks, &current)
+			}
+			startedContext, stopWaiting := context.WithTimeout(t.Context(), 5*time.Second)
+			defer stopWaiting()
+			for range tc.active {
+				select {
+				case block := <-blockedStarted:
+					require.Equal(t, tc.name, block)
+				case <-startedContext.Done():
+					t.Fatal("background transfers did not start", startedContext.Err())
+				}
+			}
+			waiting := *tasks[0]
+			if !tc.shared {
+				waiting.ID = 0
+				waiting.TaskID += "_waiting"
+				waiting.PrivateData.ArtifactArchive = nil
+				require.NoError(t, model.DB.Create(&waiting).Error)
+			}
+			// A request may time out while another caller owns the transfer.
+			// It must neither start another download nor cancel that caller.
+			requestContext, cancelRequest := context.WithTimeout(t.Context(), 250*time.Millisecond)
+			defer cancelRequest()
+			_, err := taskVideoDelivery(requestContext, &waiting, relaychannel.TaskArtifact{Key: "video", Type: "video", MimeType: "video/mp4"}, service.GetTaskArtifactStore())
+			require.ErrorIs(t, err, context.DeadlineExceeded)
+			assert.EqualValues(t, tc.active, blockedCalls.Load()-beforeDownloads)
+			unblock.Do(func() { close(release) })
+			for _, current := range tasks {
+				awaitTaskArtifactArchive(t, current.ID, model.TaskArchiveCompleted)
+			}
+			assert.EqualValues(t, tc.active, puts.Load()-beforeUploads)
+		})
+	}
 }
 
 func TestTaskArtifactArchiveDoesNotDelayOrFailGeneration(t *testing.T) {
@@ -596,14 +1029,17 @@ func setupGenericTaskTest(t *testing.T) *model.Task {
 	t.Helper()
 	originalDB := model.DB
 	previousRedisEnabled := common.RedisEnabled
+	previousMain, previousLog := common.MainDatabaseType(), common.LogDatabaseType()
 	common.RedisEnabled = false
 	// The dialect harness lets the same fixture run against MySQL and
 	// PostgreSQL when TEST_TASK_DB_DIALECT selects them; SQLite stays the default.
-	database, _ := openTaskDialectDatabase(t, &model.Task{}, &model.Channel{}, &model.User{})
+	database, dialect := openTaskDialectDatabase(t, &model.Task{}, &model.Channel{}, &model.User{})
 	model.DB = database
+	common.SetDatabaseTypes(dialect, previousLog)
 	t.Cleanup(func() {
 		model.DB = originalDB
 		common.RedisEnabled = previousRedisEnabled
+		common.SetDatabaseTypes(previousMain, previousLog)
 	})
 
 	require.NoError(t, database.Create(&model.User{
@@ -1390,16 +1826,33 @@ func TestWriteVideoDataURLRejectsOversizedPayloadBeforeDecode(t *testing.T) {
 	assert.Empty(t, recorder.Header().Get("Content-Type"))
 }
 
-func TestProxyTaskMediaAllowsOnlyCredentiallessCrossOriginRedirect(t *testing.T) {
+func TestProxyTaskMediaStripsCredentialsAcrossOrigins(t *testing.T) {
 	task := setupGenericTaskTest(t)
 	var destinationAuthorization, destinationRange string
+	var destinationCalls atomic.Int32
+	var source *httptest.Server
 	destination := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		destinationCalls.Add(1)
 		destinationAuthorization = r.Header.Get("Authorization")
 		destinationRange = r.Header.Get("Range")
-		_, _ = w.Write([]byte("redirected"))
+		for _, name := range []string{"X-Vendor-Key", "Cookie", "Referer"} {
+			assert.Empty(t, r.Header.Get(name))
+		}
+		http.Redirect(w, r, source.URL+"/final", http.StatusFound)
 	}))
 	defer destination.Close()
-	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	source = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/final" {
+			for _, name := range []string{"Authorization", "X-Vendor-Key", "Cookie", "Referer"} {
+				assert.Empty(t, r.Header.Get(name), "credentials must stay removed on return to the original host")
+			}
+			_, _ = io.WriteString(w, "redirected")
+			return
+		}
+		if r.Method == http.MethodPost {
+			http.Redirect(w, r, destination.URL, http.StatusTemporaryRedirect)
+			return
+		}
 		http.Redirect(w, r, destination.URL, http.StatusFound)
 	}))
 	defer source.Close()
@@ -1425,12 +1878,33 @@ func TestProxyTaskMediaAllowsOnlyCredentiallessCrossOriginRedirect(t *testing.T)
 	rejectedContext.Request = httptest.NewRequest(http.MethodGet, "/content", nil)
 	err = proxyTaskMedia(rejectedContext, task, &relaychannel.TaskContentRequest{
 		URL: source.URL, Method: http.MethodGet,
+		Headers: map[string]string{"Authorization": "Bearer provider-secret", "X-Vendor-Key": "provider-secret", "Cookie": "session=secret", "Referer": source.URL + "?signature=secret"},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "redirected", rejectedRecorder.Body.String())
+	assert.Empty(t, destinationAuthorization)
+	assert.Empty(t, destinationRange)
+	before := destinationCalls.Load()
+	err = proxyTaskMedia(rejectedContext, task, &relaychannel.TaskContentRequest{
+		URL: source.URL, Method: http.MethodPost, Body: []byte("private-operation"),
 		Headers: map[string]string{"Authorization": "Bearer provider-secret"},
 	})
-	var proxyErr *taskMediaProxyError
-	require.ErrorAs(t, err, &proxyErr)
-	assert.Equal(t, "artifact_request_rejected", proxyErr.code)
-	assert.Empty(t, destinationRange)
+	assert.ErrorIs(t, err, errTaskMediaRequestRejected)
+	assert.Equal(t, before, destinationCalls.Load(), "a cross-origin 307 must not replay a credentialed body")
+
+	tlsSource := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, destination.URL, http.StatusFound)
+	}))
+	defer tlsSource.Close()
+	client := taskMediaRedirectClient(tlsSource.Client(), "", rejectedContext, nil, true)
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, tlsSource.URL, nil)
+	require.NoError(t, err)
+	response, err := client.Do(request)
+	if response != nil {
+		require.NoError(t, response.Body.Close())
+	}
+	assert.ErrorIs(t, err, errTaskMediaRequestRejected)
+	assert.Equal(t, before, destinationCalls.Load(), "HTTPS redirects cannot downgrade to HTTP")
 }
 
 func TestTaskMediaRequestHeaderPolicy(t *testing.T) {

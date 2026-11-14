@@ -16,6 +16,29 @@ var ImageTaskActions = []string{"image_generation", "image_edit", "text_to_image
 
 func IsImageTaskAction(action string) bool { return slices.Contains(ImageTaskActions, action) }
 
+// UpdateTaskResponseLog records an actual client reply once without
+// replacing state written by a concurrent poll or artifact archive.
+func UpdateTaskResponseLog(ctx context.Context, task *Task, snapshot *TaskResponseSnapshot, submission bool) error {
+	return DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var current Task
+		if err := lockForUpdate(tx).First(&current, task.ID).Error; err != nil {
+			return err
+		}
+		if submission {
+			if current.PrivateData.SubmissionResponse != nil {
+				return nil
+			}
+			current.PrivateData.SubmissionResponse = snapshot
+		} else {
+			if current.PrivateData.Response != nil {
+				return nil
+			}
+			current.PrivateData.Response = snapshot
+		}
+		return tx.Model(&current).Update("private_data", current.PrivateData).Error
+	})
+}
+
 // UpdateTaskImageLog merges audit fields into the persisted terminal row.
 // A protocol observer can hold a stale task after losing the poller's CAS;
 // its plugin state, original request and billing context must not be restored.
@@ -62,8 +85,34 @@ func UpdateTaskArtifactArchive(ctx context.Context, task *Task, archive TaskArti
 			}
 			return nil
 		}
-		if archive.Artifacts == nil && current.PrivateData.ArtifactArchive != nil {
-			archive.Artifacts = current.PrivateData.ArtifactArchive.Artifacts
+		// Merge successful deliveries under the row lock. An older background
+		// worker must not erase an on-demand repair with failed placeholders.
+		if previous := current.PrivateData.ArtifactArchive; previous != nil {
+			for _, stored := range previous.Artifacts {
+				if previous.Status == TaskArchiveCompleted && stored.Type == "video" && stored.Backend == "" {
+					stored.Direct = true
+				}
+				index := slices.IndexFunc(archive.Artifacts, func(item TaskArchivedArtifact) bool { return item.Key == stored.Key })
+				if index < 0 {
+					archive.Artifacts = append(archive.Artifacts, stored)
+				} else if archive.Artifacts[index].Backend == "" && !archive.Artifacts[index].Direct {
+					archive.Artifacts[index] = stored
+				}
+			}
+		}
+		media, complete := false, true
+		for _, artifact := range archive.Artifacts {
+			switch artifact.Type {
+			case "video":
+				media = true
+				complete = complete && (artifact.Backend == "oss" || artifact.Direct)
+			case "image":
+				media = true
+				complete = complete && artifact.Backend == "oss"
+			}
+		}
+		if media && complete {
+			archive.Status = TaskArchiveCompleted
 		}
 		current.PrivateData.ArtifactArchive = &archive
 		for i := range current.PrivateData.ImageArtifacts {
@@ -79,6 +128,9 @@ func UpdateTaskArtifactArchive(ctx context.Context, task *Task, archive TaskArti
 		updated = true
 		return nil
 	})
+	if err == nil && updated {
+		task.PrivateData.ArtifactArchive = &archive
+	}
 	return updated, err
 }
 

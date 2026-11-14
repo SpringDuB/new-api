@@ -1421,7 +1421,7 @@ func renderTaskPluginQuery(
 	for _, task := range tasks {
 		tasksByID[task.TaskID] = task
 	}
-	views := make([]dto.TaskView, 0, len(taskIDs))
+	ordered := make([]*model.Task, 0, len(taskIDs))
 	for _, taskID := range taskIDs {
 		task := tasksByID[taskID]
 		if task == nil || !task.ResultRetrievable() {
@@ -1436,38 +1436,10 @@ func renderTaskPluginQuery(
 			abortTaskPluginRouteError(c, http.StatusNotFound)
 			return
 		}
-		view, viewErr := service.BuildTaskPluginView(task)
-		if viewErr != nil {
-			abortTaskPluginRouteError(c, http.StatusInternalServerError)
-			return
-		}
-		views = append(views, view)
+		ordered = append(ordered, task)
 	}
-
-	var rendererInput any = views
-	if !multiple {
-		rendererInput = views[0]
-	}
-	encoded, err := common.Marshal(rendererInput)
-	if err != nil {
-		abortTaskPluginRouteError(c, http.StatusInternalServerError)
-		return
-	}
-	// The presenter of one finished task gets its artifacts as the gateway
-	// addresses host protocol renderers get.
-	presenterContext := requestContext.JSValue()
-	artifacts := map[string]any{}
-	if !multiple {
-		projected, projectErr := taskjsplugin.RendererArtifacts(pinned.Plugin, tasksByID[taskIDs[0]], service.BuildTaskArtifactContentURL)
-		if projectErr != nil {
-			logger.LogWarn(c, common.LogText("task_plugin subsystem=query event=artifacts_unavailable generation=%d plugin=%q err=%q", generation, pinned.Plugin.Meta.Key, projectErr.Error()))
-		} else {
-			artifacts = projected
-		}
-	}
-	presenterContext["artifacts"] = artifacts
 	renderStarted := time.Now()
-	result, err := pinned.Plugin.Engine.CallPath(c.Request.Context(), "native", []string{renderer}, presenterContext, pluginruntime.RawJSON(encoded))
+	result, err := BuildTaskPluginQueryResult(c.Request.Context(), pinned.Plugin, requestContext, ordered, renderer, multiple)
 	if err != nil {
 		logger.LogDebug(
 			c,
@@ -1492,7 +1464,7 @@ func renderTaskPluginQuery(
 		generation,
 		pinned.Plugin.Meta.Key,
 		renderer,
-		len(views),
+		len(ordered),
 		time.Since(renderStarted).Milliseconds(),
 	)
 	c.Abort()
@@ -1500,6 +1472,41 @@ func renderTaskPluginQuery(
 		logger.LogWarn(c, common.LogText("task_plugin subsystem=query event=render_failed generation=%d plugin=%q renderer=%q err=%q", generation, pinned.Plugin.Meta.Key, renderer, replyErr.Error()))
 		abortTaskPluginRouteError(c, http.StatusInternalServerError)
 	}
+}
+
+// BuildTaskPluginQueryResult uses the native query presenter for already
+// authorized tasks. The dashboard and public query route share this boundary.
+func BuildTaskPluginQueryResult(ctx context.Context, plugin *pluginruntime.LoadedPlugin, requestContext pluginruntime.RouteRequestContext, tasks []*model.Task, renderer string, multiple bool) (any, error) {
+	views := make([]dto.TaskView, 0, len(tasks))
+	for _, task := range tasks {
+		view, err := service.BuildTaskPluginDeliveryView(ctx, task)
+		if err != nil {
+			return nil, err
+		}
+		views = append(views, view)
+	}
+	var rendererInput any = views
+	if !multiple {
+		rendererInput = views[0]
+	}
+	encoded, err := common.Marshal(rendererInput)
+	if err != nil {
+		return nil, err
+	}
+	// The presenter of one finished task gets its artifacts as the gateway
+	// addresses host protocol renderers get.
+	presenterContext := requestContext.JSValue()
+	artifacts := map[string]any{}
+	if !multiple {
+		projected, projectErr := taskjsplugin.RendererArtifacts(ctx, plugin, tasks[0], service.BuildTaskArtifactContentURL)
+		if projectErr != nil {
+			logger.LogWarn(ctx, common.LogText("task_plugin subsystem=query event=artifacts_unavailable plugin=%q err=%q", plugin.Meta.Key, projectErr.Error()))
+		} else {
+			artifacts = projected
+		}
+	}
+	presenterContext["artifacts"] = artifacts
+	return plugin.Engine.CallPath(ctx, "native", []string{renderer}, presenterContext, pluginruntime.RawJSON(encoded))
 }
 
 // nativeReplyHeaders are the headers a reply wrapper may set: a redirect
@@ -1515,15 +1522,41 @@ var nativeReplyHeaders = []string{"Location", "Retry-After"}
 // only Location and Retry-After, and a wrapper without __body sends no body.
 // An invalid wrapper is an error and writes nothing.
 func WriteNativeReply(c *gin.Context, status int, value any) error {
+	reply, err := BuildNativeReply(status, value)
+	if err != nil {
+		return err
+	}
+	for name, value := range reply.Headers {
+		c.Header(name, value)
+	}
+	if reply.HasBody {
+		c.JSON(reply.Status, reply.Body)
+	} else {
+		c.Status(reply.Status)
+		c.Writer.WriteHeaderNow()
+	}
+	return nil
+}
+
+// NativeReply is the validated HTTP envelope of a native presenter.
+type NativeReply struct {
+	Status  int
+	Headers map[string]string
+	Body    any
+	HasBody bool
+}
+
+// BuildNativeReply decodes the same reply envelope for public delivery and
+// dashboard presentation without writing to a client.
+func BuildNativeReply(status int, value any) (NativeReply, error) {
+	reply := NativeReply{Status: status, Body: value, HasBody: true}
 	wrapper, ok := value.(map[string]any)
 	if !ok {
-		c.JSON(status, value)
-		return nil
+		return reply, nil
 	}
 	rawStatus, isWrapper := wrapper["__status"]
 	if !isWrapper {
-		c.JSON(status, value)
-		return nil
+		return reply, nil
 	}
 	status = 0
 	switch typed := rawStatus.(type) {
@@ -1537,7 +1570,7 @@ func WriteNativeReply(c *gin.Context, status int, value any) error {
 		}
 	}
 	if status < 200 || status > 599 {
-		return fmt.Errorf("reply wrapper __status must be an integer from 200 to 599")
+		return NativeReply{}, fmt.Errorf("reply wrapper __status must be an integer from 200 to 599")
 	}
 	headers := map[string]string{}
 	for key, member := range wrapper {
@@ -1546,30 +1579,23 @@ func WriteNativeReply(c *gin.Context, status int, value any) error {
 		case "__headers":
 			values, ok := member.(map[string]any)
 			if !ok {
-				return fmt.Errorf("reply wrapper __headers must be an object")
+				return NativeReply{}, fmt.Errorf("reply wrapper __headers must be an object")
 			}
 			for name, headerValue := range values {
 				canonical := http.CanonicalHeaderKey(name)
 				text, isString := headerValue.(string)
 				if !slices.Contains(nativeReplyHeaders, canonical) || !isString {
-					return fmt.Errorf("reply wrapper may set only string Location and Retry-After headers")
+					return NativeReply{}, fmt.Errorf("reply wrapper may set only string Location and Retry-After headers")
 				}
 				headers[canonical] = text
 			}
 		default:
-			return fmt.Errorf("reply wrapper has unknown member %q", key)
+			return NativeReply{}, fmt.Errorf("reply wrapper has unknown member %q", key)
 		}
 	}
-	for name, headerValue := range headers {
-		c.Header(name, headerValue)
-	}
-	if body, hasBody := wrapper["__body"]; hasBody {
-		c.JSON(status, body)
-		return nil
-	}
-	c.Status(status)
-	c.Writer.WriteHeaderNow()
-	return nil
+	reply.Status, reply.Headers = status, headers
+	reply.Body, reply.HasBody = wrapper["__body"]
+	return reply, nil
 }
 
 // RespondTaskPluginError gives a pinned plugin a sanitized error DTO and writes

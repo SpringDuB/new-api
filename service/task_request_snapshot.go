@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -281,7 +282,7 @@ func BuildTaskResponseSnapshot(c *gin.Context, body []byte, status int, contentT
 		}
 	}
 	redactor.omitBinary = true
-	snapshot := &model.TaskResponseSnapshot{StatusCode: status, ContentType: redactor.text(contentType), BodyKind: kind}
+	snapshot := &model.TaskResponseSnapshot{CapturedAt: time.Now().Unix(), StatusCode: status, ContentType: redactor.text(contentType), BodyKind: kind}
 	if len(snapshot.ContentType) > 1024 {
 		snapshot.ContentType = "[OMITTED]"
 	}

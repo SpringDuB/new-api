@@ -138,14 +138,37 @@ func writeTaskArtifacts(c *gin.Context, task *model.Task, dashboard bool) {
 		return
 	}
 	items := make([]taskArtifactResponse, 0, len(artifacts))
-	for _, artifact := range artifacts {
-		contentURL, buildErr := service.BuildTaskArtifactContentURL(task.TaskID, artifact.Key)
-		if buildErr != nil {
-			writeTaskArtifactError(c, http.StatusInternalServerError, "artifact_url_error", "Failed to build artifact content URL")
+	var deliveries map[string]service.TaskVideoDelivery
+	if !dashboard {
+		deliveries, err = resolveTaskVideoDelivery(c.Request.Context(), task)
+		if err != nil {
+			writeTaskMediaProxyError(c, err)
 			return
 		}
+	}
+	for _, artifact := range artifacts {
+		var contentURL string
+		if delivery, ok := deliveries[artifact.Key]; ok {
+			contentURL = delivery.URL
+		} else {
+			var buildErr error
+			contentURL, buildErr = service.BuildTaskArtifactContentURL(task.TaskID, artifact.Key)
+			if buildErr != nil {
+				writeTaskArtifactError(c, http.StatusInternalServerError, "artifact_url_error", "Failed to build artifact content URL")
+				return
+			}
+		}
 		if dashboard && archiveStatus != "" && (artifact.Type == "image" || artifact.Type == "video") {
-			contentURL += "&archive=1"
+			stored := archiveStatus != model.TaskArchiveCompleted
+			for _, archived := range task.PrivateData.ArtifactArchive.Artifacts {
+				if archived.Key == artifact.Key {
+					stored = archived.Backend != "" || !archived.Direct && archiveStatus != model.TaskArchiveCompleted
+					break
+				}
+			}
+			if stored {
+				contentURL += "&archive=1"
+			}
 		}
 		items = append(items, taskArtifactResponse{
 			Key:        artifact.Key,
@@ -406,19 +429,30 @@ func TaskArtifactContent(c *gin.Context) {
 			return
 		}
 		status := service.TaskArtifactArchiveStatus(task)
-		if status == model.TaskArchivePending || status == model.TaskArchiveRunning {
-			writeTaskArtifactError(c, http.StatusConflict, "artifact_archiving", "Artifacts are being archived")
-			return
+		stored, direct := false, false
+		if task.PrivateData.ArtifactArchive != nil {
+			for _, artifact := range task.PrivateData.ArtifactArchive.Artifacts {
+				if artifact.Key == artifactKey {
+					stored, direct = artifact.Backend == "oss", artifact.Direct && artifact.Type == "video"
+					break
+				}
+			}
 		}
-		if status == model.TaskArchiveCompleted {
+		if stored || status == model.TaskArchiveCompleted && !direct {
 			if store, err := service.GetTaskArtifactReadStore(task, artifactKey); err == nil {
 				if ref, err := store.Resolve(task, artifactKey); err == nil && ref != nil && store.Serve(c, task, ref) == nil {
 					return
 				}
 			}
 		}
-		writeTaskArtifactError(c, http.StatusServiceUnavailable, "artifact_archive_failed", "Artifact archival failed")
-		return
+		if !direct {
+			if !stored && (status == model.TaskArchivePending || status == model.TaskArchiveRunning) {
+				writeTaskArtifactError(c, http.StatusConflict, "artifact_archiving", "Artifacts are being archived")
+				return
+			}
+			writeTaskArtifactError(c, http.StatusServiceUnavailable, "artifact_archive_failed", "Artifact archival failed")
+			return
+		}
 	}
 	hostArtifacts := hostImageTaskArtifacts(task)
 	if !taskArtifactKeyPattern.MatchString(artifactKey) || !task.ResultRetrievable() && len(hostArtifacts) == 0 {
@@ -432,6 +466,17 @@ func TaskArtifactContent(c *gin.Context) {
 	if !taskHasPluginExecution(task) && len(hostArtifacts) == 0 {
 		if artifactKey != "video" || !legacyVideoAvailable(task) {
 			writeTaskArtifactError(c, http.StatusNotFound, "artifact_not_found", "Task or artifact not found")
+			return
+		}
+		deliveries, err := resolveTaskVideoDelivery(c.Request.Context(), task)
+		if err != nil {
+			writeTaskMediaProxyError(c, err)
+			return
+		}
+		if delivery, ok := deliveries[artifactKey]; ok {
+			if err := delivery.Serve(c, task); err != nil {
+				writeTaskMediaProxyError(c, err)
+			}
 			return
 		}
 		descriptor := &relaychannel.TaskContentRequest{
@@ -454,15 +499,30 @@ func TaskArtifactContent(c *gin.Context) {
 		return
 	}
 	found := false
+	var video *relaychannel.TaskArtifact
 	for _, artifact := range artifacts {
 		if artifact.Key == artifactKey {
 			found = true
+			if artifact.Type == "video" {
+				video = &artifact
+			}
 			break
 		}
 	}
 	if !found {
 		logger.LogTaskArtifactFailure(c.Request.Context(), task.TaskID, "projection", http.StatusNotFound)
 		writeTaskArtifactError(c, http.StatusNotFound, "artifact_not_found", "Task or artifact not found")
+		return
+	}
+	if video != nil && service.GetTaskArtifactStore().Enabled() {
+		delivery, err := taskVideoDelivery(c.Request.Context(), task, *video, service.GetTaskArtifactStore())
+		if err != nil {
+			writeTaskMediaProxyError(c, err)
+			return
+		}
+		if err := delivery.Serve(c, task); err != nil {
+			writeTaskMediaProxyError(c, err)
+		}
 		return
 	}
 	for _, image := range task.PrivateData.ImageArtifacts {

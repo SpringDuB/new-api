@@ -1302,7 +1302,7 @@ func (a *TaskAdaptor) ConvertToOpenAIVideo(task *model.Task) ([]byte, error) {
 	if !claimed {
 		return nil, fmt.Errorf("plugin does not claim openai_video")
 	}
-	view, err := service.BuildTaskPluginView(task)
+	view, err := service.BuildTaskPluginDeliveryView(context.Background(), task)
 	if err != nil {
 		return nil, err
 	}
@@ -1355,9 +1355,10 @@ func (a *TaskAdaptor) ListArtifacts(task *model.Task) ([]channel.TaskArtifact, e
 }
 
 // RendererArtifacts projects a SUCCESS task's artifacts for a presenter as
-// {key: {key, type, url, mimeType?}}, each url a gateway content address from
-// contentURL. Other tasks, and plugins without listArtifacts, have none.
-func RendererArtifacts(plugin *pluginruntime.LoadedPlugin, task *model.Task, contentURL func(taskID, artifactKey string) (string, error)) (map[string]any, error) {
+// {key: {key, type, url, mimeType?}}. Videos use the host delivery policy when
+// storage is enabled; other URLs come from contentURL. Other tasks, and plugins
+// without listArtifacts, have none.
+func RendererArtifacts(ctx context.Context, plugin *pluginruntime.LoadedPlugin, task *model.Task, contentURL func(taskID, artifactKey string) (string, error)) (map[string]any, error) {
 	projected := make(map[string]any)
 	if task == nil || task.Status != model.TaskStatusSuccess {
 		return projected, nil
@@ -1369,10 +1370,23 @@ func RendererArtifacts(plugin *pluginruntime.LoadedPlugin, task *model.Task, con
 	if len(artifacts) > 0 && contentURL == nil {
 		return nil, fmt.Errorf("task artifact projection is unavailable")
 	}
+	var deliveries map[string]service.TaskVideoDelivery
+	if service.ResolveTaskVideoDelivery != nil && service.GetTaskArtifactStore().Enabled() {
+		deliveries, err = service.ResolveTaskVideoDelivery(ctx, task)
+		if err != nil {
+			return nil, err
+		}
+	}
 	for _, artifact := range artifacts {
-		artifactURL, urlErr := contentURL(task.TaskID, artifact.Key)
-		if urlErr != nil {
-			return nil, fmt.Errorf("build task artifact content URL: %w", urlErr)
+		var artifactURL string
+		if delivery, ok := deliveries[artifact.Key]; ok {
+			artifactURL = delivery.URL
+		} else {
+			var urlErr error
+			artifactURL, urlErr = contentURL(task.TaskID, artifact.Key)
+			if urlErr != nil {
+				return nil, fmt.Errorf("build task artifact content URL: %w", urlErr)
+			}
 		}
 		item := map[string]any{"key": artifact.Key, "type": artifact.Type, "url": artifactURL}
 		if artifact.MimeType != "" {
