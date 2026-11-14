@@ -94,6 +94,59 @@ function sidebarFor(admin?: object, user?: object, canConfigure = true) {
   return result
 }
 
+describe('online use sidebar', () => {
+  it('legacy settings show Infinite Canvas alongside Playground and Chat in Online Use', () => {
+    const { result } = sidebarFor(
+      { chat: { enabled: true, playground: true, chat: true } },
+      { chat: { enabled: true, playground: true, chat: true } }
+    )
+    const group = result.current.find((entry) => entry.id === 'chat')
+    expect(group?.title).toBe('Online Use')
+    expect(group?.items.map((item) => item.title)).toEqual([
+      'Playground',
+      'Chat',
+      'Infinite Canvas',
+    ])
+    expect(group?.items.at(-1)).toMatchObject({
+      url: 'https://canvas.stolas.cc',
+      external: true,
+    })
+  })
+
+  it.each([
+    [{ chat: { enabled: true, canvas: false } }, { chat: { canvas: true } }],
+    [{ chat: { enabled: false } }, { chat: { canvas: true } }],
+    [undefined, { chat: { enabled: true, canvas: false } }],
+    [undefined, { chat: { enabled: false } }],
+  ])(
+    'admin or personal disablement hides Infinite Canvas (%j, %j)',
+    (admin, user) => {
+      const { result } = sidebarFor(admin, user)
+      expect(
+        result.current
+          .flatMap((group) => group.items)
+          .some((item) => item.title === 'Infinite Canvas')
+      ).toBe(false)
+    }
+  )
+
+  it('saving an independent canvas toggle preserves Playground and Chat', () => {
+    const config = parseSidebarModulesAdmin(
+      '{"chat":{"enabled":true,"playground":true,"chat":true}}'
+    )
+    expect(config.chat.canvas).toBe(true)
+    config.chat.canvas = false
+    const { result } = sidebarFor(
+      parseSidebarModulesAdmin(serializeSidebarModulesAdmin(config))
+    )
+    expect(
+      result.current
+        .find((group) => group.id === 'chat')
+        ?.items.map((item) => item.title)
+    ).toEqual(['Playground', 'Chat'])
+  })
+})
+
 describe('security sidebar visibility', () => {
   it('old configurations show Security & Access immediately after Profile and keep API Keys', () => {
     const { result } = sidebarFor(

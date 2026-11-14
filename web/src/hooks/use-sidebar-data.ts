@@ -27,6 +27,7 @@ import {
   LayoutDashboard,
   ListTodo,
   MessageSquare,
+  PanelsTopLeft,
   PlugZap,
   Radio,
   ServerCog,
@@ -40,6 +41,7 @@ import {
 import { useTranslation } from 'react-i18next'
 
 import type { SidebarBadges, SidebarData } from '@/components/layout/types'
+import { INFINITE_CANVAS_URL } from '@/lib/constants'
 import { ROLE } from '@/lib/roles'
 
 /**
@@ -55,7 +57,7 @@ export function useSidebarData(badges: SidebarBadges = {}): SidebarData {
     navGroups: [
       {
         id: 'chat',
-        title: t('Chat'),
+        title: t('Online Use'),
         items: [
           {
             title: t('Playground'),
@@ -66,6 +68,12 @@ export function useSidebarData(badges: SidebarBadges = {}): SidebarData {
             title: t('Chat'),
             icon: MessageSquare,
             type: 'chat-presets',
+          },
+          {
+            title: t('Infinite Canvas'),
+            url: INFINITE_CANVAS_URL,
+            icon: PanelsTopLeft,
+            external: true,
           },
         ],
       },

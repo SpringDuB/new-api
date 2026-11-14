@@ -20,6 +20,7 @@ import { useMemo } from 'react'
 
 import type { NavGroup, NavItem } from '@/components/layout/types'
 import { useStatus } from '@/hooks/use-status'
+import { INFINITE_CANVAS_URL } from '@/lib/constants'
 import { useAuthStore } from '@/stores/auth-store'
 
 type SidebarSectionConfig = {
@@ -41,6 +42,7 @@ const DEFAULT_SIDEBAR_MODULES: SidebarModulesAdminConfig = {
     enabled: true,
     playground: true,
     chat: true,
+    canvas: true,
   },
   console: {
     enabled: true,
@@ -97,6 +99,7 @@ const mergeWithDefaultSidebarModules = (
  * Mapping from URL to configuration keys
  */
 const URL_TO_CONFIG_MAP: Record<string, { section: string; module: string }> = {
+  [INFINITE_CANVAS_URL]: { section: 'chat', module: 'canvas' },
   '/playground': { section: 'chat', module: 'playground' },
   '/dashboard': { section: 'console', module: 'detail' },
   '/dashboard/overview': { section: 'console', module: 'detail' },

@@ -25,7 +25,7 @@ import {
 } from '@tanstack/react-router'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { afterAll, afterEach, beforeAll, expect, test } from 'vitest'
+import { afterAll, afterEach, beforeAll, expect, test, vi } from 'vitest'
 
 import { SearchProvider } from '@/context/search-provider'
 import { ROLE } from '@/lib/roles'
@@ -96,11 +96,11 @@ async function searchEntriesFor(role: number, sidebarModulesAdmin = '') {
 
   await userEvent.click(await screen.findByRole('button', { name: 'Search' }))
   const options = await screen.findAllByRole('option')
-  return options.map((option) => option.textContent)
+  return { entries: options.map((option) => option.textContent), router }
 }
 
 test('regular users only find their own console pages in search', async () => {
-  const entries = await searchEntriesFor(ROLE.USER)
+  const { entries } = await searchEntriesFor(ROLE.USER)
 
   expect(entries).toEqual(
     expect.arrayContaining(['API Keys', 'Usage Logs', 'Wallet', 'Profile'])
@@ -111,7 +111,7 @@ test('regular users only find their own console pages in search', async () => {
 })
 
 test('admins find admin pages in search but not super admin pages', async () => {
-  const entries = await searchEntriesFor(ROLE.ADMIN)
+  const { entries } = await searchEntriesFor(ROLE.ADMIN)
 
   expect(entries).toEqual(expect.arrayContaining(adminEntries))
   for (const entry of superAdminEntries) {
@@ -120,11 +120,36 @@ test('admins find admin pages in search but not super admin pages', async () => 
 })
 
 test('pages hidden in the sidebar settings stay out of search', async () => {
-  const entries = await searchEntriesFor(
+  const { entries } = await searchEntriesFor(
     ROLE.USER,
     JSON.stringify({ personal: { enabled: true, topup: false } })
   )
 
   expect(entries).not.toContain('Wallet')
   expect(entries).toContain('Profile')
+})
+
+test('selecting Infinite Canvas in search opens a new tab and keeps the current console page', async () => {
+  const open = vi.spyOn(window, 'open').mockReturnValue(null)
+  const { router } = await searchEntriesFor(ROLE.USER)
+
+  await userEvent.click(screen.getByRole('option', { name: 'Infinite Canvas' }))
+
+  expect(open).toHaveBeenCalledExactlyOnceWith(
+    'https://canvas.stolas.cc',
+    '_blank',
+    'noopener,noreferrer'
+  )
+  expect(router.state.location.pathname).toBe('/dashboard/overview')
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+})
+
+test('hiding Infinite Canvas in sidebar settings also hides its search entry', async () => {
+  const { entries } = await searchEntriesFor(
+    ROLE.USER,
+    JSON.stringify({ chat: { enabled: true, canvas: false } })
+  )
+
+  expect(entries).not.toContain('Infinite Canvas')
+  expect(entries).toContain('Playground')
 })

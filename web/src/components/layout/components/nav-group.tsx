@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { Link, useLocation } from '@tanstack/react-router'
-import { ChevronRight } from 'lucide-react'
+import { ChevronRight, ExternalLink } from 'lucide-react'
 import { type ReactNode, useState, useEffect } from 'react'
 
 import { Badge } from '@/components/ui/badge'
@@ -125,19 +125,34 @@ function SidebarMenuLink({ item, href }: { item: NavLink; href: string }) {
   return (
     <SidebarMenuItem>
       <SidebarMenuButton
-        isActive={checkIsActive(href, item)}
+        isActive={!item.external && checkIsActive(href, item)}
         tooltip={item.title}
         render={
-          <Link
-            to={item.url}
-            preload={isMobile ? false : undefined}
-            onClick={() => setOpenMobile(false)}
-          />
+          item.external ? (
+            <a
+              href={item.url}
+              target='_blank'
+              rel='noopener noreferrer'
+              onClick={() => setOpenMobile(false)}
+            />
+          ) : (
+            <Link
+              to={item.url}
+              preload={isMobile ? false : undefined}
+              onClick={() => setOpenMobile(false)}
+            />
+          )
         }
       >
         {item.icon && <item.icon className='shrink-0' />}
         <span className='min-w-0 flex-1 truncate'>{item.title}</span>
         {item.badge && <NavBadge>{item.badge}</NavBadge>}
+        {item.external && (
+          <ExternalLink
+            aria-hidden='true'
+            className='ml-auto size-3.5 shrink-0 group-data-[collapsible=icon]:hidden'
+          />
+        )}
       </SidebarMenuButton>
     </SidebarMenuItem>
   )

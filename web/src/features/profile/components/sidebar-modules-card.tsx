@@ -62,8 +62,8 @@ export function SidebarModulesCard() {
   const sectionDefs: SectionDef[] = [
     {
       key: 'chat',
-      title: t('Chat Area'),
-      description: t('Playground and chat functions'),
+      title: t('Online Use'),
+      description: t('Playground, chat, and Infinite Canvas.'),
       modules: [
         {
           key: 'playground',
@@ -74,6 +74,11 @@ export function SidebarModulesCard() {
           key: 'chat',
           title: t('Chat'),
           description: t('Chat session management'),
+        },
+        {
+          key: 'canvas',
+          title: t('Infinite Canvas'),
+          description: t('Open Infinite Canvas in a new tab.'),
         },
       ],
     },
