@@ -58,6 +58,7 @@ export type BillingPluginVariant = {
 }
 
 export type PricingModel = {
+  square_display?: import('./lib/model-square-display').ModelSquareDecoration
   billing_plugin_variants?: BillingPluginVariant[]
   id: number
   model_name: string
@@ -77,7 +78,8 @@ export type PricingModel = {
   audio_ratio?: number | null
   audio_completion_ratio?: number | null
   enable_groups: string[]
-  tags?: string
+  /** Catalog tags are delimited text; display tags preserve complete labels. */
+  tags?: string | string[]
   supported_endpoint_types?: string[]
   key?: string
   group_ratio?: Record<string, number>
@@ -124,6 +126,7 @@ export type ModelCapability =
   | 'embeddings'
 
 export type PricingData = {
+  model_square_display?: import('./lib/model-square-display').ModelSquareDisplay
   success: boolean
   message?: string
   data: PricingModel[]

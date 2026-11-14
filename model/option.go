@@ -232,6 +232,13 @@ func SyncOptions(frequency int) {
 }
 
 func validateOptionValue(key string, value string) error {
+	if key == ModelSquareDisplayOption {
+		var display ModelSquareDisplay
+		if err := common.UnmarshalJsonStr(value, &display); err != nil {
+			return common.NewMessage("Invalid model square display settings")
+		}
+		return display.Validate()
+	}
 	if key == system_setting.TaskArtifactStoreOptionKey {
 		var config system_setting.TaskArtifactStoreConfig
 		if err := common.UnmarshalJsonStr(value, &config); err != nil {

@@ -25,7 +25,8 @@ import {
   PricingToolbar,
   type PricingToolbarProps,
 } from '../components/pricing-toolbar'
-import { filterByQuotaType } from '../lib/filters'
+import { extractAllTags, filterByQuotaType } from '../lib/filters'
+import { applyModelSquareDisplay } from '../lib/model-square-display'
 import type { PricingModel } from '../types'
 
 function toolbarProps(): PricingToolbarProps {
@@ -62,6 +63,37 @@ function toolbarProps(): PricingToolbarProps {
 }
 
 describe('pricing controls', () => {
+  it('counts a compound additional tag once and selects the complete filter label', async () => {
+    const label = 'High quality; text|image'
+    const models = applyModelSquareDisplay(
+      [
+        {
+          id: 1,
+          model_name: 'example-model',
+          quota_type: 1,
+          model_ratio: 1,
+          completion_ratio: 1,
+          enable_groups: ['default'],
+        },
+      ],
+      { order: [], models: { 'example-model': { tags: [label, label] } } }
+    )
+    const props = toolbarProps()
+    render(
+      <PricingSidebar
+        {...props}
+        models={models}
+        tags={extractAllTags(models)}
+      />
+    )
+    const user = userEvent.setup()
+
+    await user.click(
+      screen.getByRole('button', { name: /^high quality; text\|image\s*1$/ })
+    )
+    expect(props.onTagChange).toHaveBeenCalledWith(label.toLowerCase())
+  })
+
   it.each<{
     name: string
     pricing: Partial<PricingModel>
