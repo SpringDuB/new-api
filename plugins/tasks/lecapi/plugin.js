@@ -1,4 +1,4 @@
-// LecAPI public media catalog and documentation snapshot: 2026-11-14.
+// LecAPI public media catalog and documentation snapshot: 2026-11-15.
 // Sources: https://api.lecapi.net/api/media-models/catalog, /api/pricing, and /docs.
 // Static media kinds take precedence over inconsistent /v1/models labels.
 // User pricing policy: published CNY price +20%, platform CNY/USD units 1:1.
@@ -8,8 +8,240 @@
 // TinySnow Image 2 follows its Base64-only docs rather than the url capability.
 // Missing or unverifiable prices remain unconfigured.
 const MODELS = {
+  "lec-mj-seedance-2-5-fd-720p": {
+    kind: "video",
+    name: "Seedance 2.5（MJ）",
+    icon: "Doubao.Color",
+    tags: ["full", "720p", "image", "audio", "native", "per_request"],
+    parameters: {
+      prompt: { type: "string", required: true },
+      duration: { type: "integer", required: true, default: 15, values: [5, 8, 10, 12, 15, 18, 20, 25, 30], min: 5, max: 30 },
+      aspect_ratio: { type: "enum", required: true, default: "16:9", values: ["16:9", "9:16", "1:1", "4:3", "3:4"] },
+      images: { type: "array", constraints: { max_items: 30, url_schemes: ["https"] } },
+      videos: { type: "array", constraints: { max_items: 0, url_schemes: ["https"] } },
+      audios: { type: "array", constraints: { max_items: 10, url_schemes: ["https"] } },
+      resolution: { type: "enum", default: "720p", values: ["720p"] },
+    },
+    billing: { billing_unit: "request", price_per_request: 5.5, resolution_prices: { "720p": 5.5 } },
+  },
+  "lec-vg-seedance-2-5-vg-720p": {
+    kind: "video",
+    name: "Seedance 2.5 VG（VG）",
+    icon: "Doubao.Color",
+    tags: ["full", "3010", "720p", "image", "audio", "per_request"],
+    parameters: {
+      prompt: { type: "string", required: true },
+      duration: { type: "integer", required: true, default: 4, min: 4, max: 30, step: 1 },
+      aspect_ratio: { type: "enum", default: "16:9", values: ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "adaptive"] },
+      images: { type: "array", constraints: { max_items: 30, url_schemes: ["http", "https"], allow_data_url: true, allow_files: true } },
+      audios: { type: "array", constraints: { max_items: 10, url_schemes: ["http", "https"], allow_data_url: true, allow_files: true } },
+      resolution: { type: "enum", default: "720p", values: ["720p"] },
+    },
+    billing: { billing_unit: "request", price_per_request: 5, resolution_prices: { "720p": 5 } },
+  },
+  "lec-zy-seedance-2-5-discount2": {
+    kind: "video",
+    name: "Seedance 2.5 二号（ZY）",
+    icon: "Doubao.Color",
+    tags: ["720p", "per_request", "image"],
+    parameters: {
+      prompt: { type: "string", required: true },
+      duration: { type: "integer", required: true, default: 30, min: 4, max: 30, step: 1 },
+      aspect_ratio: { type: "enum", default: "16:9", values: ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"] },
+      images: { type: "array", constraints: { max_items: 9, url_schemes: ["https"] } },
+      audios: { type: "array", constraints: { max_items: 0, url_schemes: ["https"] } },
+      resolution: { type: "enum", default: "720p", values: ["720p"] },
+    },
+    billing: { billing_unit: "request", price_per_request: 5, resolution_prices: { "720p": 5 } },
+  },
+  "lec-zy-seedance-2-5-discount": {
+    kind: "video",
+    name: "Seedance 2.5 一号（ZY）",
+    icon: "Doubao.Color",
+    tags: ["720p", "per_request", "image"],
+    parameters: {
+      prompt: { type: "string", required: true },
+      duration: { type: "integer", required: true, default: 30, min: 4, max: 30, step: 1 },
+      aspect_ratio: { type: "enum", default: "16:9", values: ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"] },
+      images: { type: "array", constraints: { max_items: 9, url_schemes: ["https"] } },
+      audios: { type: "array", constraints: { max_items: 0, url_schemes: ["https"] } },
+      resolution: { type: "enum", default: "720p", values: ["720p"] },
+    },
+    billing: { billing_unit: "request", price_per_request: 5.5, resolution_prices: { "720p": 5.5 } },
+  },
+  "lec-mf-seedance-2-5-x": {
+    kind: "video",
+    name: "Seedance 2.5 X（MF）",
+    icon: "Doubao.Color",
+    tags: ["x", "per_request", "480p", "720p", "native", "image", "video", "audio"],
+    parameters: {
+      prompt: { type: "string", required: true },
+      duration: { type: "integer", default: 4, min: 4, max: 30, step: 1 },
+      aspect_ratio: { type: "enum", default: "16:9", values: ["16:9", "9:16", "1:1", "4:3", "3:4"] },
+      resolution: { type: "enum", default: "720p", values: ["480p", "720p"] },
+      images: { type: "array", constraints: { max_items: 30, url_schemes: ["https"] } },
+      videos: { type: "array", constraints: { max_items: 10, url_schemes: ["https"] } },
+      audios: { type: "array", constraints: { max_items: 10, url_schemes: ["https"] } },
+    },
+    billing: { billing_unit: "request", price_per_request: 5, resolution_prices: { "480p": 5, "720p": 5 } },
+  },
+  "lec-haya-seedance-2-5-m": {
+    kind: "video",
+    name: "Seedance 2.5 M（HAYA）",
+    icon: "Doubao.Color",
+    tags: ["M", "multi", "image", "video", "audio", "supported", "per_second"],
+    parameters: {
+      prompt: { type: "string", required: true, maxLength: 5000 },
+      duration: { type: "integer", required: true, default: 4, min: 4, max: 30, step: 1 },
+      aspect_ratio: { type: "enum", default: "16:9", values: ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"] },
+      resolution: { type: "enum", default: "480p", values: ["480p", "720p"] },
+      images: {
+        type: "array",
+        constraints: {
+          max_items: 30,
+          url_schemes: ["https"],
+          allow_data_url: true,
+          mime_types: ["image/png", "image/jpeg", "image/webp", "image/gif"],
+          max_bytes: 20971520,
+          allow_files: true,
+        },
+      },
+      videos: {
+        type: "array",
+        constraints: {
+          max_items: 10,
+          url_schemes: ["https"],
+          allow_data_url: true,
+          mime_types: ["video/mp4", "video/webm", "video/quicktime"],
+          max_bytes: 20971520,
+          allow_files: true,
+        },
+      },
+      audios: {
+        type: "array",
+        constraints: {
+          max_items: 10,
+          url_schemes: ["https"],
+          allow_data_url: true,
+          mime_types: ["audio/aac", "audio/flac", "audio/mp4", "audio/mpeg", "audio/ogg", "audio/wav", "audio/x-wav"],
+          max_bytes: 20971520,
+          allow_files: true,
+        },
+      },
+    },
+    billing: { billing_unit: "second", equivalent_second_price: 0.25, resolution_prices: { "480p": 0.25, "720p": 0.35 } },
+  },
+  "lec-haya-seedance-2-5-flash": {
+    kind: "video",
+    name: "Seedance 2.5 Flash（HAYA）",
+    icon: "Doubao.Color",
+    tags: ["Flash", "multi", "image", "video", "audio", "supported", "per_request"],
+    parameters: {
+      prompt: { type: "string", required: true },
+      duration: { type: "integer", required: true, default: 4, min: 4, max: 30, step: 1 },
+      aspect_ratio: { type: "enum", default: "16:9", values: ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"] },
+      resolution: { type: "enum", default: "480p", values: ["480p", "720p"] },
+      images: {
+        type: "array",
+        constraints: {
+          max_items: 10,
+          url_schemes: ["https"],
+          allow_data_url: true,
+          mime_types: ["image/png", "image/jpeg", "image/webp", "image/gif"],
+          max_bytes: 20971520,
+          allow_files: true,
+        },
+      },
+      videos: {
+        type: "array",
+        constraints: {
+          max_items: 5,
+          url_schemes: ["https"],
+          allow_data_url: true,
+          mime_types: ["video/mp4", "video/webm", "video/quicktime"],
+          max_bytes: 20971520,
+          allow_files: true,
+        },
+      },
+      audios: {
+        type: "array",
+        constraints: {
+          max_items: 5,
+          url_schemes: ["https"],
+          allow_data_url: true,
+          mime_types: ["audio/aac", "audio/flac", "audio/mp4", "audio/mpeg", "audio/ogg", "audio/wav", "audio/x-wav"],
+          max_bytes: 20971520,
+          allow_files: true,
+        },
+      },
+    },
+    billing: { billing_unit: "request", price_per_request: 3.5, resolution_prices: { "480p": 3.5, "720p": 4.5 } },
+  },
+  "lec-59-seedance-2-5-flash": {
+    kind: "video",
+    name: "Seedance 2.5 Flash 1055（59）",
+    icon: "Doubao.Color",
+    tags: ["flash", "1055", "multi", "image", "video", "audio", "native", "per_request"],
+    parameters: {
+      prompt: { type: "string", required: true, maxLength: 5000 },
+      duration: { type: "integer", required: true, default: 5, min: 5, max: 30, step: 1 },
+      aspect_ratio: { type: "enum", default: "16:9", values: ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"] },
+      resolution: { type: "enum", default: "480p", values: ["480p", "720p"] },
+      images: { type: "array", required: true, constraints: { min_items: 1, max_items: 10, url_schemes: ["https"] } },
+      videos: { type: "array", constraints: { max_items: 5, url_schemes: ["https"] } },
+      audios: { type: "array", constraints: { max_items: 5, url_schemes: ["https"] } },
+    },
+    billing: { billing_unit: "request", price_per_request: 3, resolution_prices: { "480p": 3, "720p": 4 } },
+  },
+  "lec-59-seedance-2-0-mini": {
+    kind: "video",
+    name: "Seedance 2.0 Mini 933（59）",
+    icon: "Doubao.Color",
+    tags: ["mini", "933", "multi", "image", "video", "audio", "native", "per_request"],
+    parameters: {
+      prompt: { type: "string", required: true, maxLength: 8000 },
+      duration: { type: "integer", required: true, default: 4, min: 4, max: 15, step: 1, values: [4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15] },
+      aspect_ratio: { type: "enum", default: "16:9", values: ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"] },
+      resolution: { type: "enum", default: "480p", values: ["480p", "720p"] },
+      images: { type: "array", required: true, constraints: { min_items: 1, max_items: 9, url_schemes: ["https"] } },
+      videos: { type: "array", constraints: { max_items: 3, url_schemes: ["https"] } },
+      audios: { type: "array", constraints: { max_items: 3, url_schemes: ["https"] } },
+    },
+    billing: { billing_unit: "request", price_per_request: 0.9, resolution_prices: { "480p": 0.9, "720p": 1.2 } },
+  },
+  "lec-59-seedance-2-0-full": {
+    kind: "video",
+    name: "Seedance 2.0 满血 933（59）",
+    icon: "Doubao.Color",
+    tags: ["full", "933", "720p", "image", "video", "audio", "native", "per_request"],
+    parameters: {
+      prompt: { type: "string", required: true, maxLength: 8000 },
+      duration: { type: "integer", required: true, default: 4, min: 4, max: 15, step: 1, values: [4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15] },
+      aspect_ratio: { type: "enum", default: "16:9", values: ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"] },
+      images: { type: "array", required: true, constraints: { min_items: 1, max_items: 9, url_schemes: ["https"] } },
+      videos: { type: "array", constraints: { max_items: 3, url_schemes: ["https"] } },
+      audios: { type: "array", constraints: { max_items: 3, url_schemes: ["https"] } },
+      resolution: { type: "enum", default: "720p", values: ["720p"] },
+    },
+    billing: { billing_unit: "request", price_per_request: 3.3, resolution_prices: { "720p": 3.3 } },
+  },
+  "lec-59-seedance-2-0-fast": {
+    kind: "video",
+    name: "Seedance 2.0 Fast 933（59）",
+    icon: "Doubao.Color",
+    tags: ["fast", "933", "multi", "image", "video", "audio", "native", "per_request"],
+    parameters: {
+      prompt: { type: "string", required: true, maxLength: 8000 },
+      duration: { type: "integer", required: true, default: 4, min: 4, max: 15, step: 1, values: [4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15] },
+      aspect_ratio: { type: "enum", default: "16:9", values: ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"] },
+      resolution: { type: "enum", default: "480p", values: ["480p", "720p"] },
+      images: { type: "array", required: true, constraints: { min_items: 1, max_items: 9, url_schemes: ["https"] } },
+      videos: { type: "array", constraints: { max_items: 3, url_schemes: ["https"] } },
+      audios: { type: "array", constraints: { max_items: 3, url_schemes: ["https"] } },
+    },
+    billing: { billing_unit: "request", price_per_request: 1.3, resolution_prices: { "480p": 1.3, "720p": 1.8 } },
+  },
   "lec-hc-seedance-2-5-3010": {
-    retired: true,
     kind: "video",
     name: "Seedance 2.5 3010（HC）",
     icon: "Doubao.Color",
@@ -57,6 +289,7 @@ const MODELS = {
     billing: { billing_unit: "request", price_per_request: 3, resolution_prices: { "480p": 2, "720p": 3 } },
   },
   "lec-mf-seedance-2-5-t1": {
+    retired: true,
     kind: "video",
     name: "Seedance 2.5 T1（MF）",
     icon: "Doubao.Color",
@@ -198,6 +431,7 @@ const MODELS = {
     billing: { billing_unit: "request" },
   },
   "lec-h3video-2k": {
+    retired: true,
     kind: "video",
     name: "MiniMax-H3-2K",
     icon: "Minimax.Color",
@@ -270,6 +504,7 @@ const MODELS = {
     billing: { billing_unit: "second", resolution_prices: { "1080p": 0.98, "480p": 0.25, "720p": 0.5 }, equivalent_second_price: 0.5 },
   },
   "lec-am-wan-3-0": {
+    retired: true,
     kind: "video",
     name: "Wan 3.0（AM）",
     icon: "AlibabaCloud.Color",
@@ -438,6 +673,7 @@ const MODELS = {
     billing: { billing_unit: "request", resolution_prices: { "720p": 4 }, price_per_request: 4 },
   },
   "lec-jm-seedance-2-5": {
+    retired: true,
     kind: "video",
     name: "Seedance 2.5（JM）",
     icon: "Doubao.Color",
@@ -453,6 +689,7 @@ const MODELS = {
     billing: { billing_unit: "second", resolution_prices: { "480p": 0.22, "720p": 0.3 }, equivalent_second_price: 0.3 },
   },
   "lec-jm-seedance-2-5-flash": {
+    retired: true,
     kind: "video",
     name: "Seedance 2.5 Flash（JM）",
     icon: "Doubao.Color",
@@ -483,7 +720,6 @@ const MODELS = {
     billing: { billing_unit: "request", resolution_prices: { "1080p": 1.5, "360p": 1.5, "4k": 1.5, "720p": 1.5 }, price_per_request: 1.5 },
   },
   "lec-mf-seedance-2-5-30ref": {
-    retired: true,
     kind: "video",
     name: "Seedance 2.5 30参（MF）",
     icon: "Doubao.Color",
@@ -497,7 +733,7 @@ const MODELS = {
       audios: { type: "array", constraints: { max_items: 10, url_schemes: ["https"] } },
       resolution: { type: "enum", default: "720p", values: ["720p"] },
     },
-    billing: { billing_unit: "request", resolution_prices: { "720p": 5.5 }, price_per_request: 5 },
+    billing: { billing_unit: "request", resolution_prices: { "720p": 6.5 }, price_per_request: 6.5 },
     max_reference_total: 30,
     max_reference_video_seconds: 15,
   },
@@ -531,7 +767,6 @@ const MODELS = {
     billing: { billing_unit: "second", resolution_prices: { "480p": 0.3, "720p": 0.37 }, equivalent_second_price: 0.37 },
   },
   "lec-mm-seedance-2-5": {
-    retired: true,
     kind: "video",
     name: "Seedance 2.5（MM）",
     icon: "Doubao.Color",
@@ -545,11 +780,10 @@ const MODELS = {
       audios: { type: "array", constraints: { max_items: 10, url_schemes: ["https"] } },
       resolution: { type: "enum", default: "720p", values: ["720p"] },
     },
-    billing: { billing_unit: "request", resolution_prices: { "720p": 4.5 }, price_per_request: 4.5 },
+    billing: { billing_unit: "request", resolution_prices: { "720p": 5.5 }, price_per_request: 5.5 },
     max_reference_total: 50,
   },
   "lec-mm-seedance-2-5-full": {
-    retired: true,
     kind: "video",
     name: "Seedance 2.5 满血（MM）",
     icon: "Doubao.Color",
@@ -563,7 +797,7 @@ const MODELS = {
       audios: { type: "array", constraints: { max_items: 10, url_schemes: ["https"] } },
       resolution: { type: "enum", default: "720p", values: ["720p"] },
     },
-    billing: { billing_unit: "request", resolution_prices: { "720p": 4.5 }, price_per_request: 4.5 },
+    billing: { billing_unit: "request", resolution_prices: { "720p": 5.5 }, price_per_request: 5.5 },
     max_reference_total: 50,
   },
   "lec-nw-image-2": {
@@ -809,6 +1043,7 @@ const MODELS = {
     billing: { billing_unit: "second", resolution_prices: { "2K": 0.08 }, equivalent_second_price: 0.08 },
   },
   "lec-minimax-h3": {
+    retired: true,
     kind: "video",
     name: "MiniMax-H3",
     icon: "Minimax.Color",
@@ -920,7 +1155,6 @@ const MODELS = {
     billing: { billing_unit: "request", resolution_prices: { "720p": 4 }, price_per_request: 4 },
   },
   "lec-vg-seedance-2-0-full-933": {
-    retired: true,
     kind: "video",
     name: "Seedance 2.0 满血 933（VG）",
     icon: "Doubao.Color",
@@ -968,7 +1202,6 @@ const MODELS = {
     billing: { billing_unit: "request", resolution_prices: { "720p": 2.5 }, price_per_request: 2.5 },
   },
   "lec-vg-seedance-2-0-mini-cc": {
-    retired: true,
     kind: "video",
     name: "Seedance 2.0 Mini（VG）",
     icon: "Doubao.Color",
@@ -1000,7 +1233,6 @@ const MODELS = {
     billing: { billing_unit: "request", resolution_prices: { "720p": 3 }, price_per_request: 3 },
   },
   "lec-vg-seedance-2-5-pa": {
-    retired: true,
     kind: "video",
     name: "Seedance 2.5 PA（VG）",
     icon: "Doubao.Color",
@@ -1063,7 +1295,6 @@ const MODELS = {
     billing: { billing_unit: "request", resolution_prices: { "720p": 4 }, price_per_request: 4 },
   },
   "lec-mj-seedance-2-5-bd-720p": {
-    retired: true,
     kind: "video",
     name: "Seedance 2.5（MJ）",
     icon: "Doubao.Color",
@@ -1135,16 +1366,18 @@ const MODELS = {
     tags: ["full", "933", "multi", "image", "video", "audio", "face", "per_second"],
     parameters: {
       prompt: { type: "string", required: true },
-      duration: { type: "integer", default: 5, min: 4, max: 15, step: 1 },
-      aspect_ratio: { type: "enum", default: "16:9", values: ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"] },
+      duration: { type: "integer", default: 5, min: -1, max: 15, step: 1, values: [-1, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15] },
+      aspect_ratio: { type: "enum", default: "16:9", values: ["adaptive", "16:9", "9:16", "1:1", "4:3", "3:4", "21:9"] },
       resolution: { type: "enum", default: "480p", values: ["480p", "720p", "1080p"] },
       images: { type: "array", constraints: { max_items: 9, url_schemes: ["https"] } },
       videos: { type: "array", constraints: { max_items: 3, url_schemes: ["https"] } },
       audios: { type: "array", constraints: { max_items: 3, url_schemes: ["https"] } },
+      mode: { type: "enum", values: ["text2video", "singleImage2video", "image2video", "frames2video", "mixed2video"] },
     },
     billing: { billing_unit: "second", resolution_prices: { "1080p": 1.55, "480p": 0.45, "720p": 0.75 }, equivalent_second_price: 0.45 },
   },
   "lec-gt-seedance-2-5-720p": {
+    retired: true,
     kind: "video",
     name: "Seedance 2.5 满血（官渠）",
     icon: "Doubao.Color",
@@ -1380,16 +1613,16 @@ const MODELS = {
     kind: "video",
     name: "Wan 3.0（HN）",
     icon: "AlibabaCloud.Color",
-    tags: ["full", "multi", "image", "audio", "per_request"],
+    tags: ["full", "480p", "image", "audio", "per_request"],
     parameters: {
       prompt: { type: "string", required: true },
       duration: { type: "integer", default: 4, min: 2, max: 20, step: 1 },
       aspect_ratio: { type: "enum", default: "16:9", values: ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"] },
-      resolution: { type: "enum", default: "720p", values: ["480p", "720p"] },
+      resolution: { type: "enum", default: "480p", values: ["480p"] },
       images: { type: "array", constraints: { max_items: 10, url_schemes: ["https"] } },
       audios: { type: "array", constraints: { max_items: 5, url_schemes: ["https"] } },
     },
-    billing: { billing_unit: "request", resolution_prices: { "480p": 2.5, "720p": 3 }, price_per_request: 3 },
+    billing: { billing_unit: "request", resolution_prices: { "480p": 2.5 }, price_per_request: 3 },
   },
   "lec-image-2": {
     kind: "image",
@@ -1636,11 +1869,17 @@ const PARAMETER_LABELS = {
   index: ["Original image index", "原图序号"],
   reference_video_seconds: ["Reference video duration", "参考视频合计时长"],
   process_face: ["Enable face processing", "是否启用人脸处理"],
-  mode: ["Face processing mode", "人脸处理模式"],
+  mode: ["Processing mode", "处理模式"],
 };
 const PARAMETER_VALUE_LABELS = {
   auto: "自动",
   adaptive: "自适应",
+  "-1": "智能时长",
+  text2video: "文生视频",
+  singleImage2video: "单图生视频",
+  image2video: "多图生视频",
+  frames2video: "首尾帧生视频",
+  mixed2video: "混合素材生视频",
   true: "开启",
   false: "关闭",
   url: "图片链接",
@@ -1799,7 +2038,7 @@ export const meta = {
   key: "lecapi",
   name: "LecAPI",
   icon: "text:LE",
-  version: "1.1.0",
+  version: "1.2.0",
   author: { name: "QuantumNous" },
   website: "https://api.lecapi.net/docs",
   baseUrl: "https://api.lecapi.net",
@@ -2086,6 +2325,11 @@ function submission(ctx) {
   if (profile.max_reference_total && imageCount + videoCount + audioCount + (media.documents?.length || 0) > profile.max_reference_total)
     throw new Error("too many combined reference materials");
   if (profile.vendorModel === "lec-mg-seedance-2-5-6" && audioCount && !imageCount) throw new Error("audio references require at least one image");
+  if (profile.vendorModel === "lec-gt-seedance-2-0-full") {
+    if ((videoCount || audioCount) && !imageCount) throw new Error("video or audio references require at least one image");
+    if (body.mode === "frames2video" && (imageCount !== 2 || videoCount || audioCount))
+      throw new Error("frames2video requires exactly two images and no video or audio references");
+  }
   if (body.size && !profile.parameters.size.values && !/^[1-9]\d{1,4}x[1-9]\d{1,4}$/i.test(body.size))
     throw new Error("size must contain positive pixel dimensions");
   if (
@@ -2104,7 +2348,8 @@ function submission(ctx) {
     if (body.resolution === "2K" && body.duration > 15) throw new Error("2K supports at most 15 seconds");
     if (body.resolution === "480p" && videoCount) throw new Error("480p does not support reference videos");
   }
-  let seconds = body.duration || 0,
+  // Smart duration reserves the longest supported output while preserving -1 upstream.
+  let seconds = body.duration === -1 ? profile.parameters.duration.max : body.duration || 0,
     referenceSeconds = 0;
   if (
     profile.source_duration ||
