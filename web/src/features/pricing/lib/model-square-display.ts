@@ -18,10 +18,13 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import type { PricingModel } from '../types'
 import { parseTags } from './filters'
+import { inferModelCategory, type ModelCategory } from './model-categories'
 
 export type ModelSquareColor = 'red' | 'amber' | 'blue' | 'emerald' | 'violet'
 
 export type ModelSquareDecoration = {
+  category?: ModelCategory
+  family?: string
   badge?: string
   badge_style?: 'ribbon' | 'burst'
   color?: ModelSquareColor
@@ -85,7 +88,12 @@ export function applyModelSquareDisplay(
         ...parseTags(model.tags),
         ...(decoration?.tags ?? []),
       ])
-      return { ...model, tags: [...tags], square_display: decoration }
+      return {
+        ...model,
+        tags: [...tags],
+        square_category: inferModelCategory(model),
+        square_display: decoration,
+      }
     })
     .sort((a, b) => {
       const difference =

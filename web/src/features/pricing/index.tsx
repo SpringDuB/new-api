@@ -36,6 +36,7 @@ import {
   ModelCardGrid,
   ModelDetailsDrawer,
 } from './components'
+import { ModelCategoryFilter } from './components/model-category-filter'
 import { EXCLUDED_GROUPS, VIEW_MODES } from './constants'
 import { useFilters } from './hooks/use-filters'
 import { usePricingData } from './hooks/use-pricing-data'
@@ -68,6 +69,13 @@ export function Pricing() {
   } = usePricingData()
 
   const {
+    categoryFilter,
+    familyFilter,
+    setFamilyFilter,
+    familyModels,
+    sidebarModels,
+    categoryCounts,
+    setCategoryFilter,
     searchInput,
     sortBy,
     vendorFilter,
@@ -137,6 +145,7 @@ export function Pricing() {
     if (viewMode === VIEW_MODES.CARD) {
       return (
         <ModelCardGrid
+          key={`${categoryFilter}:${familyFilter}`}
           models={filteredModels}
           onModelClick={handleModelClick}
           priceRate={priceRate}
@@ -150,6 +159,7 @@ export function Pricing() {
 
     return (
       <PricingTable
+        key={`${categoryFilter}:${familyFilter}`}
         models={filteredModels}
         priceRate={priceRate}
         usdExchangeRate={usdExchangeRate}
@@ -213,6 +223,11 @@ export function Pricing() {
               )}
               className='mx-auto mt-4 max-w-2xl sm:mt-6'
             />
+            <ModelCategoryFilter
+              value={categoryFilter}
+              counts={categoryCounts}
+              onChange={setCategoryFilter}
+            />
             {canManage && (
               <Button
                 variant='outline'
@@ -227,6 +242,9 @@ export function Pricing() {
 
           <div className='grid gap-4 xl:grid-cols-[280px_minmax(0,1fr)]'>
             <PricingSidebar
+              familyFilter={familyFilter}
+              onFamilyChange={setFamilyFilter}
+              familyModels={familyModels}
               quotaTypeFilter={quotaTypeFilter}
               endpointTypeFilter={endpointTypeFilter}
               vendorFilter={vendorFilter}
@@ -241,7 +259,7 @@ export function Pricing() {
               groups={availableGroups}
               groupRatios={groupRatio}
               tags={availableTags}
-              models={models || []}
+              models={sidebarModels}
               hasActiveFilters={hasActiveFilters}
               onClearFilters={clearFilters}
               className='hover-scrollbar sticky top-20 hidden max-h-[calc(100dvh-6rem)] self-start overflow-y-auto xl:block'
@@ -249,6 +267,9 @@ export function Pricing() {
 
             <main className='min-w-0 space-y-4'>
               <PricingToolbar
+                familyFilter={familyFilter}
+                onFamilyChange={setFamilyFilter}
+                familyModels={familyModels}
                 filteredCount={filteredModels.length}
                 totalCount={models?.length}
                 sortBy={sortBy}
@@ -273,7 +294,7 @@ export function Pricing() {
                 groups={availableGroups}
                 groupRatios={groupRatio}
                 tags={availableTags}
-                models={models || []}
+                models={sidebarModels}
                 hasActiveFilters={hasActiveFilters}
                 activeFilterCount={activeFilterCount}
                 onClearFilters={clearFilters}
@@ -309,6 +330,8 @@ export function Pricing() {
             <Suspense fallback={<LoadingState />}>
               <ModelSquareManager
                 models={catalogModels}
+                initialCategory={categoryFilter}
+                initialFamily={familyFilter}
                 priceRate={priceRate}
                 usdExchangeRate={usdExchangeRate}
                 onClose={() => setManagerOpen(false)}

@@ -31,9 +31,17 @@ import {
   type ViewMode,
 } from '../constants'
 import { filterAndSortModels, extractAllTags } from '../lib/filters'
+import {
+  countModelCategories,
+  getModelCategory,
+  type ModelCategoryFilter,
+} from '../lib/model-categories'
+import { ALL_MODEL_FAMILIES, getModelFamilyKey } from '../lib/model-families'
 import type { PricingModel, TokenUnit } from '../types'
 
 type FilterState = {
+  category?: ModelCategoryFilter
+  family?: string
   search?: string
   sort?: string
   vendor?: string
@@ -56,6 +64,8 @@ function normalizeViewMode(value: unknown): ViewMode {
 export function useFilters(models: PricingModel[]) {
   const search = useSearch({ from: '/pricing/' })
   const [filterState, setFilterState] = useState<FilterState>(() => ({
+    category: search.category,
+    family: search.family,
     search: search.search,
     sort: search.sort,
     vendor: search.vendor,
@@ -76,6 +86,8 @@ export function useFilters(models: PricingModel[]) {
   const quotaTypeFilter = filterState.quotaType || QUOTA_TYPES.ALL
   const endpointTypeFilter = filterState.endpointType || ENDPOINT_TYPES.ALL
   const tagFilter = filterState.tag || FILTER_ALL
+  const categoryFilter = filterState.category || FILTER_ALL
+  const familyFilter = filterState.family || ALL_MODEL_FAMILIES
   const tokenUnit: TokenUnit =
     filterState.tokenUnit === 'K' ? 'K' : DEFAULT_TOKEN_UNIT
   const viewMode = normalizeViewMode(filterState.view)
@@ -126,6 +138,26 @@ export function useFilters(models: PricingModel[]) {
     (v: string) => updateFilters({ tag: v === FILTER_ALL ? undefined : v }),
     [updateFilters]
   )
+  const setCategoryFilter = useCallback(
+    (category: ModelCategoryFilter) =>
+      updateFilters({
+        category: category === FILTER_ALL ? undefined : category,
+        family: undefined,
+        vendor: undefined,
+        group: undefined,
+        quotaType: undefined,
+        endpointType: undefined,
+        tag: undefined,
+      }),
+    [updateFilters]
+  )
+  const setFamilyFilter = useCallback(
+    (family: string) =>
+      updateFilters({
+        family: family === ALL_MODEL_FAMILIES ? undefined : family,
+      }),
+    [updateFilters]
+  )
   const setTokenUnit = useCallback(
     (v: TokenUnit) =>
       updateFilters({ tokenUnit: v === DEFAULT_TOKEN_UNIT ? undefined : v }),
@@ -141,12 +173,19 @@ export function useFilters(models: PricingModel[]) {
     [updateFilters]
   )
 
-  const availableTags = useMemo(() => {
-    if (!models || models.length === 0) return []
-    return extractAllTags(models)
-  }, [models])
+  const sidebarModels = useMemo(
+    () =>
+      categoryFilter === FILTER_ALL
+        ? models
+        : models.filter((model) => getModelCategory(model) === categoryFilter),
+    [models, categoryFilter]
+  )
+  const availableTags = useMemo(
+    () => extractAllTags(sidebarModels),
+    [sidebarModels]
+  )
 
-  const filteredModels = useMemo(() => {
+  const matchingModels = useMemo(() => {
     if (!models || models.length === 0) return []
 
     return filterAndSortModels(models, {
@@ -169,14 +208,45 @@ export function useFilters(models: PricingModel[]) {
     sortBy,
   ])
 
+  const categoryCounts = useMemo(
+    () => countModelCategories(matchingModels),
+    [matchingModels]
+  )
+  const familyModels = useMemo(
+    () =>
+      categoryFilter === FILTER_ALL
+        ? matchingModels
+        : matchingModels.filter(
+            (model) => getModelCategory(model) === categoryFilter
+          ),
+    [matchingModels, categoryFilter]
+  )
+  const filteredModels = useMemo(
+    () =>
+      familyFilter === ALL_MODEL_FAMILIES
+        ? familyModels
+        : familyModels.filter(
+            (model) => getModelFamilyKey(model) === familyFilter
+          ),
+    [familyModels, familyFilter]
+  )
+
   const hasActiveFilters = useMemo(
     () =>
       vendorFilter !== FILTER_ALL ||
       groupFilter !== FILTER_ALL ||
       quotaTypeFilter !== QUOTA_TYPES.ALL ||
       endpointTypeFilter !== ENDPOINT_TYPES.ALL ||
-      tagFilter !== FILTER_ALL,
-    [vendorFilter, groupFilter, quotaTypeFilter, endpointTypeFilter, tagFilter]
+      tagFilter !== FILTER_ALL ||
+      familyFilter !== ALL_MODEL_FAMILIES,
+    [
+      vendorFilter,
+      groupFilter,
+      quotaTypeFilter,
+      endpointTypeFilter,
+      tagFilter,
+      familyFilter,
+    ]
   )
 
   const activeFilterCount = useMemo(
@@ -185,8 +255,16 @@ export function useFilters(models: PricingModel[]) {
       (groupFilter !== FILTER_ALL ? 1 : 0) +
       (quotaTypeFilter !== QUOTA_TYPES.ALL ? 1 : 0) +
       (endpointTypeFilter !== ENDPOINT_TYPES.ALL ? 1 : 0) +
-      (tagFilter !== FILTER_ALL ? 1 : 0),
-    [vendorFilter, groupFilter, quotaTypeFilter, endpointTypeFilter, tagFilter]
+      (tagFilter !== FILTER_ALL ? 1 : 0) +
+      (familyFilter !== ALL_MODEL_FAMILIES ? 1 : 0),
+    [
+      vendorFilter,
+      groupFilter,
+      quotaTypeFilter,
+      endpointTypeFilter,
+      tagFilter,
+      familyFilter,
+    ]
   )
 
   const clearFilters = useCallback(() => {
@@ -196,6 +274,7 @@ export function useFilters(models: PricingModel[]) {
       quotaType: undefined,
       endpointType: undefined,
       tag: undefined,
+      family: undefined,
     })
   }, [updateFilters])
 
@@ -204,6 +283,13 @@ export function useFilters(models: PricingModel[]) {
   }, [updateFilters])
 
   return {
+    familyFilter,
+    setFamilyFilter,
+    familyModels,
+    sidebarModels,
+    categoryFilter,
+    categoryCounts,
+    setCategoryFilter,
     searchInput,
     sortBy,
     vendorFilter,

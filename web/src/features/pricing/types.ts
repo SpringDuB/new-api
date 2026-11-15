@@ -58,6 +58,7 @@ export type BillingPluginVariant = {
 }
 
 export type PricingModel = {
+  square_category?: import('./lib/model-categories').ModelCategory
   square_display?: import('./lib/model-square-display').ModelSquareDecoration
   billing_plugin_variants?: BillingPluginVariant[]
   id: number
@@ -126,6 +127,10 @@ export type ModelCapability =
   | 'embeddings'
 
 export type PricingData = {
+  model_square_categories?: Record<
+    string,
+    import('./lib/model-categories').ModelCategory
+  >
   model_square_display?: import('./lib/model-square-display').ModelSquareDisplay
   success: boolean
   message?: string

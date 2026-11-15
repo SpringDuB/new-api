@@ -133,7 +133,7 @@ func TestModelSquareDisplayDatabaseMatrix(t *testing.T) {
 			display := model.ModelSquareDisplay{
 				Order: []string{"visible-model", "hidden-model"},
 				Models: map[string]model.ModelSquareDecoration{
-					"visible-model": {Badge: "站长推荐", BadgeStyle: "burst", Color: "red", Highlight: true, Note: "全天稳定", Tags: []string{"视频", "推荐"}},
+					"visible-model": {Category: "video", Family: "Seedance 2.5", Badge: "站长推荐", BadgeStyle: "burst", Color: "red", Highlight: true, Note: "全天稳定", Tags: []string{"视频", "推荐"}},
 					"hidden-model":  {Badge: "Private catalog entry"},
 				},
 			}
@@ -156,17 +156,32 @@ func TestModelSquareDisplayDatabaseMatrix(t *testing.T) {
 			}, model.GetModelSquareDisplay().ForModels([]string{"visible-model", "new-model"}))
 			model.RefreshPricing()
 			var publicResponse struct {
-				Success bool
-				Display model.ModelSquareDisplay `json:"model_square_display"`
+				Success    bool
+				Display    model.ModelSquareDisplay `json:"model_square_display"`
+				Categories map[string]string        `json:"model_square_categories"`
 			}
 			modelManagementRequest(t, GetPricing, http.MethodGet, "/api/pricing", nil, &publicResponse)
 			require.True(t, publicResponse.Success)
 			assert.Empty(t, publicResponse.Display.Order, "a public catalog with no accessible models must not expose saved model names")
 			assert.Empty(t, publicResponse.Display.Models)
+			assert.Empty(t, publicResponse.Categories)
+			for _, category := range []string{"", "video", "image", "chat", "other"} {
+				settings := model.ModelSquareDisplay{Models: map[string]model.ModelSquareDecoration{"visible-model": {Category: category}}}
+				modelManagementRequest(t, UpdateModelSquareDisplay, http.MethodPut, "/api/models/display", settings, &response)
+				require.True(t, response.Success)
+				assert.Equal(t, category, response.Data.Models["visible-model"].Category)
+			}
+			modelManagementRequest(t, UpdateModelSquareDisplay, http.MethodPut, "/api/models/display", display, &response)
+			require.True(t, response.Success)
 
 			for _, invalid := range []model.ModelSquareDisplay{
 				{Order: []string{"duplicate", "duplicate"}},
 				{Order: []string{" "}},
+				{Models: map[string]model.ModelSquareDecoration{"test": {Category: "auto"}}},
+				{Models: map[string]model.ModelSquareDecoration{"test": {Category: "invalid"}}},
+				{Models: map[string]model.ModelSquareDecoration{"test": {Family: strings.Repeat("字", 65)}}},
+				{Models: map[string]model.ModelSquareDecoration{"test": {Family: " Seedance 2.5"}}},
+				{Models: map[string]model.ModelSquareDecoration{"test": {Family: "Series\nName"}}},
 				{Models: map[string]model.ModelSquareDecoration{"test": {Badge: strings.Repeat("字", 25)}}},
 				{Models: map[string]model.ModelSquareDecoration{"test": {Note: strings.Repeat("a", 121)}}},
 				{Models: map[string]model.ModelSquareDecoration{"test": {Color: "unknown"}}},
@@ -197,6 +212,24 @@ func TestModelSquareDisplayDatabaseMatrix(t *testing.T) {
 			assert.Equal(t, cleared, model.GetModelSquareDisplay(), "failed persistence must not publish new settings")
 		})
 	}
+	t.Run("model scoped media categories", func(t *testing.T) {
+		_, err := jsplugin.DefaultRegistry.Register(`
+export const meta = {apiVersion: 1, key: "square-categories", name: "Square category fixture", version: "1.0.0", author: {name: "Test"}, models: ["square-image", "square-video", "square-dual"], fetchMode: "per_task", protocols: [{name: "openai_image", models: ["square-image", "square-dual"]}, {name: "openai_video", models: ["square-video", "square-dual"]}]};
+export function buildSubmitRequest() { return {}; }
+export function parseSubmitResponse() { return {}; }
+export function buildQueryRequest() { return {}; }
+export function parseTaskResult() { return {}; }
+export function listArtifacts() { return []; }
+export function buildContentRequest() { return {}; }
+export const protocols = {openai_image: {decodeRequest(){return {};}, render(){return {};}}, openai_video: {decodeRequest(){return {};}, render(){return {};}}};
+`, jsplugin.Options{})
+		require.NoError(t, err)
+		t.Cleanup(func() { require.NoError(t, jsplugin.DefaultRegistry.Unregister("square-categories")) })
+		assert.Equal(t, map[string]string{"square-image": "image", "square-video": "video", "square-dual": "other"}, model.GetModelSquareCategories([]string{"square-image", "square-video", "square-dual", "unrecognized"}))
+		assert.Equal(t, map[string]string{"square-video": "video"}, model.GetModelSquareCategories([]string{"square-video"}), "only requested visible names may be returned")
+		require.NoError(t, jsplugin.DefaultRegistry.Unregister("square-categories"))
+		assert.Empty(t, model.GetModelSquareCategories([]string{"square-video"}), "removed plugins must no longer supply automatic categories")
+	})
 	t.Run("authorization", func(t *testing.T) {
 		previousOptions := common.OptionMap
 		common.OptionMap = map[string]string{}

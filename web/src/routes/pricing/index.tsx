@@ -24,7 +24,12 @@ import { getModuleAccessForGuard } from '@/lib/nav-modules'
 import { useAuthStore } from '@/stores/auth-store'
 
 const pricingSearchSchema = z.object({
+  category: z
+    .enum(['all', 'video', 'image', 'chat', 'other'])
+    .optional()
+    .catch(undefined),
   search: z.string().optional(),
+  family: z.string().max(80).optional().catch(undefined),
   sort: z.string().optional(),
   vendor: z.string().optional(),
   group: z.string().optional(),

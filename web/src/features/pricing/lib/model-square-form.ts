@@ -23,6 +23,13 @@ export const modelSquareDisplaySchema = z.object({
   models: z.record(
     z.string().min(1).max(256),
     z.object({
+      category: z.enum(['video', 'image', 'chat', 'other']).optional(),
+      family: z
+        .string()
+        .trim()
+        .max(64)
+        .regex(/^[^\n\r\t]*$/)
+        .optional(),
       badge: z.string().max(24).optional(),
       badge_style: z.enum(['ribbon', 'burst']).optional(),
       color: z.enum(['red', 'amber', 'blue', 'emerald', 'violet']).optional(),
