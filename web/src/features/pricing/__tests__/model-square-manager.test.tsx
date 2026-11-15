@@ -25,6 +25,7 @@ import { api } from '@/lib/api'
 
 import type { ModelSquareDisplayResponse } from '../api'
 import ModelSquareManager from '../components/model-square-manager'
+import type { ModelCategoryFilter } from '../lib/model-categories'
 import type { ModelSquareDisplay } from '../lib/model-square-display'
 import type { PricingModel } from '../types'
 
@@ -57,12 +58,18 @@ afterEach(() => {
   client.clear()
 })
 
-function renderManager(catalog = models) {
+function renderManager(
+  catalog = models,
+  initialCategory: ModelCategoryFilter = 'all',
+  initialFamily = 'all'
+) {
   const onClose = vi.fn()
   render(
     <QueryClientProvider client={client}>
       <ModelSquareManager
         models={catalog}
+        initialCategory={initialCategory}
+        initialFamily={initialFamily}
         onClose={onClose}
         priceRate={1}
         usdExchangeRate={1}
@@ -91,6 +98,297 @@ function deferCachedDisplayRefresh() {
 }
 
 describe('model square manager', () => {
+  it('keeps editing the same model after assigning it to another series and disables moves outside the scope', async () => {
+    const catalog = [
+      {
+        ...models[0],
+        model_name: 'seedance-2-5',
+        square_category: 'video' as const,
+      },
+    ]
+    const save = vi
+      .spyOn(api, 'put')
+      .mockImplementation(async (_url, data) => ({
+        data: { success: true, data },
+      }))
+    renderManager(catalog, 'video', 'series:Seedance 2.5')
+    const user = userEvent.setup()
+    const family = await screen.findByRole('combobox', { name: 'Model series' })
+    await user.clear(family)
+    await user.type(family, 'Editorial collection')
+    expect(family).toHaveValue('Editorial collection')
+    expect(
+      screen.getByRole('combobox', { name: 'Filter by model series' })
+    ).toHaveValue('Seedance 2.5 · 0')
+    expect(screen.getByLabelText('Move to position')).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Move to top' })).toBeDisabled()
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+    await waitFor(() => expect(save).toHaveBeenCalled())
+    expect((save.mock.calls[0][1] as ModelSquareDisplay).models).toEqual({
+      'seedance-2-5': { family: 'Editorial collection' },
+    })
+  })
+
+  it.each(['arrow', 'top', 'position'])(
+    'reorders only the current category and series with %s, preserving other series and hidden slots',
+    async (method) => {
+      const names = [
+        'a-seedance-2-5',
+        'b-image-2',
+        'c-seedance-2-0',
+        'd-seedance-2-5',
+      ]
+      const catalog = names.map((model_name, index) => ({
+        ...models[0],
+        id: index,
+        model_name,
+        square_category: index === 1 ? ('image' as const) : ('video' as const),
+      }))
+      vi.mocked(api.get).mockResolvedValue({
+        data: {
+          success: true,
+          data: {
+            order: [names[0], 'hidden', ...names.slice(1)],
+            models: { hidden: { note: 'Preserve' } },
+          },
+        },
+      })
+      const save = vi
+        .spyOn(api, 'put')
+        .mockImplementation(async (_url, data) => ({
+          data: { success: true, data },
+        }))
+      renderManager(catalog, 'video', 'series:Seedance 2.5')
+      const user = userEvent.setup()
+      const edit = await screen.findByRole('button', {
+        name: 'Edit d-seedance-2-5',
+      })
+      expect(
+        screen.queryByRole('button', { name: 'Edit b-image-2' })
+      ).not.toBeInTheDocument()
+      expect(
+        screen.queryByRole('button', { name: 'Edit c-seedance-2-0' })
+      ).not.toBeInTheDocument()
+      if (method === 'arrow') {
+        await user.click(
+          screen.getByRole('button', { name: 'Move d-seedance-2-5 up' })
+        )
+      } else {
+        await user.click(edit)
+        if (method === 'top') {
+          await user.click(screen.getByRole('button', { name: 'Move to top' }))
+        } else {
+          const position = screen.getByLabelText('Move to position')
+          expect(position).toHaveAttribute('max', '2')
+          await user.type(position, '1')
+          await user.click(screen.getByRole('button', { name: /^Move$/ }))
+        }
+      }
+      await user.click(screen.getByRole('button', { name: 'Save changes' }))
+      await waitFor(() => expect(save).toHaveBeenCalled())
+      expect(save.mock.calls[0][1]).toEqual({
+        order: [
+          'd-seedance-2-5',
+          'hidden',
+          'b-image-2',
+          'c-seedance-2-0',
+          'a-seedance-2-5',
+        ],
+        models: { hidden: { note: 'Preserve' } },
+      })
+    }
+  )
+
+  it('changes the ordering scope without dirtying the form and shows an empty scope safely', async () => {
+    renderManager()
+    const user = userEvent.setup()
+    await user.click(
+      await screen.findByRole('combobox', { name: 'Ordering scope' })
+    )
+    await user.click(screen.getByRole('option', { name: /^Videos · 0$/ }))
+    expect(screen.getByText('No models found')).toBeVisible()
+    expect(
+      screen.queryByLabelText('Recommendation badge')
+    ).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled()
+    await user.click(screen.getByRole('combobox', { name: 'Ordering scope' }))
+    await user.click(screen.getByRole('option', { name: /^All · 3$/ }))
+    expect(screen.getByLabelText('Recommendation badge')).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled()
+  })
+
+  it('saves a custom series then restores automatic grouping when its value is cleared', async () => {
+    const save = vi
+      .spyOn(api, 'put')
+      .mockImplementation(async (_url, data) => ({
+        data: { success: true, data },
+      }))
+    renderManager()
+    const user = userEvent.setup()
+    const family = await screen.findByRole('combobox', { name: 'Model series' })
+    await user.clear(family)
+    await user.type(family, '  Editorial  ')
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+    await waitFor(() => expect(save).toHaveBeenCalled())
+    expect(
+      (save.mock.calls[0][1] as ModelSquareDisplay).models.alpha.family
+    ).toBe('Editorial')
+    await user.clear(family)
+    await user.type(screen.getByLabelText('Card notice'), 'Keep')
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(2))
+    expect((save.mock.calls[1][1] as ModelSquareDisplay).models.alpha).toEqual({
+      note: 'Keep',
+    })
+  })
+
+  it('assigns a custom series in bulk while retaining badges and hidden settings', async () => {
+    vi.mocked(api.get).mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          order: [],
+          models: { alpha: { badge: 'Keep' }, hidden: { family: 'Private' } },
+        },
+      },
+    })
+    const save = vi
+      .spyOn(api, 'put')
+      .mockImplementation(async (_url, data) => ({
+        data: { success: true, data },
+      }))
+    renderManager()
+    const user = userEvent.setup()
+    await user.click(
+      await screen.findByRole('button', { name: 'Batch classification' })
+    )
+    const selection = await screen.findByRole('combobox', {
+      name: 'Search and select models...',
+    })
+    await user.click(selection)
+    await user.click(await screen.findByRole('option', { name: 'alpha' }))
+    await user.click(selection)
+    await user.click(await screen.findByRole('option', { name: 'beta' }))
+    await user.keyboard('{Escape}')
+    const family = screen.getByRole('combobox', { name: 'Assign series' })
+    await user.clear(family)
+    await user.type(family, 'Custom collection')
+    await user.click(
+      screen.getByRole('button', { name: 'Apply series to selected' })
+    )
+    expect(screen.getByRole('combobox', { name: 'Model series' })).toHaveValue(
+      'Custom collection'
+    )
+    expect(save).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+    await waitFor(() => expect(save).toHaveBeenCalled())
+    expect((save.mock.calls[0][1] as ModelSquareDisplay).models).toEqual({
+      alpha: { badge: 'Keep', family: 'Custom collection' },
+      beta: { family: 'Custom collection' },
+      hidden: { family: 'Private' },
+    })
+  })
+
+  it('saves a manual category and returns to automatic classification without losing the badge', async () => {
+    vi.mocked(api.get).mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          order: [],
+          models: {
+            alpha: { badge: 'Keep', category: 'video', family: 'Editorial' },
+          },
+        },
+      },
+    })
+    const save = vi
+      .spyOn(api, 'put')
+      .mockImplementation(async (_url, data) => ({
+        data: { success: true, data },
+      }))
+    const onClose = renderManager()
+    const user = userEvent.setup()
+    const category = await screen.findByRole('combobox', {
+      name: 'Model category',
+    })
+    await user.click(category)
+    await user.click(screen.getByRole('option', { name: 'Images' }))
+    await user.click(
+      screen.getByRole('button', { name: 'Clear card decoration' })
+    )
+    expect(category).toHaveTextContent('Images')
+    expect(screen.getByRole('combobox', { name: 'Model series' })).toHaveValue(
+      'Editorial'
+    )
+    expect(screen.getByLabelText('Recommendation badge')).toHaveValue('')
+    await user.type(screen.getByLabelText('Recommendation badge'), 'Keep')
+    await user.click(category)
+    await user.click(
+      screen.getByRole('option', {
+        name: 'Automatic classification',
+      })
+    )
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce())
+    expect(save).toHaveBeenCalledWith('/api/models/display', {
+      order: [],
+      models: { alpha: { badge: 'Keep', family: 'Editorial' } },
+    })
+  })
+
+  it('applies a category to selected models as a draft and preserves unselected hidden settings', async () => {
+    vi.mocked(api.get).mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          order: [],
+          models: {
+            hidden: { category: 'video', note: 'Preserve' },
+            alpha: { badge: 'Keep' },
+          },
+        },
+      },
+    })
+    const save = vi
+      .spyOn(api, 'put')
+      .mockImplementation(async (_url, data) => ({
+        data: { success: true, data },
+      }))
+    const onClose = renderManager()
+    const user = userEvent.setup()
+    await user.click(
+      await screen.findByRole('button', { name: 'Batch classification' })
+    )
+    expect(
+      await screen.findByRole('button', { name: 'Apply to selected' })
+    ).toBeDisabled()
+    const models = screen.getByRole('combobox', {
+      name: 'Search and select models...',
+    })
+    await user.click(models)
+    await user.click(await screen.findByRole('option', { name: /^alpha/ }))
+    await user.click(models)
+    await user.click(await screen.findByRole('option', { name: /^beta/ }))
+    await user.keyboard('{Escape}')
+    await user.click(screen.getByRole('combobox', { name: 'Assign category' }))
+    await user.click(screen.getByRole('option', { name: 'Images' }))
+    await user.click(screen.getByRole('button', { name: 'Apply to selected' }))
+    expect(
+      screen.getByRole('combobox', { name: 'Model category' })
+    ).toHaveTextContent('Images')
+    expect(save).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce())
+    expect(save).toHaveBeenCalledWith('/api/models/display', {
+      order: [],
+      models: {
+        hidden: { category: 'video', note: 'Preserve' },
+        alpha: { badge: 'Keep', category: 'image' },
+        beta: { category: 'image' },
+      },
+    })
+  })
+
   it('previews badge, notice, border and additional tags before saving them together', async () => {
     const save = vi
       .spyOn(api, 'put')
@@ -300,7 +598,7 @@ describe('model square manager', () => {
     await user.type(tags, `${'a'.repeat(33)}{Enter}`)
     expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled()
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      'Use up to 24 characters'
+      'Use up to 64 characters for series'
     )
     await user.click(screen.getByRole('button', { name: 'Remove tag' }))
     await user.type(tags, 'valid{Enter}')

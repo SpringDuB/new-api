@@ -50,6 +50,9 @@ import type { PricingModel, PricingVendor, TokenUnit } from '../types'
 import { PricingSidebar } from './pricing-sidebar'
 
 export interface PricingToolbarProps {
+  familyFilter: string
+  onFamilyChange: (value: string) => void
+  familyModels?: PricingModel[]
   filteredCount: number
   totalCount?: number
   sortBy: string
@@ -199,11 +202,14 @@ export function PricingToolbar(props: PricingToolbarProps) {
           <SheetHeader className={sideDrawerHeaderClassName()}>
             <SheetTitle>{t('Filter')}</SheetTitle>
             <SheetDescription>
-              {t('Filter models by provider, group, type, endpoint, and tags.')}
+              {t('Filters apply to the current category.')}
             </SheetDescription>
           </SheetHeader>
           <div className={sideDrawerFormClassName('gap-0')}>
             <PricingSidebar
+              familyFilter={props.familyFilter}
+              onFamilyChange={props.onFamilyChange}
+              familyModels={props.familyModels}
               quotaTypeFilter={props.quotaTypeFilter}
               endpointTypeFilter={props.endpointTypeFilter}
               vendorFilter={props.vendorFilter}

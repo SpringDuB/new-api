@@ -56,6 +56,7 @@ export function usePricingData(enabled = true) {
         : undefined
       return {
         ...model,
+        square_category: data.model_square_categories?.[model.model_name],
         key: model.model_name,
         vendor_name: vendor?.name,
         vendor_icon: vendor?.icon,

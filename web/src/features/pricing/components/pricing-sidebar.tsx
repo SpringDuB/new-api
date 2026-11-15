@@ -27,6 +27,8 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
+import { toIntlLocale } from '@/i18n/languages'
+import { formatNumber } from '@/lib/format'
 import { getLobeIcon } from '@/lib/lobe-icon'
 import { cn } from '@/lib/utils'
 
@@ -38,6 +40,7 @@ import {
   getQuotaTypeLabels,
 } from '../constants'
 import { getModelQuotaType, parseTags } from '../lib/filters'
+import { getModelFamilies } from '../lib/model-families'
 import type { PricingModel, PricingVendor } from '../types'
 
 type FilterOption = {
@@ -56,6 +59,9 @@ type FilterSectionProps = {
 }
 
 export interface PricingSidebarProps {
+  familyFilter: string
+  onFamilyChange: (value: string) => void
+  familyModels?: PricingModel[]
   quotaTypeFilter: string
   endpointTypeFilter: string
   vendorFilter: string
@@ -89,6 +95,8 @@ function FilterChip(props: {
   active: boolean
   onClick: () => void
 }) {
+  const { i18n } = useTranslation()
+  const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
   return (
     <Button
       type='button'
@@ -112,7 +120,7 @@ function FilterChip(props: {
               : 'bg-muted text-muted-foreground'
           )}
         >
-          {props.option.suffix ?? props.option.count}
+          {props.option.suffix ?? formatNumber(props.option.count ?? 0, locale)}
         </span>
       )}
     </Button>
@@ -178,6 +186,14 @@ export const PricingSidebar = memo(function PricingSidebar(
   }, [props.models])
   const quotaTypeLabels = getQuotaTypeLabels(t)
   const endpointTypeLabels = getEndpointTypeLabels(t)
+  const familyModels = props.familyModels ?? props.models
+  const familyOptions: FilterOption[] = [
+    { value: FILTER_ALL, label: t('All'), count: familyModels.length },
+    ...getModelFamilies(familyModels).map((family) => ({
+      ...family,
+      label: family.label ?? t('Unassigned series'),
+    })),
+  ]
 
   const vendorOptions: FilterOption[] = [
     {
@@ -264,7 +280,7 @@ export const PricingSidebar = memo(function PricingSidebar(
         <div>
           <h2 className='text-foreground text-sm font-bold'>{t('Filter')}</h2>
           <p className='text-muted-foreground mt-1 text-xs'>
-            {t('Refine models by provider, group, type, and tags.')}
+            {t('Filters apply to the current category.')}
           </p>
         </div>
         <Button
@@ -287,6 +303,12 @@ export const PricingSidebar = memo(function PricingSidebar(
       )}
 
       <div className='space-y-1'>
+        <FilterSection
+          title={t('Model series')}
+          value={props.familyFilter}
+          options={familyOptions}
+          onChange={props.onFamilyChange}
+        />
         <FilterSection
           title={t('Groups')}
           value={props.groupFilter}

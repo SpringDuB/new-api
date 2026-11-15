@@ -6,11 +6,14 @@ import (
 	"unicode/utf8"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/pkg/jsplugin"
 )
 
 const ModelSquareDisplayOption = "ModelSquareDisplay"
 
 type ModelSquareDecoration struct {
+	Category   string   `json:"category,omitempty"`
+	Family     string   `json:"family,omitempty"`
 	Badge      string   `json:"badge,omitempty"`
 	BadgeStyle string   `json:"badge_style,omitempty"`
 	Color      string   `json:"color,omitempty"`
@@ -41,6 +44,12 @@ func (display *ModelSquareDisplay) Validate() error {
 		if strings.TrimSpace(name) == "" || utf8.RuneCountInString(name) > 256 {
 			return common.NewMessage("Model square display contains an invalid model name")
 		}
+		if !slices.Contains([]string{"", "video", "image", "chat", "other"}, decoration.Category) {
+			return common.NewMessage("Invalid model square category")
+		}
+		if utf8.RuneCountInString(decoration.Family) > 64 || decoration.Family != strings.TrimSpace(decoration.Family) || strings.ContainsAny(decoration.Family, "\n\r\t") {
+			return common.NewMessage("Model series must contain at most 64 characters without surrounding whitespace or line breaks")
+		}
 		if utf8.RuneCountInString(decoration.Badge) > 24 || utf8.RuneCountInString(decoration.Note) > 120 {
 			return common.NewMessage("Model square badges allow 24 characters and notes allow 120 characters")
 		}
@@ -58,6 +67,26 @@ func (display *ModelSquareDisplay) Validate() error {
 		}
 	}
 	return nil
+}
+
+// GetModelSquareCategories uses model-scoped protocol claims, rather than
+// reference-input tags, to identify media models exposed on generic endpoints.
+func GetModelSquareCategories(names []string) map[string]string {
+	generation := jsplugin.DefaultRegistry.Generation()
+	categories := make(map[string]string)
+	for _, name := range names {
+		_, video := generation.LookupEndpoint("POST", "/v1/videos", name)
+		_, image := generation.LookupEndpoint("POST", "/v1/images/generations", name)
+		switch {
+		case video && image:
+			categories[name] = "other"
+		case video:
+			categories[name] = "video"
+		case image:
+			categories[name] = "image"
+		}
+	}
+	return categories
 }
 
 func GetModelSquareDisplay() ModelSquareDisplay {

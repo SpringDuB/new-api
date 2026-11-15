@@ -30,6 +30,8 @@ import { ErrorState } from '@/components/error-state'
 import { LoadingState } from '@/components/loading-state'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
+import { ComboboxInput } from '@/components/ui/combobox-input'
+import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
@@ -38,6 +40,19 @@ import {
 } from '@/lib/server-error-message'
 
 import { getModelSquareDisplay, saveModelSquareDisplay } from '../api'
+import {
+  getModelCategoryLabels,
+  getModelCategory,
+  inferModelCategory,
+  type ModelCategoryChoice,
+  type ModelCategoryFilter as CategoryFilter,
+} from '../lib/model-categories'
+import {
+  ALL_MODEL_FAMILIES,
+  getModelFamilies,
+  getModelFamilyKey,
+  inferModelFamily,
+} from '../lib/model-families'
 import {
   applyModelSquareDisplay,
   EMPTY_MODEL_SQUARE_DISPLAY,
@@ -48,20 +63,30 @@ import {
 import { modelSquareDisplaySchema } from '../lib/model-square-form'
 import type { PricingModel } from '../types'
 import { ModelCard } from './model-card'
+import { ModelCategorySelect } from './model-category-select'
+import { ModelSquareBulkCategoryEditor } from './model-square-bulk-category-editor'
 import { ModelSquareDecorationEditor } from './model-square-decoration-editor'
 import { ModelSquareOrderEditor } from './model-square-order-editor'
+import { ModelSquareScopeFilter } from './model-square-scope-filter'
 
 export default function ModelSquareManager(props: {
   models: PricingModel[]
   onClose: () => void
   priceRate: number
   usdExchangeRate: number
+  initialCategory?: CategoryFilter
+  initialFamily?: string
 }) {
   const { t } = useTranslation()
+  const categoryLabels = getModelCategoryLabels(t)
   const queryClient = useQueryClient()
   const [discardOpen, setDiscardOpen] = useState(false)
-  const [selectedName, setSelectedName] = useState(
-    props.models[0]?.model_name ?? ''
+  const [selectedModelName, setSelectedName] = useState('')
+  const [categoryScope, setCategoryScope] = useState<CategoryFilter>(
+    props.initialCategory ?? 'all'
+  )
+  const [familyScope, setFamilyScope] = useState(
+    props.initialFamily ?? ALL_MODEL_FAMILIES
   )
   const [position, setPosition] = useState('')
   const query = useQuery({
@@ -83,9 +108,22 @@ export default function ModelSquareManager(props: {
     () => applyModelSquareDisplay(props.models, display),
     [props.models, display]
   )
-  const names = models.map((model) => model.model_name)
-  const selectedModel = models.find(
-    (model) => model.model_name === selectedName
+  const categoryModels = models.filter(
+    (model) =>
+      categoryScope === 'all' || getModelCategory(model) === categoryScope
+  )
+  const scopedModels = categoryModels.filter(
+    (model) =>
+      familyScope === ALL_MODEL_FAMILIES ||
+      getModelFamilyKey(model) === familyScope
+  )
+  const names = scopedModels.map((model) => model.model_name)
+  const selectedModel =
+    models.find((model) => model.model_name === selectedModelName) ??
+    scopedModels[0]
+  const selectedName = selectedModel?.model_name ?? ''
+  const familyOptions = getModelFamilies(models).flatMap((family) =>
+    family.label ? [{ value: family.label, label: family.label }] : []
   )
   const selectedIndex = names.indexOf(selectedName)
   const save = useMutation({
@@ -99,7 +137,11 @@ export default function ModelSquareManager(props: {
     },
   })
   const reorder = (order: string[]) => {
-    const currentOrder = reorderModelSquareDisplay(display, names)
+    setSelectedName(selectedName)
+    const currentOrder = reorderModelSquareDisplay(
+      display,
+      models.map((model) => model.model_name)
+    )
     form.setValue(
       'order',
       reorderModelSquareDisplay(currentOrder, order).order,
@@ -110,11 +152,26 @@ export default function ModelSquareManager(props: {
     )
   }
   const updateDecoration = (decoration: ModelSquareDecoration) => {
+    setSelectedName(selectedName)
     form.setValue(
       'models',
       { ...display.models, [selectedName]: decoration },
       { shouldDirty: true, shouldValidate: true }
     )
+  }
+  const updateCategories = (names: string[], category: ModelCategoryChoice) => {
+    setSelectedName(selectedName)
+    const decorations = { ...display.models }
+    for (const name of names) {
+      const decoration = { ...decorations[name] }
+      if (category === 'auto') delete decoration.category
+      else decoration.category = category
+      decorations[name] = decoration
+    }
+    form.setValue('models', decorations, {
+      shouldDirty: true,
+      shouldValidate: true,
+    })
   }
   const close = () => {
     if (save.isPending) return
@@ -180,17 +237,54 @@ export default function ModelSquareManager(props: {
         )}
         {query.isSuccess && (
           <fieldset disabled={save.isPending} className='min-w-0 space-y-4'>
+            <ModelSquareScopeFilter
+              models={models}
+              categoryModels={categoryModels}
+              category={categoryScope}
+              family={familyScope}
+              onCategoryChange={(category) => {
+                setCategoryScope(category)
+                setFamilyScope(ALL_MODEL_FAMILIES)
+                setSelectedName('')
+                setPosition('')
+              }}
+              onFamilyChange={(family) => {
+                setFamilyScope(family)
+                setSelectedName('')
+                setPosition('')
+              }}
+            />
+            <ModelSquareBulkCategoryEditor
+              key={`${categoryScope}:${familyScope}`}
+              models={scopedModels}
+              onApply={updateCategories}
+              onApplyFamily={(names, family) => {
+                setSelectedName(selectedName)
+                const decorations = { ...display.models }
+                for (const name of names) {
+                  const decoration = { ...decorations[name] }
+                  if (family.trim()) decoration.family = family.trim()
+                  else delete decoration.family
+                  decorations[name] = decoration
+                }
+                form.setValue('models', decorations, {
+                  shouldDirty: true,
+                  shouldValidate: true,
+                })
+              }}
+            />
             {!form.formState.isValid && form.formState.isDirty && (
               <Alert variant='destructive'>
                 <AlertDescription>
                   {t(
-                    'Use up to 24 characters for badges, 120 for notices, and 10 tags of up to 32 characters each.'
+                    'Use up to 64 characters for series, 24 for badges, 120 for notices, and 10 tags of up to 32 characters each.'
                   )}
                 </AlertDescription>
               </Alert>
             )}
             <div className='grid min-w-0 gap-5 lg:grid-cols-[minmax(230px,0.9fr)_minmax(0,1fr)_minmax(0,1fr)]'>
               <ModelSquareOrderEditor
+                key={`${categoryScope}:${familyScope}`}
                 names={names}
                 selectedName={selectedName}
                 onSelect={(name) => {
@@ -205,6 +299,62 @@ export default function ModelSquareManager(props: {
                     <p className='font-mono text-sm font-semibold break-all'>
                       {selectedName}
                     </p>
+                    <Field>
+                      <FieldLabel htmlFor='square-category'>
+                        {t('Model category')}
+                      </FieldLabel>
+                      <ModelCategorySelect
+                        id='square-category'
+                        value={display.models[selectedName]?.category ?? 'auto'}
+                        onChange={(category) =>
+                          updateCategories([selectedName], category)
+                        }
+                      />
+                      <FieldDescription>
+                        {t('Automatically detected: {{category}}', {
+                          category:
+                            categoryLabels[inferModelCategory(selectedModel)],
+                        })}
+                      </FieldDescription>
+                    </Field>
+                    <Field>
+                      <FieldLabel htmlFor='square-family'>
+                        {t('Model series')}
+                      </FieldLabel>
+                      <ComboboxInput
+                        id='square-family'
+                        value={display.models[selectedName]?.family ?? ''}
+                        options={[
+                          { value: '', label: t('Automatic grouping') },
+                          ...familyOptions,
+                        ]}
+                        allowCustomValue
+                        openOnFocus={false}
+                        placeholder={t('Automatic grouping')}
+                        emptyText='No matching items'
+                        aria-invalid={Boolean(
+                          form.formState.errors.models?.[selectedName]?.family
+                        )}
+                        onValueChange={(family) =>
+                          updateDecoration({
+                            ...display.models[selectedName],
+                            family: family || undefined,
+                          })
+                        }
+                      />
+                      <FieldDescription>
+                        {t('Automatically grouped as: {{series}}', {
+                          series:
+                            inferModelFamily(selectedName) ??
+                            t('Unassigned series'),
+                        })}
+                      </FieldDescription>
+                      <FieldDescription>
+                        {t(
+                          'Choose an existing series or enter a custom name. Clear the value to restore automatic grouping.'
+                        )}
+                      </FieldDescription>
+                    </Field>
                     <div className='space-y-2 rounded-lg border p-3'>
                       <Label htmlFor='square-position'>
                         {t('Move to position')}
@@ -216,7 +366,10 @@ export default function ModelSquareManager(props: {
                           min={1}
                           max={names.length}
                           step={1}
-                          placeholder={String(selectedIndex + 1)}
+                          disabled={selectedIndex < 0}
+                          placeholder={
+                            selectedIndex < 0 ? '' : String(selectedIndex + 1)
+                          }
                           value={position}
                           onChange={(event) => setPosition(event.target.value)}
                         />
@@ -224,6 +377,7 @@ export default function ModelSquareManager(props: {
                           variant='outline'
                           onClick={moveToPosition}
                           disabled={
+                            selectedIndex < 0 ||
                             !Number.isInteger(Number(position)) ||
                             Number(position) < 1 ||
                             Number(position) > names.length
@@ -233,7 +387,7 @@ export default function ModelSquareManager(props: {
                         </Button>
                         <Button
                           variant='outline'
-                          disabled={selectedIndex === 0}
+                          disabled={selectedIndex <= 0}
                           onClick={() =>
                             reorder([
                               selectedName,
@@ -244,6 +398,13 @@ export default function ModelSquareManager(props: {
                           {t('Move to top')}
                         </Button>
                       </div>
+                      {selectedIndex < 0 && (
+                        <FieldDescription>
+                          {t(
+                            'This model is outside the current ordering scope.'
+                          )}
+                        </FieldDescription>
+                      )}
                     </div>
                     <ModelSquareDecorationEditor
                       value={display.models[selectedName] ?? {}}
@@ -267,7 +428,12 @@ export default function ModelSquareManager(props: {
                     </p>
                     <Button
                       variant='ghost'
-                      onClick={() => updateDecoration({})}
+                      onClick={() =>
+                        updateDecoration({
+                          category: display.models[selectedName]?.category,
+                          family: display.models[selectedName]?.family,
+                        })
+                      }
                     >
                       {t('Clear card decoration')}
                     </Button>
@@ -275,7 +441,9 @@ export default function ModelSquareManager(props: {
                 </>
               )}
             </div>
-            {models.length === 0 && <EmptyState title={t('No models found')} />}
+            {scopedModels.length === 0 && (
+              <EmptyState title={t('No models found')} />
+            )}
           </fieldset>
         )}
       </Dialog>

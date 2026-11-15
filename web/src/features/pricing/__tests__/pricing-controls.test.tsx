@@ -31,6 +31,8 @@ import type { PricingModel } from '../types'
 
 function toolbarProps(): PricingToolbarProps {
   return {
+    familyFilter: 'all',
+    onFamilyChange: vi.fn(),
     filteredCount: 2,
     totalCount: 2,
     sortBy: 'name',
