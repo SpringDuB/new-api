@@ -27,10 +27,14 @@ import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 
+import { Button } from '@/components/ui/button'
+
 import { ModelCategoryFilter } from '../components/model-category-filter'
 import { PricingSidebar } from '../components/pricing-sidebar'
 import { SearchBar } from '../components/search-bar'
 import { useFilters } from '../hooks/use-filters'
+import { sortModels } from '../lib/filters'
+import type { ModelCategory } from '../lib/model-categories'
 import {
   getModelFamilies,
   getModelFamily,
@@ -55,10 +59,15 @@ const models: PricingModel[] = [
   square_category: id === 1 ? 'image' : 'video',
 }))
 
-function FamilyCatalog() {
-  const filters = useFilters(models)
+function FamilyCatalog(props: { models: PricingModel[] }) {
+  const filters = useFilters(props.models)
   return (
     <>
+      <Button onClick={() => filters.setSortBy('recommended')}>
+        Recommended order
+      </Button>
+      <Button onClick={() => filters.setSortBy('name')}>Name order</Button>
+      <Button onClick={() => filters.setSortBy('family')}>Series order</Button>
       <SearchBar
         value={filters.searchInput}
         onChange={filters.setSearchInput}
@@ -99,12 +108,15 @@ function FamilyCatalog() {
   )
 }
 
-function renderCatalog(path = '/pricing/?category=video') {
+function renderCatalog(
+  path = '/pricing/?category=video',
+  catalog: PricingModel[] = models
+) {
   const root = createRootRoute()
   const route = createRoute({
     getParentRoute: () => root,
     path: '/pricing/',
-    component: FamilyCatalog,
+    component: () => <FamilyCatalog models={catalog} />,
   })
   const router = createRouter({
     routeTree: root.addChildren([route]),
@@ -124,6 +136,7 @@ describe('model series', () => {
     ['ad-minimax-h3-replace', 'MiniMax'],
     ['h3video-2k', 'MiniMax'],
     ['jl-wan-3-0-1055-720p', 'Wan'],
+    ['jl-wan3.0-fast', 'Wan'],
     ['ap-muse-video-720-10s', 'Muse Video'],
     ['muse-zr-700', 'Muse'],
     ['tinysnow-banana-3-1', 'Nano Banana'],
@@ -131,8 +144,15 @@ describe('model series', () => {
     ['image2', 'Image 2'],
     ['sl-midjourney-niji', 'Midjourney'],
     ['mf-gemini-omni-1-2-flash', 'Gemini Omni'],
+    ['anthropic/claude-sonnet-4', 'Claude'],
+    ['proxy-gpt-4o-mini', 'GPT'],
+    ['proxy-deepseek-chat', 'DeepSeek'],
+    ['Qwen/Qwen3-32B', 'Qwen'],
+    ['proxy-glm-4.5', 'GLM'],
+    ['proxy-grok-3-mini', 'Grok'],
     ['unknown-model', undefined],
     ['notseedance-2-5', undefined],
+    ['notgpt-4o', undefined],
   ])(
     'groups %s as %s without using provider prefixes or variant suffixes',
     (name, family) => {
@@ -156,11 +176,176 @@ describe('model series', () => {
     expect(
       getModelFamilies([...models, { ...models[0], model_name: 'unknown' }])
     ).toEqual([
-      { value: 'series:Image 2', label: 'Image 2', count: 1 },
-      { value: 'series:Seedance 2.0', label: 'Seedance 2.0', count: 1 },
       { value: 'series:Seedance 2.5', label: 'Seedance 2.5', count: 2 },
+      { value: 'series:Seedance 2.0', label: 'Seedance 2.0', count: 1 },
+      { value: 'series:Image 2', label: 'Image 2', count: 1 },
       { value: 'unassigned', label: undefined, count: 1 },
     ])
+  })
+
+  it.each<{
+    category: ModelCategory
+    names: string[]
+    expected: string[]
+    families: string[]
+  }>([
+    {
+      category: 'video',
+      names: [
+        'a-minimax-h3',
+        'b-seedance-2-0',
+        'c-wan-3-0',
+        'd-seedance-2-5',
+        'e-muse',
+        'f-minimax-h3',
+        'g-seedance-2-5',
+        'h-seedance-2-0',
+        'i-wan3.0-fast',
+      ],
+      expected: [
+        'd-seedance-2-5',
+        'g-seedance-2-5',
+        'b-seedance-2-0',
+        'h-seedance-2-0',
+        'c-wan-3-0',
+        'i-wan3.0-fast',
+        'a-minimax-h3',
+        'f-minimax-h3',
+        'e-muse',
+      ],
+      families: ['Seedance 2.5', 'Seedance 2.0', 'Wan', 'MiniMax', 'Muse'],
+    },
+    {
+      category: 'image',
+      names: [
+        'a-seedream-5-0',
+        'b-image-2',
+        'c-seedream-4-5',
+        'd-image-2',
+        'e-seedream-5-0',
+      ],
+      expected: [
+        'b-image-2',
+        'd-image-2',
+        'c-seedream-4-5',
+        'a-seedream-5-0',
+        'e-seedream-5-0',
+      ],
+      families: ['Image 2', 'Seedream 4.5', 'Seedream 5.0'],
+    },
+    {
+      category: 'chat',
+      names: [
+        'a-claude-sonnet-4',
+        'b-gpt-4o',
+        'c-deepseek-chat',
+        'd-claude-opus-4',
+        'e-gpt-4o-mini',
+      ],
+      expected: [
+        'a-claude-sonnet-4',
+        'd-claude-opus-4',
+        'c-deepseek-chat',
+        'b-gpt-4o',
+        'e-gpt-4o-mini',
+      ],
+      families: ['Claude', 'DeepSeek', 'GPT'],
+    },
+  ])(
+    'groups interleaved $category models by series by default and uses the same filter order',
+    async ({ category, names, expected, families }) => {
+      const catalog = names.map((model_name, id) => ({
+        ...models[0],
+        id,
+        model_name,
+        square_category: category,
+      }))
+      renderCatalog(`/pricing/?category=${category}`, catalog)
+      const list = await screen.findByRole('list', { name: 'Visible models' })
+
+      expect(
+        within(list)
+          .getAllByRole('listitem')
+          .map((item) => item.textContent)
+      ).toEqual(expected)
+      expect(
+        screen.getAllByRole('button').flatMap((button) => {
+          const family = families.find((name) =>
+            button.textContent?.startsWith(name)
+          )
+          return family ? [family] : []
+        })
+      ).toEqual(families)
+      expect(catalog.map((model) => model.model_name)).toEqual(names)
+    }
+  )
+
+  it('uses custom series for sorting, leaves unassigned models last, and preserves order within each series', () => {
+    const catalog = applyModelSquareDisplay(
+      ['a-seedance-2-5', 'b-unknown', 'c-minimax', 'd-custom', 'e-custom'].map(
+        (model_name) => ({ ...models[0], model_name })
+      ),
+      {
+        order: [
+          'e-custom',
+          'b-unknown',
+          'c-minimax',
+          'd-custom',
+          'a-seedance-2-5',
+        ],
+        models: {
+          'a-seedance-2-5': { family: 'Editorial' },
+          'd-custom': { family: 'Seedance 2.5' },
+          'e-custom': { family: 'Seedance 2.5' },
+        },
+      }
+    )
+
+    expect(
+      sortModels(catalog, 'family').map((model) => model.model_name)
+    ).toEqual([
+      'e-custom',
+      'd-custom',
+      'c-minimax',
+      'a-seedance-2-5',
+      'b-unknown',
+    ])
+    expect(sortModels([], 'family')).toEqual([])
+    expect(sortModels([catalog[0]], 'family')).toEqual([catalog[0]])
+  })
+
+  it('switches from series sorting to recommended and name order and can restore the default series order', async () => {
+    const catalog = applyModelSquareDisplay(models, {
+      order: ['old-seedance-2-0', 'second-seedance2.5', 'first-seedance-2-5'],
+      models: {},
+    })
+    renderCatalog('/pricing/?category=video', catalog)
+    const user = userEvent.setup()
+    const list = await screen.findByRole('list', { name: 'Visible models' })
+    expect(
+      within(list)
+        .getAllByRole('listitem')
+        .map((item) => item.textContent)
+    ).toEqual(['second-seedance2.5', 'first-seedance-2-5', 'old-seedance-2-0'])
+
+    await user.click(screen.getByRole('button', { name: 'Recommended order' }))
+    expect(
+      within(list)
+        .getAllByRole('listitem')
+        .map((item) => item.textContent)
+    ).toEqual(['old-seedance-2-0', 'second-seedance2.5', 'first-seedance-2-5'])
+    await user.click(screen.getByRole('button', { name: 'Name order' }))
+    expect(
+      within(list)
+        .getAllByRole('listitem')
+        .map((item) => item.textContent)
+    ).toEqual(['first-seedance-2-5', 'old-seedance-2-0', 'second-seedance2.5'])
+    await user.click(screen.getByRole('button', { name: 'Series order' }))
+    expect(
+      within(list)
+        .getAllByRole('listitem')
+        .map((item) => item.textContent)
+    ).toEqual(['second-seedance2.5', 'first-seedance-2-5', 'old-seedance-2-0'])
   })
 
   it('limits series to the category and resets its filters while retaining category and recommendation order', async () => {

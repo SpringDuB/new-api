@@ -26,6 +26,7 @@ import type { TokenUnit } from './types'
 
 /** Sort options for pricing models */
 export const SORT_OPTIONS = {
+  FAMILY: 'family',
   RECOMMENDED: 'recommended',
   NAME: 'name',
   INPUT_PRICE_LOW: 'input-price-low',
@@ -40,6 +41,7 @@ export type SortOption = (typeof SORT_OPTIONS)[keyof typeof SORT_OPTIONS]
 
 export function getSortLabels(t: TFunction): Record<SortOption, string> {
   return {
+    [SORT_OPTIONS.FAMILY]: t('Model series'),
     [SORT_OPTIONS.RECOMMENDED]: t('Recommended order'),
     [SORT_OPTIONS.NAME]: t('Name'),
     [SORT_OPTIONS.INPUT_PRICE_LOW]: t('Input Price: Low to High'),

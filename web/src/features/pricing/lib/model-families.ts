@@ -22,11 +22,18 @@ import type { PricingModel } from '../types'
 export const ALL_MODEL_FAMILIES = 'all'
 export const UNASSIGNED_MODEL_FAMILY = 'unassigned'
 
+const familyPriority = new Map(
+  ['seedance 2.5', 'seedance 2.0', 'wan', 'minimax'].map((family, index) => [
+    family,
+    index,
+  ])
+)
+
 const versionedFamilyPattern =
   /(?:^|[^a-z0-9])(seedance|seedream)[-_. ]?(\d+)(?:[-_. ](\d+))?(?=$|[^a-z0-9])/
 const familyPatterns: readonly [RegExp, string][] = [
   [/(?:^|[^a-z0-9])(?:minimax|h3(?:video)?)(?=$|[^a-z0-9])/, 'MiniMax'],
-  [/(?:^|[^a-z0-9])wan(?=$|[^a-z0-9])/, 'Wan'],
+  [/(?:^|[^a-z0-9])wan(?:x?\d+)?(?=$|[^a-z0-9])/, 'Wan'],
   [/(?:^|[^a-z0-9])muse[-_ ]video(?=$|[^a-z0-9])/, 'Muse Video'],
   [/(?:^|[^a-z0-9])muse(?=$|[^a-z0-9])/, 'Muse'],
   [/(?:^|[^a-z0-9])(?:nano[-_ ]?)?banana(?=$|[^a-z0-9])/, 'Nano Banana'],
@@ -34,6 +41,12 @@ const familyPatterns: readonly [RegExp, string][] = [
   [/(?:^|[^a-z0-9])midjourney(?=$|[^a-z0-9])/, 'Midjourney'],
   [/(?:^|[^a-z0-9])gemini[-_ ]omni(?=$|[^a-z0-9])/, 'Gemini Omni'],
   [/(?:^|[^a-z0-9])gemini(?=$|[^a-z0-9])/, 'Gemini'],
+  [/(?:^|[^a-z0-9])claude(?=$|[^a-z0-9])/, 'Claude'],
+  [/(?:^|[^a-z0-9])(?:chat)?gpt(?=$|[^a-z0-9])/, 'GPT'],
+  [/(?:^|[^a-z0-9])deepseek(?=$|[^a-z0-9])/, 'DeepSeek'],
+  [/(?:^|[^a-z0-9])qwen\d*(?=$|[^a-z0-9])/, 'Qwen'],
+  [/(?:^|[^a-z0-9])(?:chat)?glm\d*(?=$|[^a-z0-9])/, 'GLM'],
+  [/(?:^|[^a-z0-9])grok(?=$|[^a-z0-9])/, 'Grok'],
   [/(?:^|[^a-z0-9])video[-_ ]upscale(?=$|[^a-z0-9])/, 'Video Upscale'],
   [/(?:^|[^a-z0-9])face[-_ ]processing(?=$|[^a-z0-9])/, 'Face Processing'],
 ]
@@ -77,6 +90,11 @@ export function getModelFamilies(models: PricingModel[]): {
   return [...families.values()].sort((a, b) => {
     if (a.label === undefined) return b.label === undefined ? 0 : 1
     if (b.label === undefined) return -1
-    return a.label.localeCompare(b.label, undefined, { numeric: true })
+    const priority =
+      (familyPriority.get(a.label.toLowerCase()) ?? familyPriority.size) -
+      (familyPriority.get(b.label.toLowerCase()) ?? familyPriority.size)
+    return (
+      priority || a.label.localeCompare(b.label, undefined, { numeric: true })
+    )
   })
 }

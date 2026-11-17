@@ -80,7 +80,7 @@ export function useFilters(models: PricingModel[]) {
 
   const searchInput = filterState.search || ''
   const debouncedSearchInput = useDebounce(searchInput, 200)
-  const sortBy = filterState.sort || SORT_OPTIONS.RECOMMENDED
+  const sortBy = filterState.sort || SORT_OPTIONS.FAMILY
   const vendorFilter = filterState.vendor || FILTER_ALL
   const groupFilter = filterState.group || FILTER_ALL
   const quotaTypeFilter = filterState.quotaType || QUOTA_TYPES.ALL
@@ -111,7 +111,7 @@ export function useFilters(models: PricingModel[]) {
   )
   const setSortBy = useCallback(
     (v: string) =>
-      updateFilters({ sort: v === SORT_OPTIONS.RECOMMENDED ? undefined : v }),
+      updateFilters({ sort: v === SORT_OPTIONS.FAMILY ? undefined : v }),
     [updateFilters]
   )
   const setVendorFilter = useCallback(

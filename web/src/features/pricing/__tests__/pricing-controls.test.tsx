@@ -65,6 +65,21 @@ function toolbarProps(): PricingToolbarProps {
 }
 
 describe('pricing controls', () => {
+  it('offers series sorting alongside the saved recommendation and name order', async () => {
+    const props = toolbarProps()
+    render(<PricingToolbar {...props} sortBy='family' />)
+    const user = userEvent.setup()
+
+    await user.click(screen.getByRole('button', { name: 'Model series' }))
+    expect(
+      screen.getByRole('menuitem', { name: 'Recommended order' })
+    ).toBeVisible()
+    expect(screen.getByRole('menuitem', { name: 'Name' })).toBeVisible()
+    await user.click(screen.getByRole('menuitem', { name: 'Model series' }))
+
+    expect(props.onSortChange).toHaveBeenCalledWith('family')
+  })
+
   it('counts a compound additional tag once and selects the complete filter label', async () => {
     const label = 'High quality; text|image'
     const models = applyModelSquareDisplay(

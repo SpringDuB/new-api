@@ -34,6 +34,7 @@ import {
   hasTaskUsageSchema,
   isUnconfiguredTaskUsageModel,
 } from './dynamic-price'
+import { getModelFamilies, getModelFamilyKey } from './model-families'
 import { isTokenBasedModel } from './model-helpers'
 import { calculateTokenPrice } from './price'
 
@@ -216,6 +217,19 @@ export function sortModels(
   }
 
   switch (sortBy) {
+    case SORT_OPTIONS.FAMILY: {
+      const families = new Map<string, PricingModel[]>()
+      for (const model of sorted) {
+        const key = getModelFamilyKey(model)
+        const family = families.get(key)
+        if (family) family.push(model)
+        else families.set(key, [model])
+      }
+      // Keep the saved recommendation order within each series.
+      return getModelFamilies(sorted).flatMap(
+        (family) => families.get(family.value) ?? []
+      )
+    }
     case SORT_OPTIONS.NAME:
       sorted.sort((a, b) =>
         (a.model_name || '').localeCompare(b.model_name || '')

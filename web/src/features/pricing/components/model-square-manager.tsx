@@ -40,6 +40,8 @@ import {
 } from '@/lib/server-error-message'
 
 import { getModelSquareDisplay, saveModelSquareDisplay } from '../api'
+import { SORT_OPTIONS, type SortOption } from '../constants'
+import { sortModels } from '../lib/filters'
 import {
   getModelCategoryLabels,
   getModelCategory,
@@ -89,6 +91,7 @@ export default function ModelSquareManager(props: {
     props.initialFamily ?? ALL_MODEL_FAMILIES
   )
   const [position, setPosition] = useState('')
+  const [sortBy, setSortBy] = useState<SortOption>(SORT_OPTIONS.FAMILY)
   const query = useQuery({
     queryKey: ['model-square-display'],
     queryFn: async () => requireServerSuccess(await getModelSquareDisplay()),
@@ -108,7 +111,11 @@ export default function ModelSquareManager(props: {
     () => applyModelSquareDisplay(props.models, display),
     [props.models, display]
   )
-  const categoryModels = models.filter(
+  const orderedModels = useMemo(
+    () => sortModels(models, sortBy),
+    [models, sortBy]
+  )
+  const categoryModels = orderedModels.filter(
     (model) =>
       categoryScope === 'all' || getModelCategory(model) === categoryScope
   )
@@ -117,11 +124,18 @@ export default function ModelSquareManager(props: {
       familyScope === ALL_MODEL_FAMILIES ||
       getModelFamilyKey(model) === familyScope
   )
-  const names = scopedModels.map((model) => model.model_name)
   const selectedModel =
     models.find((model) => model.model_name === selectedModelName) ??
     scopedModels[0]
   const selectedName = selectedModel?.model_name ?? ''
+  const orderingModels =
+    sortBy === SORT_OPTIONS.FAMILY && selectedModel
+      ? scopedModels.filter(
+          (model) =>
+            getModelFamilyKey(model) === getModelFamilyKey(selectedModel)
+        )
+      : scopedModels
+  const names = orderingModels.map((model) => model.model_name)
   const familyOptions = getModelFamilies(models).flatMap((family) =>
     family.label ? [{ value: family.label, label: family.label }] : []
   )
@@ -285,7 +299,12 @@ export default function ModelSquareManager(props: {
             <div className='grid min-w-0 gap-5 lg:grid-cols-[minmax(230px,0.9fr)_minmax(0,1fr)_minmax(0,1fr)]'>
               <ModelSquareOrderEditor
                 key={`${categoryScope}:${familyScope}`}
-                names={names}
+                models={scopedModels}
+                sortBy={sortBy}
+                onSortChange={(sort) => {
+                  setSortBy(sort)
+                  setPosition('')
+                }}
                 selectedName={selectedName}
                 onSelect={(name) => {
                   setSelectedName(name)

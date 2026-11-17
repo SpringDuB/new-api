@@ -25,7 +25,10 @@ import { api } from '@/lib/api'
 
 import type { ModelSquareDisplayResponse } from '../api'
 import ModelSquareManager from '../components/model-square-manager'
-import type { ModelCategoryFilter } from '../lib/model-categories'
+import type {
+  ModelCategory,
+  ModelCategoryFilter,
+} from '../lib/model-categories'
 import type { ModelSquareDisplay } from '../lib/model-square-display'
 import type { PricingModel } from '../types'
 
@@ -98,6 +101,214 @@ function deferCachedDisplayRefresh() {
 }
 
 describe('model square manager', () => {
+  it.each<{
+    category: ModelCategory
+    names: string[]
+    expected: string[]
+  }>([
+    {
+      category: 'video',
+      names: [
+        'a-minimax-h3',
+        'b-seedance-2-0',
+        'c-wan-3-0',
+        'd-seedance-2-5',
+        'e-minimax-h3',
+        'f-seedance-2-5',
+      ],
+      expected: [
+        'd-seedance-2-5',
+        'f-seedance-2-5',
+        'b-seedance-2-0',
+        'c-wan-3-0',
+        'a-minimax-h3',
+        'e-minimax-h3',
+      ],
+    },
+    {
+      category: 'image',
+      names: ['a-seedream-5-0', 'b-image-2', 'c-seedream-5-0'],
+      expected: ['b-image-2', 'a-seedream-5-0', 'c-seedream-5-0'],
+    },
+    {
+      category: 'chat',
+      names: ['a-gpt-4o', 'b-claude-sonnet-4', 'c-gpt-4o-mini'],
+      expected: ['b-claude-sonnet-4', 'a-gpt-4o', 'c-gpt-4o-mini'],
+    },
+  ])(
+    'opens interleaved $category recommendations in series order without changing the saved settings',
+    async ({ category, names, expected }) => {
+      const catalog = names.map((model_name, id) => ({
+        ...models[0],
+        id,
+        model_name,
+        square_category: category,
+      }))
+      vi.mocked(api.get).mockResolvedValue({
+        data: { success: true, data: { order: names, models: {} } },
+      })
+      renderManager(catalog, category)
+      await screen.findByRole('button', { name: `Edit ${expected[0]}` })
+
+      const ordering = screen.getByRole('region', { name: 'Model order' })
+      expect(ordering).toHaveClass('max-h-[48dvh]', 'overflow-y-auto')
+      expect(
+        within(ordering)
+          .getAllByRole('button', { name: /^Edit / })
+          .map((button) => button.getAttribute('aria-label')?.slice(5))
+      ).toEqual(expected)
+      expect(screen.getByRole('combobox', { name: 'Sort' })).toHaveTextContent(
+        'Model series'
+      )
+      expect(
+        screen.getByRole('button', { name: 'Save changes' })
+      ).toBeDisabled()
+    }
+  )
+
+  it.each(['arrow', 'top', 'position', 'keyboard'])(
+    'keeps series grouped when reordering with %s and preserves other saved positions',
+    async (method) => {
+      const names = [
+        'a-seedance-2-0',
+        'b-seedance-2-5',
+        'c-wan-3-0',
+        'd-seedance-2-5',
+        'e-minimax',
+      ]
+      const catalog = names.map((model_name, id) => ({
+        ...models[0],
+        id,
+        model_name,
+        square_category: 'video' as const,
+      }))
+      vi.mocked(api.get).mockResolvedValue({
+        data: {
+          success: true,
+          data: {
+            order: [names[0], 'hidden', ...names.slice(1)],
+            models: { hidden: { note: 'Preserve' } },
+          },
+        },
+      })
+      const save = vi
+        .spyOn(api, 'put')
+        .mockImplementation(async (_url, data) => ({
+          data: { success: true, data },
+        }))
+      renderManager(catalog, 'video')
+      const user = userEvent.setup()
+      const series = await screen.findByRole('list', {
+        name: 'Model order: Seedance 2.5',
+      })
+      expect(
+        within(series).getByRole('button', { name: 'Move b-seedance-2-5 up' })
+      ).toBeDisabled()
+      expect(
+        within(series).getByRole('button', { name: 'Move d-seedance-2-5 down' })
+      ).toBeDisabled()
+
+      if (method === 'arrow') {
+        await user.click(
+          within(series).getByRole('button', { name: 'Move d-seedance-2-5 up' })
+        )
+      } else if (method === 'keyboard') {
+        within(series)
+          .getByRole('button', {
+            name: 'Drag d-seedance-2-5 to reorder',
+          })
+          .focus()
+        await user.keyboard('{ArrowUp}')
+      } else {
+        await user.click(
+          within(series).getByRole('button', {
+            name: 'Edit d-seedance-2-5',
+          })
+        )
+        if (method === 'top') {
+          await user.click(screen.getByRole('button', { name: 'Move to top' }))
+        } else {
+          const position = screen.getByLabelText('Move to position')
+          expect(position).toHaveAttribute('max', '2')
+          await user.type(position, '1')
+          await user.click(screen.getByRole('button', { name: /^Move$/ }))
+        }
+      }
+      expect(
+        screen
+          .getAllByRole('button', { name: /^Edit / })
+          .map((button) => button.getAttribute('aria-label')?.slice(5))
+      ).toEqual([
+        'd-seedance-2-5',
+        'b-seedance-2-5',
+        'a-seedance-2-0',
+        'c-wan-3-0',
+        'e-minimax',
+      ])
+      await user.click(screen.getByRole('button', { name: 'Save changes' }))
+      await waitFor(() => expect(save).toHaveBeenCalled())
+      expect(save.mock.calls[0][1]).toEqual({
+        order: [
+          'a-seedance-2-0',
+          'hidden',
+          'd-seedance-2-5',
+          'c-wan-3-0',
+          'b-seedance-2-5',
+          'e-minimax',
+        ],
+        models: { hidden: { note: 'Preserve' } },
+      })
+    }
+  )
+
+  it('allows switching to recommendation order for moves across series without saving the viewing preference', async () => {
+    const catalog = ['a-seedance-2-0', 'b-minimax', 'c-seedance-2-5'].map(
+      (model_name, id) => ({
+        ...models[0],
+        id,
+        model_name,
+        square_category: 'video' as const,
+      })
+    )
+    const save = vi
+      .spyOn(api, 'put')
+      .mockImplementation(async (_url, data) => ({
+        data: { success: true, data },
+      }))
+    renderManager(catalog, 'video')
+    const user = userEvent.setup()
+    const sort = await screen.findByRole('combobox', { name: 'Sort' })
+    await user.click(sort)
+    await user.click(screen.getByRole('option', { name: 'Recommended order' }))
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled()
+    expect(
+      screen
+        .getAllByRole('button', { name: /^Edit / })
+        .map((button) => button.getAttribute('aria-label')?.slice(5))
+    ).toEqual(['a-seedance-2-0', 'b-minimax', 'c-seedance-2-5'])
+
+    await user.click(sort)
+    await user.click(screen.getByRole('option', { name: 'Model series' }))
+    expect(
+      screen
+        .getAllByRole('button', { name: /^Edit / })
+        .map((button) => button.getAttribute('aria-label')?.slice(5))
+    ).toEqual(['c-seedance-2-5', 'a-seedance-2-0', 'b-minimax'])
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled()
+
+    await user.click(sort)
+    await user.click(screen.getByRole('option', { name: 'Recommended order' }))
+    await user.click(screen.getByRole('button', { name: 'Edit b-minimax' }))
+    await user.click(screen.getByRole('button', { name: 'Move to top' }))
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+    await waitFor(() => expect(save).toHaveBeenCalled())
+    expect((save.mock.calls[0][1] as ModelSquareDisplay).order).toEqual([
+      'b-minimax',
+      'a-seedance-2-0',
+      'c-seedance-2-5',
+    ])
+  })
+
   it('keeps editing the same model after assigning it to another series and disables moves outside the scope', async () => {
     const catalog = [
       {
