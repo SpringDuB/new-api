@@ -61,7 +61,7 @@ function BrandLogo({
     >
       <div className='relative h-6 w-6'>
         {loading || !logoLoaded ? (
-          <Skeleton className='absolute inset-0 rounded-full' />
+          <Skeleton className='absolute inset-0 rounded-none' />
         ) : null}
         {displayLogo}
       </div>

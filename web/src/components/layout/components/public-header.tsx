@@ -104,11 +104,11 @@ export function PublicHeader(props: PublicHeaderProps) {
       src={systemLogo}
       loading={loading}
       logoLoaded={logoLoaded}
-      className='size-full rounded-lg object-contain'
+      className='size-full object-contain'
     />
   )
   if (customLogo) logoContent = customLogo
-  if (loading) logoContent = <Skeleton className='size-full rounded-lg' />
+  if (loading) logoContent = <Skeleton className='size-full rounded-none' />
 
   let authContent = (
     <Button
