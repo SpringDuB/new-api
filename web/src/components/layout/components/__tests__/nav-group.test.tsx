@@ -41,7 +41,9 @@ afterEach(() => {
 })
 
 function Navigation() {
-  const group = useSidebarData().navGroups.find((entry) => entry.id === 'chat')
+  const groups = useSidebarData().navGroups.filter(
+    (entry) => entry.id === 'chat' || entry.id === 'general'
+  )
   const { openMobile, setOpenMobile } = useSidebar()
   return (
     <>
@@ -51,7 +53,9 @@ function Navigation() {
       <output aria-label='Mobile navigation'>
         {openMobile ? 'open' : 'closed'}
       </output>
-      {group && <NavGroup {...group} />}
+      {groups.map((group) => (
+        <NavGroup key={group.id} {...group} />
+      ))}
     </>
   )
 }
@@ -88,18 +92,20 @@ describe('sidebar canvas link', () => {
       const canvas = await screen.findByRole('link', {
         name: 'Infinite Canvas',
       })
-      expect(canvas).toHaveAttribute('href', 'https://canvas.stolas.cc')
+      expect(canvas).toHaveAttribute(
+        'href',
+        'https://canvas.stolas.cc/api/auth/stolas/start'
+      )
       expect(canvas).toHaveAttribute('target', '_blank')
       expect(canvas).toHaveAttribute('rel', 'noopener noreferrer')
       expect(canvas).not.toHaveAttribute('data-active')
       expect(screen.getByRole('link', { name: 'Playground' })).toHaveAttribute(
         'data-active'
       )
-      expect(screen.getByText('Online Use')).toBeInTheDocument()
 
       const user = userEvent.setup()
-      await user.tab()
-      await user.tab()
+      canvas.focus()
+      await user.keyboard('{Shift>}{Tab}{/Shift}')
       await user.tab()
       expect(canvas).toHaveFocus()
     }

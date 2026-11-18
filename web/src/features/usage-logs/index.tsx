@@ -26,6 +26,8 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { CacheStatsDialog } from '@/features/system-settings/general/channel-affinity/cache-stats-dialog'
 import { useSidebarConfig } from '@/hooks/use-sidebar-config'
 
+import '@/styles/stolas-activity.css'
+
 import { UserInfoDialog } from './components/dialogs/user-info-dialog'
 import {
   type LogsViewScope,
@@ -128,6 +130,11 @@ function UsageLogsContent() {
         <SectionPageLayout.Title>
           {t(pageMeta.titleKey)}
         </SectionPageLayout.Title>
+        <SectionPageLayout.Description>
+          {t(
+            'Follow each request from creation to completion, with its usage and cost in one place.'
+          )}
+        </SectionPageLayout.Description>
         <SectionPageLayout.Actions>
           {canManageScope && (
             <Tabs value={viewScope} onValueChange={handleViewScopeChange}>

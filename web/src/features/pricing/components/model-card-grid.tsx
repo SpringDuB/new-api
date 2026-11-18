@@ -24,6 +24,7 @@ import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
 import { getPerfMetricsSummary } from '@/features/performance-metrics/api'
 import { requireServerSuccess } from '@/lib/server-error-message'
+import { cn } from '@/lib/utils'
 
 import { DEFAULT_PRICING_PAGE_SIZE, DEFAULT_TOKEN_UNIT } from '../constants'
 import type { PricingModel, TokenUnit } from '../types'
@@ -38,6 +39,7 @@ export interface ModelCardGridProps {
   tokenUnit?: TokenUnit
   showRechargePrice?: boolean
   selectedGroup?: string
+  presentation?: 'card' | 'directory'
 }
 
 export const ModelCardGrid = memo(function ModelCardGrid(
@@ -93,19 +95,34 @@ export const ModelCardGrid = memo(function ModelCardGrid(
 
   return (
     <div className='flex flex-col gap-4 sm:gap-5'>
-      <div className='grid grid-cols-1 gap-3 sm:gap-4 md:grid-cols-2 xl:grid-cols-3'>
+      <div
+        role={props.presentation === 'directory' ? 'list' : undefined}
+        aria-label={
+          props.presentation === 'directory' ? t('Models') : undefined
+        }
+        className={cn(
+          'grid grid-cols-1 gap-3 sm:gap-4 md:grid-cols-2 xl:grid-cols-3',
+          props.presentation === 'directory' && 'stolas-model-directory'
+        )}
+      >
         {pagedModels.map((model) => (
-          <ModelCard
+          <div
             key={model.id ?? model.model_name}
-            model={model}
-            tokenUnit={tokenUnit}
-            priceRate={props.priceRate}
-            usdExchangeRate={props.usdExchangeRate}
-            showRechargePrice={props.showRechargePrice}
-            selectedGroup={props.selectedGroup}
-            perf={perfMap.get(model.model_name || '')}
-            onClick={props.onModelClick}
-          />
+            role={props.presentation === 'directory' ? 'listitem' : undefined}
+            className='min-w-0'
+          >
+            <ModelCard
+              presentation={props.presentation}
+              model={model}
+              tokenUnit={tokenUnit}
+              priceRate={props.priceRate}
+              usdExchangeRate={props.usdExchangeRate}
+              showRechargePrice={props.showRechargePrice}
+              selectedGroup={props.selectedGroup}
+              perf={perfMap.get(model.model_name || '')}
+              onClick={props.onModelClick}
+            />
+          </div>
         ))}
       </div>
 

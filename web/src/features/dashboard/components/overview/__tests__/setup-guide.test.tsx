@@ -107,14 +107,28 @@ async function renderOverview() {
 }
 
 describe('overview setup guide', () => {
-  it('shows usage first and only a header entry when setup is complete', async () => {
+  it('shows both Stolas workspaces and usage while keeping the completed setup guide collapsed', async () => {
     await renderOverview()
 
     const toggle = await screen.findByRole('button', { name: 'Setup guide' })
     expect(toggle).toHaveAttribute('aria-expanded', 'false')
     expect(
       screen.getAllByRole('heading').map((heading) => heading.textContent)
-    ).toEqual(['Overview', 'Usage at a glance'])
+    ).toEqual([
+      'Console',
+      'Welcome back, dashboard-user',
+      'Infinite Canvas',
+      'API access',
+      'Usage at a glance',
+      'Seedance model health',
+    ])
+    expect(
+      screen.getByRole('link', { name: 'Open Infinite Canvas' })
+    ).toHaveAttribute('href', 'https://canvas.stolas.cc/api/auth/stolas/start')
+    expect(screen.getByRole('link', { name: 'API Keys' })).toHaveAttribute(
+      'href',
+      '/keys'
+    )
     expect(screen.queryByText('Setup guide complete')).not.toBeInTheDocument()
     expect(screen.queryByText('Setup progress: 3/3')).not.toBeInTheDocument()
     for (const name of ['API Keys', 'Channels', 'Usage Logs', 'Pricing']) {

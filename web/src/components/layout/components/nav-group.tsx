@@ -60,22 +60,48 @@ import { ChatPresetsItem } from './chat-presets-item'
  * Sidebar navigation group component
  * Renders a group of navigation items, supporting regular links and collapsible submenus
  */
-export function NavGroup({ title, items }: NavGroupProps) {
+export function NavGroup({
+  title,
+  items,
+  orientation = 'vertical',
+}: NavGroupProps & { orientation?: 'vertical' | 'horizontal' }) {
   const { state, isMobile } = useSidebar()
   const href = useLocation({ select: (location) => location.href })
 
   return (
-    <SidebarGroup className='px-2 py-1'>
-      <SidebarGroupLabel className='text-muted-foreground/70 px-2 text-[11px] font-medium tracking-wider uppercase'>
+    <SidebarGroup
+      className={
+        orientation === 'horizontal' ? 'w-max min-w-full p-0' : 'px-2 py-1'
+      }
+    >
+      <SidebarGroupLabel
+        className={
+          orientation === 'horizontal'
+            ? 'sr-only'
+            : 'text-muted-foreground/70 px-2 text-[11px] font-medium tracking-wider uppercase'
+        }
+      >
         {title}
       </SidebarGroupLabel>
-      <SidebarMenu>
+      <SidebarMenu
+        className={
+          orientation === 'horizontal'
+            ? 'flex-row items-center gap-1'
+            : undefined
+        }
+      >
         {items.map((item) => {
           const key = `${item.title}-${item.url || item.type}`
 
           // Special handling: dynamic chat presets list
           if (item.type === 'chat-presets') {
-            return <ChatPresetsItem key={key} item={item as NavChatPresets} />
+            return (
+              <ChatPresetsItem
+                key={key}
+                item={item as NavChatPresets}
+                presentation={orientation === 'horizontal' ? 'menu' : 'sidebar'}
+              />
+            )
           }
 
           // If no sub-items, render regular link
@@ -86,12 +112,16 @@ export function NavGroup({ title, items }: NavGroupProps) {
           }
 
           // In collapsed state on non-mobile, render dropdown menu
-          if (state === 'collapsed' && !isMobile) {
+          if (
+            orientation === 'horizontal' ||
+            (state === 'collapsed' && !isMobile)
+          ) {
             return (
               <SidebarMenuCollapsedDropdown
                 key={key}
                 item={item as NavCollapsible}
                 href={href}
+                horizontal={orientation === 'horizontal'}
               />
             )
           }
@@ -126,6 +156,9 @@ function SidebarMenuLink({ item, href }: { item: NavLink; href: string }) {
     <SidebarMenuItem>
       <SidebarMenuButton
         isActive={!item.external && checkIsActive(href, item)}
+        aria-current={
+          !item.external && checkIsActive(href, item) ? 'page' : undefined
+        }
         tooltip={item.title}
         render={
           item.external ? (
@@ -230,9 +263,11 @@ function SidebarMenuCollapsible({
 function SidebarMenuCollapsedDropdown({
   item,
   href,
+  horizontal,
 }: {
   item: NavCollapsible
   href: string
+  horizontal?: boolean
 }) {
   return (
     <SidebarMenuItem>
@@ -251,7 +286,11 @@ function SidebarMenuCollapsedDropdown({
           {item.badge && <NavBadge>{item.badge}</NavBadge>}
           <ChevronRight className='ms-auto size-4 shrink-0 transition-transform duration-200 group-data-[popup-open]/dropdown-trigger:rotate-90' />
         </DropdownMenuTrigger>
-        <DropdownMenuContent side='right' align='start' sideOffset={4}>
+        <DropdownMenuContent
+          side={horizontal ? 'bottom' : 'right'}
+          align='start'
+          sideOffset={4}
+        >
           <DropdownMenuGroup>
             <DropdownMenuLabel>
               {item.title} {item.badge ? `(${item.badge})` : ''}

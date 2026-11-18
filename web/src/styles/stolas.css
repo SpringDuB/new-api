@@ -1,0 +1,330 @@
+/*
+Copyright (C) 2023-2026 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
+/* Stolas product surfaces share semantic tokens with existing New API tools. */
+:root {
+  --background: #f8f6f0;
+  --foreground: #292821;
+  --card: #fffdf8;
+  --card-foreground: var(--foreground);
+  --popover: var(--card);
+  --popover-foreground: var(--foreground);
+  --primary: #a84d29;
+  --primary-foreground: #fffaf2;
+  --secondary: #eeeadf;
+  --secondary-foreground: #49483f;
+  --muted: #eeece4;
+  --muted-foreground: #6c6a5f;
+  --accent: #eee3d1;
+  --accent-foreground: #7b3e25;
+  --border: #dedbd0;
+  --input: #d6d1c4;
+  --ring: #b66d44;
+  --sidebar: #f0eee6;
+  --sidebar-foreground: var(--foreground);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
+  --sidebar-accent: var(--accent);
+  --sidebar-accent-foreground: var(--accent-foreground);
+  --sidebar-border: var(--border);
+  --sidebar-ring: var(--ring);
+  --radius: 0.5rem;
+  --stolas-gold: #b5904b;
+  --stolas-dark-paper: #2c302b;
+  --stolas-light-ink: #f3efdf;
+  --overview-accent-1: #b56840;
+  --overview-accent-2: #72866a;
+  --overview-accent-3: #be9b52;
+  --chart-1: #b56840;
+  --chart-2: #72866a;
+  --chart-3: #be9b52;
+  --chart-4: #768d91;
+  --chart-5: #a27972;
+  --font-ui-sans: 'Public Sans Variable', 'Public Sans', sans-serif;
+}
+
+.stolas-surface {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-body);
+}
+
+.dark {
+  --background: #22241f;
+  --foreground: #eae7dc;
+  --card: #292c25;
+  --primary: #e7a274;
+  --primary-foreground: #2a2118;
+  --secondary: #34372e;
+  --secondary-foreground: #d4d0c0;
+  --muted: #30332b;
+  --muted-foreground: #b0b0a2;
+  --accent: #40382a;
+  --accent-foreground: #efbd91;
+  --border: #46493e;
+  --input: #525447;
+  --ring: #daa276;
+  --sidebar: #282b24;
+  --stolas-gold: #d0b879;
+}
+
+.stolas-editorial {
+  font-family: var(--font-serif);
+  font-weight: 450;
+  letter-spacing: -0.045em;
+  text-wrap: balance;
+}
+
+.stolas-eyebrow {
+  color: var(--primary);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+}
+
+.stolas-story-art {
+  position: relative;
+  border: 1px solid var(--border);
+  padding: 0.75rem;
+  background: var(--card);
+  box-shadow: 12px 14px 0 color-mix(in srgb, var(--border) 45%, transparent);
+}
+
+.stolas-art-caption,
+.stolas-art-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.65rem 0.3rem;
+  font-size: 0.62rem;
+  letter-spacing: 0.08em;
+}
+
+.stolas-art-caption {
+  padding-top: 0.2rem;
+  color: var(--muted-foreground);
+}
+.stolas-art-footer {
+  padding-bottom: 0.1rem;
+}
+.stolas-art-footer > :last-child {
+  color: var(--primary);
+  font-size: 1rem;
+}
+.stolas-auth-art {
+  background: var(--stolas-dark-paper);
+  color: var(--stolas-light-ink);
+}
+.stolas-shell {
+  --app-header-height: 5rem;
+  --stolas-content-width: 100rem;
+  --stolas-page-gutter: clamp(1rem, 3vw, 3rem);
+}
+.stolas-masthead {
+  border-bottom: 1px solid var(--border);
+  background: var(--card);
+}
+.stolas-masthead-inner {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 2.5rem;
+  min-height: var(--app-header-height);
+  max-width: var(--stolas-content-width);
+  margin-inline: auto;
+  padding-inline: var(--stolas-page-gutter);
+}
+.stolas-area-link {
+  height: var(--app-header-height);
+  border-radius: 0;
+  border-bottom: 2px solid transparent;
+  padding-inline: 1rem;
+  color: var(--muted-foreground);
+  font-size: 0.82rem;
+  background: transparent;
+}
+.stolas-area-link[data-active] {
+  border-bottom-color: var(--primary);
+  color: var(--primary);
+}
+.stolas-context-bar {
+  border-bottom: 1px solid var(--border);
+}
+.stolas-context-inner {
+  display: flex;
+  align-items: center;
+  gap: 2rem;
+  min-height: 3.5rem;
+  max-width: var(--stolas-content-width);
+  margin-inline: auto;
+  padding-inline: var(--stolas-page-gutter);
+}
+.stolas-context-label {
+  flex-shrink: 0;
+  border-inline-end: 1px solid var(--border);
+  padding-inline-end: 2rem;
+  color: var(--muted-foreground);
+  font-size: 0.7rem;
+}
+.stolas-page-navigation [data-slot='sidebar-menu-item'] {
+  flex-shrink: 0;
+}
+.stolas-page-navigation [data-sidebar='menu-button'] {
+  height: 2.15rem;
+  border-radius: 0.25rem;
+  padding-inline: 0.85rem;
+  font-size: 0.75rem;
+}
+.stolas-page-navigation [data-sidebar='menu-button'] > svg {
+  width: 0.9rem;
+  height: 0.9rem;
+}
+.stolas-page {
+  width: 100%;
+  max-width: var(--stolas-content-width);
+  margin-inline: auto;
+}
+.stolas-page-heading {
+  padding: 2.4rem var(--stolas-page-gutter) 1.75rem;
+}
+.stolas-page-body {
+  padding: 0 var(--stolas-page-gutter) 1.5rem;
+}
+.stolas-page-footer {
+  padding-inline: var(--stolas-page-gutter);
+}
+.stolas-wallet-layout {
+  grid-template-columns: minmax(18rem, 0.7fr) minmax(0, 1.6fr);
+}
+.stolas-wallet-summary {
+  border: 1px solid var(--border);
+  border-top: 3px solid var(--primary);
+  background: var(--card);
+  padding: 2rem;
+}
+@media (max-width: 1199px) {
+  .stolas-masthead-inner {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 0;
+    min-height: 4rem;
+  }
+  .stolas-masthead-navigation {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+  .stolas-masthead-tools {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .stolas-masthead-inner > :first-child {
+    padding-block: 0.8rem;
+  }
+  .stolas-area-link {
+    height: 3rem;
+  }
+}
+@media (max-width: 767px) {
+  .stolas-context-label {
+    display: none;
+  }
+  .stolas-context-inner {
+    min-height: 3rem;
+  }
+  .stolas-page-heading {
+    padding-block: 1.5rem 1.25rem;
+  }
+  .stolas-area-link {
+    padding-inline: 0.8rem;
+  }
+  .stolas-wallet-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.stolas-workspace h2 {
+  font-family: var(--font-serif);
+  letter-spacing: -0.025em;
+}
+.stolas-launch-panel {
+  position: relative;
+  min-height: 20rem;
+  border: 1px solid var(--border);
+  background: var(--card);
+  padding: clamp(1.5rem, 3vw, 2.5rem);
+}
+.stolas-launch-studio {
+  background: color-mix(in srgb, var(--accent) 65%, var(--card));
+}
+.stolas-launch-number {
+  align-self: flex-end;
+  color: var(--muted-foreground);
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  letter-spacing: 0.1em;
+}
+.stolas-account-initial {
+  display: grid;
+  place-items: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border: 1px solid var(--border);
+  border-radius: 0.25rem;
+  background: var(--accent);
+  color: var(--accent-foreground);
+  font-family: var(--font-serif);
+}
+.stolas-usage-strip {
+  border-block: 1px solid var(--border);
+  padding-block: 1.5rem;
+}
+.stolas-usage-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-top: 1.5rem;
+}
+.stolas-usage-metric {
+  border-inline-end: 1px solid var(--border);
+  padding-inline: 1.5rem;
+}
+.stolas-usage-metric:first-child {
+  padding-inline-start: 0;
+}
+.stolas-usage-metric:last-child {
+  border: 0;
+}
+@media (max-width: 767px) {
+  .stolas-usage-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1.5rem 0;
+  }
+  .stolas-usage-metric:nth-child(odd) {
+    padding-inline-start: 0;
+  }
+  .stolas-usage-metric:nth-child(even) {
+    border: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stolas-surface *,
+  .stolas-surface *::before,
+  .stolas-surface *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { Link } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
 
+import { StolasLogo } from '@/components/stolas-logo'
 import {
   SidebarMenu,
   SidebarMenuButton,
@@ -26,6 +27,7 @@ import {
 } from '@/components/ui/sidebar'
 import { useStatus } from '@/hooks/use-status'
 import { useSystemConfig } from '@/hooks/use-system-config'
+import { DEFAULT_LOGO } from '@/lib/constants'
 import { cn } from '@/lib/utils'
 
 type SystemBrandProps = {
@@ -48,10 +50,10 @@ type SystemBrandProps = {
 export function SystemBrand(props: SystemBrandProps) {
   const { t } = useTranslation()
   const { status } = useStatus()
-  const { logo } = useSystemConfig()
+  const { logo, systemName } = useSystemConfig()
 
   const variant = props.variant ?? 'sidebar'
-  const name = status?.system_name || props.defaultName || 'New API'
+  const name = systemName || props.defaultName || 'Stolas'
   const version =
     status?.version || props.defaultVersion || t('Unknown version')
 
@@ -65,14 +67,18 @@ export function SystemBrand(props: SystemBrandProps) {
           'hover:bg-accent focus-visible:ring-ring/40 focus-visible:ring-2'
         )}
       >
-        <div className='flex size-5 shrink-0 items-center justify-center overflow-hidden'>
+        {logo === DEFAULT_LOGO ? (
+          <StolasLogo />
+        ) : (
           <img
             src={logo}
-            alt={t('Logo')}
-            className='size-full object-cover'
+            alt={name}
+            className='size-8 shrink-0 object-contain'
           />
-        </div>
-        <span className='max-w-[12rem] truncate'>{name}</span>
+        )}
+        {name.toLowerCase() !== 'stolas' && (
+          <span className='max-w-36 truncate text-sm'>{name}</span>
+        )}
       </Link>
     )
   }

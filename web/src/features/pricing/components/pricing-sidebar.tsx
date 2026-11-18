@@ -16,17 +16,21 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { ChevronDown, RotateCcw } from 'lucide-react'
-import { memo, useMemo, type ReactNode } from 'react'
+import { RotateCcw } from 'lucide-react'
+import { memo, useId, useMemo, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { ComboboxInput } from '@/components/ui/combobox-input'
+import { Field, FieldGroup, FieldLabel } from '@/components/ui/field'
 import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from '@/components/ui/collapsible'
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { toIntlLocale } from '@/i18n/languages'
 import { formatNumber } from '@/lib/format'
 import { getLobeIcon } from '@/lib/lobe-icon'
@@ -51,11 +55,12 @@ type FilterOption = {
   icon?: ReactNode
 }
 
-type FilterSectionProps = {
+type FilterFieldProps = {
   title: string
   value: string
   options: FilterOption[]
   onChange: (value: string) => void
+  searchable?: boolean
 }
 
 export interface PricingSidebarProps {
@@ -90,68 +95,61 @@ function formatGroupRatio(ratio: number | undefined): string | undefined {
   return `x${formatted}`
 }
 
-function FilterChip(props: {
-  option: FilterOption
-  active: boolean
-  onClick: () => void
-}) {
-  const { i18n } = useTranslation()
+function FilterField(props: FilterFieldProps) {
+  const { t, i18n } = useTranslation()
+  const id = useId()
   const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
+  const options = props.options.map((option) => {
+    const detail =
+      option.suffix ??
+      (option.count == null ? undefined : formatNumber(option.count, locale))
+    return {
+      ...option,
+      label: detail ? `${option.label} · ${detail}` : option.label,
+    }
+  })
+  if (!options.some((option) => option.value === props.value)) {
+    let label = props.value
+    if (props.value.startsWith('series:')) label = props.value.slice(7)
+    if (props.value === 'unassigned') label = t('Unassigned series')
+    options.push({ value: props.value, label })
+  }
   return (
-    <Button
-      type='button'
-      variant={props.active ? 'secondary' : 'outline'}
-      size='sm'
-      onClick={props.onClick}
-      aria-pressed={props.active}
-      className='h-auto max-w-full gap-1.5 px-2 py-1 text-xs'
-      title={props.option.label}
-    >
-      {props.option.icon && (
-        <span className='shrink-0'>{props.option.icon}</span>
-      )}
-      <span className='truncate'>{props.option.label}</span>
-      {(props.option.suffix || props.option.count != null) && (
-        <span
-          className={cn(
-            'rounded-md px-1.5 py-0.5 text-[12px]',
-            props.active
-              ? 'bg-background text-foreground'
-              : 'bg-muted text-muted-foreground'
-          )}
+    <Field>
+      <FieldLabel htmlFor={id}>{props.title}</FieldLabel>
+      {props.searchable ? (
+        <ComboboxInput
+          id={id}
+          value={props.value}
+          options={options}
+          onValueChange={props.onChange}
+          placeholder={t('Search...')}
+          emptyText='No matching items'
+          openOnFocus={false}
+        />
+      ) : (
+        <Select
+          items={options}
+          value={props.value}
+          onValueChange={(value) => {
+            if (value != null) props.onChange(value)
+          }}
         >
-          {props.option.suffix ?? formatNumber(props.option.count ?? 0, locale)}
-        </span>
+          <SelectTrigger id={id} className='w-full'>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectGroup>
+              {options.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectGroup>
+          </SelectContent>
+        </Select>
       )}
-    </Button>
-  )
-}
-
-function FilterSection(props: FilterSectionProps) {
-  return (
-    <Collapsible
-      defaultOpen
-      className='border-border/70 border-b pb-3 last:border-b-0'
-    >
-      <CollapsibleTrigger className='group flex w-full items-center justify-between py-2.5 text-left'>
-        <span className='text-foreground text-sm font-semibold'>
-          {props.title}
-        </span>
-        <ChevronDown className='text-muted-foreground size-4 transition-transform group-data-[panel-open]:rotate-180' />
-      </CollapsibleTrigger>
-      <CollapsibleContent>
-        <div className='flex flex-wrap gap-1.5'>
-          {props.options.map((option) => (
-            <FilterChip
-              key={option.value}
-              option={option}
-              active={props.value === option.value}
-              onClick={() => props.onChange(option.value)}
-            />
-          ))}
-        </div>
-      </CollapsibleContent>
-    </Collapsible>
+    </Field>
   )
 }
 
@@ -275,71 +273,60 @@ export const PricingSidebar = memo(function PricingSidebar(
   ]
 
   return (
-    <aside className={cn('bg-card rounded-xl border p-3', props.className)}>
-      <div className='mb-2.5 flex items-center justify-between gap-2'>
-        <div>
-          <h2 className='text-foreground text-sm font-bold'>{t('Filter')}</h2>
-          <p className='text-muted-foreground mt-1 text-xs'>
-            {t('Filters apply to the current category.')}
-          </p>
-        </div>
-        <Button
-          type='button'
-          variant='ghost'
-          size='sm'
-          onClick={props.onClearFilters}
-          disabled={!props.hasActiveFilters}
-          className='h-7 gap-1.5 px-2 text-xs'
-        >
-          <RotateCcw className='size-3.5' />
-          {t('Reset')}
-        </Button>
-      </div>
-
-      {props.hasActiveFilters && (
-        <Badge variant='secondary' className='mb-3'>
-          {t('Filters active')}
-        </Badge>
-      )}
-
-      <div className='space-y-1'>
-        <FilterSection
+    <section className={cn('flex min-w-0 flex-col gap-6', props.className)}>
+      <FieldGroup>
+        <FilterField
           title={t('Model series')}
           value={props.familyFilter}
           options={familyOptions}
           onChange={props.onFamilyChange}
+          searchable
         />
-        <FilterSection
+        <FilterField
+          title={t('Vendor')}
+          value={props.vendorFilter}
+          options={vendorOptions}
+          onChange={props.onVendorChange}
+          searchable
+        />
+        <FilterField
           title={t('Groups')}
           value={props.groupFilter}
           options={groupOptions}
           onChange={props.onGroupChange}
+          searchable
         />
-        <FilterSection
-          title={t('All Vendors')}
-          value={props.vendorFilter}
-          options={vendorOptions}
-          onChange={props.onVendorChange}
-        />
-        <FilterSection
+        <FilterField
           title={t('Model Tags')}
           value={props.tagFilter}
           options={tagOptions}
           onChange={props.onTagChange}
+          searchable
         />
-        <FilterSection
+        <FilterField
           title={t('Pricing Type')}
           value={props.quotaTypeFilter}
           options={quotaOptions}
           onChange={props.onQuotaTypeChange}
         />
-        <FilterSection
+        <FilterField
           title={t('Endpoint Type')}
           value={props.endpointTypeFilter}
           options={endpointOptions}
           onChange={props.onEndpointTypeChange}
         />
-      </div>
-    </aside>
+      </FieldGroup>
+      <Button
+        type='button'
+        variant='ghost'
+        size='sm'
+        onClick={props.onClearFilters}
+        disabled={!props.hasActiveFilters}
+        className='self-start'
+      >
+        <RotateCcw data-icon='inline-start' />
+        {t('Reset')}
+      </Button>
+    </section>
   )
 })

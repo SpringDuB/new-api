@@ -1,0 +1,282 @@
+/*
+Copyright (C) 2023-2026 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
+.stolas-activity-filters {
+  flex-shrink: 0;
+  min-width: 0;
+  border: 0;
+  border-block: 1px solid var(--border);
+  border-radius: 0;
+  padding: 0.75rem 0;
+  background: transparent;
+}
+
+.stolas-activity-quick-row,
+.stolas-activity-filter-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.stolas-activity-quick-fields {
+  display: flex;
+  flex: 1 1 30rem;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.stolas-activity-quick-fields > :first-child {
+  flex: 1 1 21rem;
+}
+
+.stolas-activity-quick-fields > :not(:first-child) {
+  flex: 1 1 10rem;
+}
+
+.stolas-activity-filter-actions {
+  margin-inline-start: auto;
+}
+
+.stolas-activity-expanded-filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+}
+
+.stolas-activity-stats-row {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+}
+
+.stolas-activity-stat {
+  padding-inline-end: 1rem;
+}
+
+.stolas-activity-stat + .stolas-activity-stat {
+  border-inline-start: 1px solid var(--border);
+  padding-inline-start: 0.5rem;
+}
+
+.stolas-activity-list {
+  border-top: 1px solid var(--border);
+}
+
+.stolas-activity-list > div,
+.stolas-activity-record-wrapper {
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  padding: 0;
+  background: transparent;
+}
+
+.stolas-activity-record {
+  min-width: 0;
+  padding: 1.25rem 0.25rem;
+  overflow-wrap: anywhere;
+}
+
+.stolas-activity-common,
+.stolas-activity-task {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  column-gap: 1.25rem;
+  row-gap: 0.8rem;
+}
+
+.stolas-activity-label {
+  display: block;
+  margin-bottom: 0.3rem;
+  color: var(--muted-foreground);
+  font-size: 0.68rem;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.stolas-activity-identity {
+  grid-column: 1;
+  min-width: 0;
+}
+
+.stolas-activity-cost {
+  grid-column: 2;
+  justify-self: end;
+  text-align: end;
+}
+
+.stolas-activity-cost > .inline-flex {
+  justify-content: flex-end;
+  max-width: 100%;
+  flex-wrap: wrap;
+}
+
+.stolas-activity-record [data-slot='status-badge'] {
+  height: auto;
+  border: 0;
+  border-radius: 0;
+  padding-inline: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.stolas-activity-identity [data-slot='status-badge'],
+.stolas-activity-identity > .stolas-activity-field > :last-child {
+  color: var(--foreground);
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.stolas-activity-record [data-slot='avatar'] {
+  display: none;
+}
+
+.stolas-activity-chronology,
+.stolas-activity-metadata,
+.stolas-activity-usage,
+.stolas-activity-details,
+.stolas-activity-task-time,
+.stolas-activity-outcome,
+.stolas-activity-task-actions {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+.stolas-activity-metadata {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 1.5rem;
+  row-gap: 0.4rem;
+}
+
+.stolas-activity-details,
+.stolas-activity-task-actions {
+  border-top: 1px solid var(--border);
+  padding-top: 0.65rem;
+}
+
+.stolas-activity-task-id {
+  margin-top: 0.4rem;
+}
+
+.stolas-activity-task-id [data-slot='status-badge'] {
+  font-size: 0.75rem;
+  font-weight: 400;
+  color: var(--muted-foreground);
+}
+
+.stolas-activity-task-id > .flex {
+  max-width: 100%;
+}
+
+.stolas-activity-outcome,
+.stolas-activity-task-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: start;
+  gap: 0.75rem 1.5rem;
+}
+
+.stolas-activity-outcome > .stolas-activity-cost {
+  margin-inline-start: auto;
+}
+
+.stolas-activity-task-actions button {
+  min-height: 2rem;
+}
+
+@media (min-width: 641px) {
+  .stolas-activity-common,
+  .stolas-activity-task {
+    grid-template-columns: 11rem minmax(0, 1fr) minmax(8rem, auto);
+    column-gap: clamp(1.25rem, 3vw, 3rem);
+  }
+
+  .stolas-activity-identity {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .stolas-activity-cost {
+    grid-column: 3;
+    grid-row: 1;
+  }
+
+  .stolas-activity-chronology,
+  .stolas-activity-task-time {
+    grid-column: 1;
+    grid-row: 1 / span 4;
+    align-content: start;
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 0.75rem;
+  }
+
+  .stolas-activity-chronology > .col-start-2 {
+    grid-column-start: 1;
+    align-items: start;
+  }
+
+  .stolas-activity-chronology > .col-start-2 > div {
+    justify-content: start;
+  }
+
+  .stolas-activity-metadata,
+  .stolas-activity-usage,
+  .stolas-activity-details,
+  .stolas-activity-task-actions {
+    grid-column: 2 / -1;
+  }
+
+  .stolas-activity-metadata {
+    grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  }
+
+  .stolas-activity-outcome {
+    grid-column: 3;
+    grid-row: 1 / span 3;
+    flex-direction: column;
+    align-items: end;
+    text-align: end;
+  }
+
+  .stolas-activity-task .stolas-activity-metadata {
+    grid-column: 2;
+  }
+}
+
+@media (max-width: 640px) {
+  .stolas-activity-record {
+    padding-block: 1rem;
+  }
+
+  .stolas-activity-task > .stolas-activity-identity {
+    grid-column: 1 / -1;
+  }
+
+  .stolas-activity-filter-actions {
+    width: 100%;
+  }
+}

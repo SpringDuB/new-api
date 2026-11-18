@@ -17,20 +17,27 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { Link, useNavigate, useRouterState } from '@tanstack/react-router'
-import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Dialog } from '@/components/dialog'
 import { LanguageSwitcher } from '@/components/language-switcher'
 import { NotificationPopover } from '@/components/notification-popover'
 import { ProfileDropdown } from '@/components/profile-dropdown'
+import { StolasLogo } from '@/components/stolas-logo'
 import { ThemeSwitch } from '@/components/theme-switch'
 import { Button } from '@/components/ui/button'
+import {
+  Popover,
+  PopoverContent,
+  PopoverTitle,
+  PopoverTrigger,
+} from '@/components/ui/popover'
 import { Skeleton } from '@/components/ui/skeleton'
-import { SystemUpdateAction } from '@/features/system-update/system-update-action'
 import { useNotifications } from '@/hooks/use-notifications'
 import { useSystemConfig } from '@/hooks/use-system-config'
 import { useTopNavLinks } from '@/hooks/use-top-nav-links'
+import { DEFAULT_LOGO } from '@/lib/constants'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/auth-store'
 
@@ -76,8 +83,8 @@ export function PublicHeader(props: PublicHeaderProps) {
 
   const { t } = useTranslation()
   const navigate = useNavigate()
-  const [scrolled, setScrolled] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
+  const mobileMenuTrigger = useRef<HTMLButtonElement>(null)
   const [authPromptTarget, setAuthPromptTarget] =
     useState<AuthPromptTarget | null>(null)
   const [authPromptSecondsLeft, setAuthPromptSecondsLeft] =
@@ -98,6 +105,18 @@ export function PublicHeader(props: PublicHeaderProps) {
   const isAuthenticated = !!user
   const displaySiteName = customSiteName || systemName
   const links = dynamicLinks.length > 0 ? dynamicLinks : navLinks
+  const notificationControl = showNotifications ? (
+    <NotificationPopover
+      open={notifications.popoverOpen}
+      onOpenChange={notifications.setPopoverOpen}
+      unreadCount={notifications.unreadCount}
+      activeTab={notifications.activeTab}
+      onTabChange={notifications.setActiveTab}
+      notice={notifications.notice}
+      announcements={notifications.announcements}
+      loading={notifications.loading}
+    />
+  ) : null
 
   let logoContent: ReactNode = (
     <HeaderLogo
@@ -119,21 +138,33 @@ export function PublicHeader(props: PublicHeaderProps) {
       {t('Sign in')}
     </Button>
   )
-  if (isAuthenticated) authContent = <ProfileDropdown />
+  if (isAuthenticated) {
+    authContent = (
+      <ProfileDropdown
+        showLanguageSwitcher={showLanguageSwitcher}
+        showThemeSwitch={showThemeSwitch}
+        tools={notificationControl}
+      />
+    )
+  }
   if (loading) authContent = <Skeleton className='h-8 w-20 rounded-lg' />
-
-  useEffect(() => {
-    const onScroll = () => setScrolled(window.scrollY > 20)
-    onScroll()
-    window.addEventListener('scroll', onScroll, { passive: true })
-    return () => window.removeEventListener('scroll', onScroll)
-  }, [])
 
   useEffect(() => {
     document.body.style.overflow = mobileOpen ? 'hidden' : ''
     return () => {
       document.body.style.overflow = ''
     }
+  }, [mobileOpen])
+
+  useEffect(() => {
+    if (!mobileOpen) return
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      setMobileOpen(false)
+      mobileMenuTrigger.current?.focus()
+    }
+    document.addEventListener('keydown', handleEscape)
+    return () => document.removeEventListener('keydown', handleEscape)
   }, [mobileOpen])
 
   useEffect(() => {
@@ -199,42 +230,37 @@ export function PublicHeader(props: PublicHeaderProps) {
 
   return (
     <>
-      <header className='pointer-events-none fixed inset-x-0 top-0 z-50'>
-        <div
-          className={cn(
-            'pointer-events-auto mx-auto transition-all duration-700 ease-[cubic-bezier(0.16,1,0.3,1)]',
-            scrolled ? 'max-w-[52rem] px-3 pt-3' : 'max-w-7xl px-4 pt-0 md:px-6'
-          )}
-        >
-          <nav
-            className={cn(
-              'flex items-center justify-between gap-2 transition-all duration-700 ease-[cubic-bezier(0.16,1,0.3,1)]',
-              scrolled
-                ? 'bg-background/60 ring-border/50 h-12 rounded-2xl pr-1.5 pl-4 shadow-[0_2px_16px_-6px_rgba(0,0,0,0.08),0_0_0_0.5px_rgba(0,0,0,0.02)] ring-[0.5px] backdrop-blur-2xl dark:shadow-[0_2px_16px_-6px_rgba(0,0,0,0.4)]'
-                : 'h-16 px-2'
-            )}
-          >
+      <header className='bg-background/95 border-border fixed inset-x-0 top-0 z-50 border-b backdrop-blur-sm'>
+        <div className={cn('mx-auto max-w-7xl px-4 md:px-10')}>
+          <nav className={cn('flex h-20 items-center justify-between gap-2')}>
             {/* Logo */}
             <div className='@container/system-brand flex min-w-0 flex-1 items-center gap-1 lg:min-w-36'>
               <Link
                 to={homeUrl}
                 className='group flex min-w-0 items-center gap-2.5'
               >
-                <div className='flex size-7 shrink-0 items-center justify-center transition-all duration-300 group-hover:scale-105'>
-                  {logoContent}
-                </div>
+                {!customLogo && systemLogo === DEFAULT_LOGO ? (
+                  <StolasLogo />
+                ) : (
+                  <div className='flex size-7 shrink-0 items-center justify-center transition-all duration-300 group-hover:scale-105'>
+                    {logoContent}
+                  </div>
+                )}
                 <span
-                  className='max-w-48 truncate text-sm font-semibold tracking-tight'
+                  className='flex max-w-48 flex-col truncate text-sm font-semibold tracking-tight'
                   title={displaySiteName}
                 >
                   {loading ? (
                     <Skeleton className='h-4 w-16' />
                   ) : (
-                    displaySiteName
+                    displaySiteName.toLowerCase() !== 'stolas' && (
+                      <span className='text-foreground text-sm font-medium'>
+                        {displaySiteName}
+                      </span>
+                    )
                   )}
                 </span>
               </Link>
-              <SystemUpdateAction presentation='version' />
             </div>
 
             {/* Desktop nav */}
@@ -281,26 +307,29 @@ export function PublicHeader(props: PublicHeaderProps) {
                 )
               })}
 
-              {(showLanguageSwitcher ||
-                showThemeSwitch ||
-                showNotifications) && (
-                <div className='bg-border/40 mx-2 h-4 w-px' />
-              )}
-
-              {showLanguageSwitcher && <LanguageSwitcher />}
-              {showThemeSwitch && <ThemeSwitch />}
-              {showNotifications && (
-                <NotificationPopover
-                  open={notifications.popoverOpen}
-                  onOpenChange={notifications.setPopoverOpen}
-                  unreadCount={notifications.unreadCount}
-                  activeTab={notifications.activeTab}
-                  onTabChange={notifications.setActiveTab}
-                  notice={notifications.notice}
-                  announcements={notifications.announcements}
-                  loading={notifications.loading}
-                />
-              )}
+              {!isAuthenticated &&
+                (showLanguageSwitcher ||
+                  showThemeSwitch ||
+                  showNotifications) && (
+                  <Popover>
+                    <PopoverTrigger
+                      render={<Button variant='ghost' size='sm' />}
+                    >
+                      {t('Preferences')}
+                    </PopoverTrigger>
+                    <PopoverContent
+                      align='end'
+                      className='gap-4 rounded-sm p-4'
+                    >
+                      <PopoverTitle>{t('Display & language')}</PopoverTitle>
+                      <div className='flex gap-2'>
+                        {showLanguageSwitcher && <LanguageSwitcher />}
+                        {showThemeSwitch && <ThemeSwitch />}
+                        {notificationControl}
+                      </div>
+                    </PopoverContent>
+                  </Popover>
+                )}
 
               {showAuthButtons && (
                 <>
@@ -312,17 +341,24 @@ export function PublicHeader(props: PublicHeaderProps) {
 
             {/* Mobile: compact actions + hamburger */}
             <div className='flex shrink-0 items-center gap-2 lg:hidden'>
-              {showThemeSwitch && <ThemeSwitch />}
+              {showThemeSwitch && !isAuthenticated && <ThemeSwitch />}
               {showAuthButtons && !loading && isAuthenticated && (
-                <ProfileDropdown />
+                <ProfileDropdown
+                  showLanguageSwitcher={showLanguageSwitcher}
+                  showThemeSwitch={showThemeSwitch}
+                  tools={notificationControl}
+                />
               )}
               <Button
+                ref={mobileMenuTrigger}
                 type='button'
                 variant='ghost'
                 size='icon'
                 className='size-9'
                 onClick={() => setMobileOpen((v) => !v)}
                 aria-label={t('Toggle navigation menu')}
+                aria-expanded={mobileOpen}
+                aria-controls='stolas-mobile-navigation'
               >
                 <div className='relative size-4'>
                   <span
@@ -352,6 +388,9 @@ export function PublicHeader(props: PublicHeaderProps) {
 
       {/* Mobile full-screen overlay */}
       <div
+        id='stolas-mobile-navigation'
+        inert={!mobileOpen}
+        aria-hidden={!mobileOpen}
         className={cn(
           'bg-background/98 fixed inset-0 z-40 backdrop-blur-2xl transition-all duration-500 ease-[cubic-bezier(0.16,1,0.3,1)] lg:pointer-events-none lg:hidden',
           mobileOpen
@@ -415,6 +454,7 @@ export function PublicHeader(props: PublicHeaderProps) {
             )}
             style={{ transitionDelay: mobileOpen ? '250ms' : '0ms' }}
           >
+            {showLanguageSwitcher && <LanguageSwitcher />}
             {showAuthButtons && (
               <Link
                 to={isAuthenticated ? '/dashboard' : '/sign-in'}

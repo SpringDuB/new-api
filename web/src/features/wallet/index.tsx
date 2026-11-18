@@ -285,58 +285,66 @@ export function Wallet(props: WalletProps) {
   return (
     <>
       <SectionPageLayout>
-        <SectionPageLayout.Title>{t('Wallet')}</SectionPageLayout.Title>
+        <SectionPageLayout.Title>
+          {t('Balance & billing')}
+        </SectionPageLayout.Title>
+        <SectionPageLayout.Description>
+          {t('One balance for your canvas projects and API applications.')}
+        </SectionPageLayout.Description>
         <SectionPageLayout.Content>
           <div className='mx-auto flex w-full max-w-7xl flex-col gap-4 sm:gap-5'>
-            <WalletStatsCard user={user} loading={userLoading} />
-
-            <div
-              className={
-                showSubscriptionPanel
-                  ? 'grid gap-4 xl:grid-cols-[minmax(0,1.05fr)_minmax(360px,0.95fr)] xl:items-start'
-                  : 'grid gap-4'
-              }
-            >
-              <div id='wallet-add-funds' className='scroll-mt-4'>
-                <RechargeFormCard
-                  topupInfo={topupInfo}
-                  presetAmounts={presetAmounts}
-                  selectedPreset={selectedPreset}
-                  onSelectPreset={handleSelectPreset}
-                  topupAmount={topupAmount}
-                  onTopupAmountChange={handleTopupAmountChange}
-                  paymentAmount={paymentAmount}
-                  calculating={calculating}
-                  onPaymentMethodSelect={handlePaymentMethodSelect}
-                  paymentLoading={paymentLoading}
-                  redemptionCode={redemptionCode}
-                  onRedemptionCodeChange={setRedemptionCode}
-                  onRedeem={handleRedeem}
-                  redeeming={redeeming}
-                  topupLink={topupInfo?.topup_link}
-                  loading={topupLoading}
-                  priceRatio={(status?.price as number) || 1}
-                  usdExchangeRate={effectiveUsdExchangeRate}
-                  onOpenBilling={() => setBillingDialogOpen(true)}
-                  creemProducts={topupInfo?.creem_products}
-                  enableCreemTopup={topupInfo?.enable_creem_topup}
-                  onCreemProductSelect={handleCreemProductSelect}
-                  enableWaffoTopup={topupInfo?.enable_waffo_topup}
-                  waffoPayMethods={topupInfo?.waffo_pay_methods}
-                  waffoMinTopup={topupInfo?.waffo_min_topup}
-                  onWaffoMethodSelect={handleWaffoMethodSelect}
-                  enableWaffoPancakeTopup={
-                    topupInfo?.enable_waffo_pancake_topup
+            <div className='stolas-wallet-layout grid items-start gap-6'>
+              <WalletStatsCard user={user} loading={userLoading} />
+              <div className='flex min-w-0 flex-col gap-5'>
+                <div
+                  className={
+                    showSubscriptionPanel
+                      ? 'grid gap-4 2xl:grid-cols-2 2xl:items-start'
+                      : 'grid gap-4'
                   }
-                />
-              </div>
+                >
+                  <div id='wallet-add-funds' className='scroll-mt-4'>
+                    <RechargeFormCard
+                      topupInfo={topupInfo}
+                      presetAmounts={presetAmounts}
+                      selectedPreset={selectedPreset}
+                      onSelectPreset={handleSelectPreset}
+                      topupAmount={topupAmount}
+                      onTopupAmountChange={handleTopupAmountChange}
+                      paymentAmount={paymentAmount}
+                      calculating={calculating}
+                      onPaymentMethodSelect={handlePaymentMethodSelect}
+                      paymentLoading={paymentLoading}
+                      redemptionCode={redemptionCode}
+                      onRedemptionCodeChange={setRedemptionCode}
+                      onRedeem={handleRedeem}
+                      redeeming={redeeming}
+                      topupLink={topupInfo?.topup_link}
+                      loading={topupLoading}
+                      priceRatio={(status?.price as number) || 1}
+                      usdExchangeRate={effectiveUsdExchangeRate}
+                      onOpenBilling={() => setBillingDialogOpen(true)}
+                      creemProducts={topupInfo?.creem_products}
+                      enableCreemTopup={topupInfo?.enable_creem_topup}
+                      onCreemProductSelect={handleCreemProductSelect}
+                      enableWaffoTopup={topupInfo?.enable_waffo_topup}
+                      waffoPayMethods={topupInfo?.waffo_pay_methods}
+                      waffoMinTopup={topupInfo?.waffo_min_topup}
+                      onWaffoMethodSelect={handleWaffoMethodSelect}
+                      enableWaffoPancakeTopup={
+                        topupInfo?.enable_waffo_pancake_topup
+                      }
+                    />
+                  </div>
 
-              <SubscriptionPlansCard
-                topupInfo={topupInfo}
-                onAvailabilityChange={handleSubscriptionAvailabilityChange}
-                userQuota={user?.quota}
-                onPurchaseSuccess={fetchUser}
-              />
+                  <SubscriptionPlansCard
+                    topupInfo={topupInfo}
+                    onAvailabilityChange={handleSubscriptionAvailabilityChange}
+                    userQuota={user?.quota}
+                    onPurchaseSuccess={fetchUser}
+                  />
+                </div>
+              </div>
             </div>
 
             <AffiliateRewardsCard

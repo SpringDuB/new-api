@@ -59,16 +59,10 @@ import { requireServerSuccess } from '@/lib/server-error-message'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/auth-store'
 
-import {
-  useApiInfo,
-  useDashboardContentVisibility,
-} from '../../hooks/use-status-data'
-import { AnnouncementsPanel } from './announcements-panel'
-import { ApiInfoPanel } from './api-info-panel'
-import { FAQPanel } from './faq-panel'
-import { PerformanceHealthPanel } from './performance-health-panel'
+import { useApiInfo } from '../../hooks/use-status-data'
+import { CreativeWorkspace } from './creative-workspace'
+import { SeedanceHealthPanel } from './seedance-health-panel'
 import { SummaryCards } from './summary-cards'
-import { UptimePanel } from './uptime-panel'
 
 const SETUP_GUIDE_VISIBILITY_STORAGE_KEY =
   'dashboard_overview_setup_guide_expanded'
@@ -466,12 +460,6 @@ export function OverviewDashboard() {
   const setupGuideToggleRef = useRef<HTMLButtonElement>(null)
   const user = useAuthStore((state) => state.auth.user)
   const { items: apiInfoItems } = useApiInfo()
-  const {
-    apiInfo: showApiInfoPanel,
-    announcements: showAnnouncementsPanel,
-    faq: showFAQPanel,
-    uptimeKuma: showUptimePanel,
-  } = useDashboardContentVisibility()
   const [manualSetupGuideExpanded, setManualSetupGuideExpanded] = useState<
     boolean | null
   >(() => getSavedSetupGuideExpanded())
@@ -482,21 +470,23 @@ export function OverviewDashboard() {
   const isAdmin = Boolean(user?.role && user.role >= ROLE.ADMIN)
 
   const apiKeysQuery = useQuery({
-    queryKey: ['dashboard', 'overview', 'api-keys'],
+    queryKey: ['dashboard', 'overview', 'api-keys', user?.id],
     queryFn: async () => {
       const result = requireServerSuccess(await getApiKeys({ p: 1, size: 10 }))
       return result.success ? (result.data?.items ?? []) : []
     },
     staleTime: 60 * 1000,
+    enabled: Boolean(user),
   })
 
   const modelsQuery = useQuery({
-    queryKey: ['dashboard', 'overview', 'user-models'],
+    queryKey: ['dashboard', 'overview', 'user-models', user?.id],
     queryFn: async () => {
       const result = requireServerSuccess(await getUserModels())
       return result.success ? (result.data ?? []) : []
     },
     staleTime: 5 * 60 * 1000,
+    enabled: Boolean(user),
   })
 
   const preferredKey = useMemo(
@@ -614,9 +604,6 @@ export function OverviewDashboard() {
   const setupStatusReady = apiKeysQuery.isFetched && Boolean(user)
   const setupGuideExpanded =
     manualSetupGuideExpanded ?? (setupStatusReady && !setupComplete)
-  const showLeftContentPanels =
-    isAdmin || showApiInfoPanel || showAnnouncementsPanel || showFAQPanel
-  const showContentPanels = showLeftContentPanels || showUptimePanel
 
   const handleSetupGuideToggle = () => {
     const nextExpanded = !setupGuideExpanded
@@ -629,7 +616,7 @@ export function OverviewDashboard() {
 
   return (
     <SectionPageLayout>
-      <SectionPageLayout.Title>{t('Overview')}</SectionPageLayout.Title>
+      <SectionPageLayout.Title>{t('Console')}</SectionPageLayout.Title>
       <SectionPageLayout.Actions>
         {setupStatusReady && setupComplete && (
           <Button
@@ -647,6 +634,7 @@ export function OverviewDashboard() {
       </SectionPageLayout.Actions>
       <SectionPageLayout.Content>
         <div className='flex flex-col gap-4'>
+          <CreativeWorkspace />
           <div id={setupGuideId} hidden={!setupGuideExpanded}>
             {setupGuideExpanded && (
               <CardStaggerContainer className='grid items-stretch gap-4 xl:grid-cols-[minmax(0,1fr)_22rem]'>
@@ -789,54 +777,12 @@ export function OverviewDashboard() {
 
           <SummaryCards />
 
-          {showContentPanels && (
-            <CardStaggerContainer
-              className={cn(
-                'grid grid-cols-1 gap-4',
-                showLeftContentPanels &&
-                  showUptimePanel &&
-                  'xl:grid-cols-[minmax(0,1fr)_22rem]'
-              )}
-            >
-              {showLeftContentPanels && (
-                <div
-                  className={cn(
-                    'grid min-w-0 grid-cols-1 gap-4',
-                    (showApiInfoPanel ||
-                      showAnnouncementsPanel ||
-                      showFAQPanel) &&
-                      'lg:grid-cols-2'
-                  )}
-                >
-                  {isAdmin && (
-                    <CardStaggerItem className='lg:col-span-2'>
-                      <PerformanceHealthPanel />
-                    </CardStaggerItem>
-                  )}
-                  {showApiInfoPanel && (
-                    <CardStaggerItem>
-                      <ApiInfoPanel />
-                    </CardStaggerItem>
-                  )}
-                  {showAnnouncementsPanel && (
-                    <CardStaggerItem>
-                      <AnnouncementsPanel />
-                    </CardStaggerItem>
-                  )}
-                  {showFAQPanel && (
-                    <CardStaggerItem>
-                      <FAQPanel />
-                    </CardStaggerItem>
-                  )}
-                </div>
-              )}
-              {showUptimePanel && (
-                <CardStaggerItem>
-                  <UptimePanel />
-                </CardStaggerItem>
-              )}
-            </CardStaggerContainer>
-          )}
+          <SeedanceHealthPanel
+            models={modelsQuery.data ?? []}
+            loading={modelsQuery.isPending}
+            error={modelsQuery.isError}
+            onRetry={() => void modelsQuery.refetch()}
+          />
         </div>
       </SectionPageLayout.Content>
     </SectionPageLayout>

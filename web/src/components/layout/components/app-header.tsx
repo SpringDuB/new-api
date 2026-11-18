@@ -16,20 +16,31 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { Link } from '@tanstack/react-router'
+import { MoreHorizontal } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
+
 import { ConfigDrawer } from '@/components/config-drawer'
-import { LanguageSwitcher } from '@/components/language-switcher'
 import { NotificationPopover } from '@/components/notification-popover'
 import { ProfileDropdown } from '@/components/profile-dropdown'
 import { Search } from '@/components/search'
+import { Button } from '@/components/ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { SystemUpdateAction } from '@/features/system-update/system-update-action'
 import { useNotifications } from '@/hooks/use-notifications'
 import { useTopNavLinks } from '@/hooks/use-top-nav-links'
 
 import { defaultTopNavLinks } from '../config/top-nav.config'
 import type { TopNavLink } from '../types'
-import { Header } from './header'
 import { SystemBrand } from './system-brand'
-import { TopNav } from './top-nav'
 
 /**
  * General application Header component
@@ -104,6 +115,7 @@ export function AppHeader({
   showConfigDrawer = true,
   showProfileDropdown = true,
 }: AppHeaderProps) {
+  const { t } = useTranslation()
   // Prioritize dynamically generated links from backend
   const dynamicLinks = useTopNavLinks()
   const links = dynamicLinks.length > 0 ? dynamicLinks : navLinks
@@ -112,43 +124,91 @@ export function AppHeader({
   const notifications = useNotifications()
 
   return (
-    <Header>
-      <div className='@container/system-brand flex min-w-0 flex-1 items-center gap-1'>
-        <SystemBrand variant='inline' />
-        <SystemUpdateAction presentation='version' />
-      </div>
-
-      {leftContent ? (
-        <div className='ms-2 flex items-center'>{leftContent}</div>
-      ) : null}
-
-      {rightContent ?? (
-        <div className='ms-auto flex shrink-0 items-center gap-1 sm:gap-2'>
-          {showTopNav && (
-            <div className='me-1 hidden lg:block'>
-              <TopNav links={links} />
-            </div>
-          )}
-          {showSearch && (
-            <Search className='w-8 flex-none [&>span]:hidden sm:[&>span]:inline' />
-          )}
-          {showNotifications && (
-            <NotificationPopover
-              open={notifications.popoverOpen}
-              onOpenChange={notifications.setPopoverOpen}
-              unreadCount={notifications.unreadCount}
-              activeTab={notifications.activeTab}
-              onTabChange={notifications.setActiveTab}
-              notice={notifications.notice}
-              announcements={notifications.announcements}
-              loading={notifications.loading}
-            />
-          )}
-          <LanguageSwitcher />
-          {showConfigDrawer && <ConfigDrawer />}
-          {showProfileDropdown && <ProfileDropdown />}
+    <header className='stolas-masthead shrink-0'>
+      <div className='stolas-masthead-inner'>
+        <div className='min-w-0'>
+          <SystemBrand variant='inline' />
         </div>
-      )}
-    </Header>
+
+        {leftContent ? (
+          <div className='stolas-masthead-navigation min-w-0'>
+            {leftContent}
+          </div>
+        ) : null}
+
+        {rightContent ?? (
+          <div className='stolas-masthead-tools flex shrink-0 items-center gap-1'>
+            {showTopNav && (
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={
+                    <Button
+                      variant='ghost'
+                      size='icon'
+                      aria-label={t('Explore Stolas')}
+                    />
+                  }
+                >
+                  <MoreHorizontal aria-hidden='true' />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align='end'>
+                  <DropdownMenuGroup>
+                    <DropdownMenuLabel>{t('Explore Stolas')}</DropdownMenuLabel>
+                    {links.map((link) => (
+                      <DropdownMenuItem
+                        key={`${link.title}-${link.href}`}
+                        disabled={link.disabled}
+                        render={
+                          link.external ? (
+                            <a
+                              href={link.href}
+                              target='_blank'
+                              rel='noopener noreferrer'
+                            />
+                          ) : (
+                            <Link to={link.href} />
+                          )
+                        }
+                      >
+                        {link.title}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuGroup>
+                  <DropdownMenuSeparator />
+                  <div className='text-muted-foreground flex flex-col gap-2 px-2 py-2 text-xs'>
+                    <span>Stolas · Powered by New API</span>
+                    <SystemUpdateAction presentation='version' />
+                  </div>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+            {showSearch && <Search compact />}
+            {showProfileDropdown && (
+              <ProfileDropdown
+                tools={
+                  <>
+                    {showNotifications && (
+                      <NotificationPopover
+                        open={notifications.popoverOpen}
+                        onOpenChange={notifications.setPopoverOpen}
+                        unreadCount={notifications.unreadCount}
+                        activeTab={notifications.activeTab}
+                        onTabChange={notifications.setActiveTab}
+                        notice={notifications.notice}
+                        announcements={notifications.announcements}
+                        loading={notifications.loading}
+                      />
+                    )}
+                    {showConfigDrawer && (
+                      <ConfigDrawer showSidebarSettings={false} />
+                    )}
+                  </>
+                }
+              />
+            )}
+          </div>
+        )}
+      </div>
+    </header>
   )
 }

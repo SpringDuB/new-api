@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { api } from '@/lib/api'
@@ -234,6 +235,33 @@ describe('notifications a user receives', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save Settings' }))
     await waitFor(() => expect(onUpdate).toHaveBeenCalled())
   }
+
+  it('choosing a notification method checks one radio and reveals its fields', async () => {
+    const user = userEvent.setup()
+    renderNotificationTab(ROLE.USER, { notify_type: 'email' })
+    expect(screen.getByRole('radio', { name: 'Email' })).toBeChecked()
+
+    await user.click(screen.getByRole('radio', { name: 'Webhook' }))
+
+    expect(screen.getByRole('radio', { name: 'Webhook' })).toBeChecked()
+    expect(screen.getByRole('radio', { name: 'Email' })).not.toBeChecked()
+    expect(screen.getByRole('textbox', { name: 'Webhook URL' })).toBeVisible()
+    expect(
+      screen.queryByRole('textbox', { name: 'Notification Email' })
+    ).not.toBeInTheDocument()
+  })
+
+  it('notification methods can be selected using arrow keys', async () => {
+    const user = userEvent.setup()
+    renderNotificationTab(ROLE.USER, { notify_type: 'email' })
+    screen.getByRole('radio', { name: 'Email' }).focus()
+
+    await user.keyboard('{ArrowRight}')
+
+    expect(screen.getByRole('radio', { name: 'Webhook' })).toHaveFocus()
+    expect(screen.getByRole('radio', { name: 'Webhook' })).toBeChecked()
+    expect(screen.getByRole('textbox', { name: 'Webhook URL' })).toBeVisible()
+  })
 
   it.each([
     { name: 'user', role: ROLE.USER, channel: undefined },

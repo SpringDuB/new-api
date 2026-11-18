@@ -72,7 +72,7 @@ type ModelSummary struct {
 	SuccessRate         float64            `json:"success_rate"`
 	AvgTps              float64            `json:"avg_tps"`
 	RecentSuccessSeries []SuccessRatePoint `json:"recent_success_series,omitempty"`
-	RequestCount        int64              `json:"-"`
+	RequestCount        int64              `json:"request_count"`
 }
 
 type SummaryAllResult struct {

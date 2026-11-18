@@ -16,19 +16,19 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Activity, BarChart3, WalletCards } from 'lucide-react'
+import { Link } from '@tanstack/react-router'
+import { ArrowUpRight } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
-import { StatusBadge } from '@/components/status-badge'
+import { CopyButton } from '@/components/copy-button'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
-import { Card, CardContent } from '@/components/ui/card'
-import { IconBadge, type IconBadgeTone } from '@/components/ui/icon-badge'
 import { Skeleton } from '@/components/ui/skeleton'
-import { getUserAvatarFallback, getUserAvatarStyle } from '@/lib/avatar'
+import { useIsSidebarModuleVisible } from '@/hooks/use-sidebar-config'
+import { toIntlLocale } from '@/i18n/languages'
 import { formatCompactNumber, formatQuota } from '@/lib/format'
 import { getRoleLabel } from '@/lib/roles'
 
-import { getDisplayName } from '../lib'
+import { getDisplayName, getUserInitials } from '../lib'
 import type { UserProfile } from '../types'
 
 // ============================================================================
@@ -40,151 +40,103 @@ interface ProfileHeaderProps {
   loading: boolean
 }
 
-export function ProfileHeader({ profile, loading }: ProfileHeaderProps) {
-  const { t } = useTranslation()
+export function ProfileHeader(props: ProfileHeaderProps) {
+  const { t, i18n } = useTranslation()
+  const walletVisible = useIsSidebarModuleVisible('/wallet')
+  const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
 
-  if (loading) {
+  if (props.loading) {
     return (
-      <Card data-card-hover='false' className='gap-0 overflow-hidden py-0'>
-        <CardContent className='p-4 sm:p-5'>
-          <div className='flex flex-col items-center gap-4 text-center sm:flex-row sm:text-left'>
-            <Skeleton className='h-16 w-16 rounded-2xl' />
-            <div className='space-y-3'>
-              <div className='flex flex-col items-center gap-2 sm:flex-row sm:justify-start'>
-                <Skeleton className='h-8 w-48' />
-                <Skeleton className='h-5 w-16' />
-              </div>
-              <div className='flex flex-col items-center gap-1 sm:flex-row sm:justify-start sm:gap-4'>
-                <Skeleton className='h-4 w-24' />
-                <Skeleton className='h-4 w-40' />
-                <Skeleton className='h-4 w-20' />
-              </div>
-            </div>
-          </div>
-        </CardContent>
-        <div className='border-t'>
-          <div className='divide-border/60 grid grid-cols-1 divide-y sm:grid-cols-3 sm:divide-x sm:divide-y-0'>
-            {['balance', 'usage', 'requests'].map((key) => (
-              <div key={key} className='px-4 py-3.5 sm:px-5 sm:py-4'>
-                <Skeleton className='h-3.5 w-20' />
-                <Skeleton className='mt-2 h-7 w-28' />
-                <Skeleton className='mt-1.5 h-3.5 w-24' />
-              </div>
-            ))}
-          </div>
+      <aside
+        className='stolas-profile-identity'
+        aria-label={t('Account details')}
+        aria-busy='true'
+      >
+        <Skeleton className='size-12 rounded-md' />
+        <Skeleton className='mt-5 h-7 w-40' />
+        <Skeleton className='mt-3 h-4 w-28' />
+        <div className='mt-8 flex flex-col gap-5'>
+          {['role', 'id', 'email', 'balance'].map((key) => (
+            <Skeleton key={key} className='h-5 w-full' />
+          ))}
         </div>
-      </Card>
+      </aside>
     )
   }
 
+  const profile = props.profile
   if (!profile) return null
 
-  const displayName = getDisplayName(profile)
-  const avatarName = profile.username || displayName
-  const avatarFallback = getUserAvatarFallback(avatarName)
-  const avatarFallbackStyle = getUserAvatarStyle(avatarName)
-  const roleLabel = getRoleLabel(profile.role)
-  const stats: {
-    label: string
-    value: string
-    description: string
-    icon: typeof WalletCards
-    tone: IconBadgeTone
-  }[] = [
-    {
-      label: t('Current Balance'),
-      value: formatQuota(profile.quota),
-      description: t('Remaining quota'),
-      icon: WalletCards,
-      tone: 'success',
-    },
-    {
-      label: t('Total Usage'),
-      value: formatQuota(profile.used_quota),
-      description: t('Total consumed quota'),
-      icon: BarChart3,
-      tone: 'info',
-    },
-    {
-      label: t('API Requests'),
-      value: formatCompactNumber(profile.request_count),
-      description: t('Total requests made'),
-      icon: Activity,
-      tone: 'chart-4',
-    },
-  ]
-
   return (
-    <Card data-card-hover='false' className='gap-0 overflow-hidden py-0'>
-      <CardContent className='p-3 sm:p-5'>
-        <div className='flex items-center gap-3 text-left sm:gap-4'>
-          <Avatar className='ring-background h-12 w-12 rounded-xl text-sm ring-2 sm:h-16 sm:w-16 sm:rounded-2xl sm:text-lg sm:ring-4'>
-            <AvatarFallback
-              className='rounded-xl font-semibold text-white sm:rounded-2xl'
-              style={avatarFallbackStyle}
-            >
-              {avatarFallback}
-            </AvatarFallback>
-          </Avatar>
-
-          <div className='min-w-0 flex-1 space-y-1.5 sm:space-y-3'>
-            <div className='flex min-w-0 items-center gap-2'>
-              <h1 className='truncate text-xl font-semibold tracking-tight sm:text-2xl'>
-                {displayName}
-              </h1>
-              <StatusBadge
-                label={roleLabel}
-                variant='neutral'
-                copyable={false}
-              />
-              <StatusBadge
-                label={`${t('User ID')} ${profile.id}`}
-                variant='info'
-                copyText={String(profile.id)}
-              />
-            </div>
-
-            <div className='text-muted-foreground flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs sm:gap-x-4 sm:text-sm'>
-              <span className='truncate'>@{profile.username}</span>
-              {profile.email && (
-                <>
-                  <span>•</span>
-                  <span className='truncate'>{profile.email}</span>
-                </>
-              )}
-              {profile.group && (
-                <>
-                  <span>•</span>
-                  <span className='truncate'>{profile.group}</span>
-                </>
-              )}
-            </div>
-          </div>
-        </div>
-      </CardContent>
-      <div className='border-t'>
-        <div className='divide-border/60 grid grid-cols-3 divide-x'>
-          {stats.map((item) => (
-            <div key={item.label} className='min-w-0 px-3 py-3 sm:px-5 sm:py-4'>
-              <div className='flex items-center gap-2'>
-                <IconBadge tone={item.tone} size='stat'>
-                  <item.icon />
-                </IconBadge>
-                <div className='text-muted-foreground truncate text-xs font-medium tracking-wider uppercase'>
-                  {item.label}
-                </div>
-              </div>
-
-              <div className='text-foreground mt-1.5 truncate font-mono text-lg font-bold tracking-tight tabular-nums sm:mt-2 sm:text-2xl'>
-                {item.value}
-              </div>
-              <div className='text-muted-foreground/60 mt-1 hidden text-xs md:block'>
-                {item.description}
-              </div>
-            </div>
-          ))}
+    <aside
+      className='stolas-profile-identity'
+      aria-label={t('Account details')}
+    >
+      <div className='stolas-profile-account-mark'>
+        <img
+          src='/stolas/mark-orange.png'
+          alt='Stolas'
+          width={32}
+          height={32}
+        />
+        <span>{t('Your Stolas account')}</span>
+      </div>
+      <div className='stolas-profile-person'>
+        <Avatar className='size-12 rounded-md'>
+          <AvatarFallback className='stolas-profile-initials'>
+            {getUserInitials(profile)}
+          </AvatarFallback>
+        </Avatar>
+        <div className='min-w-0'>
+          <h2 className='stolas-editorial'>{getDisplayName(profile)}</h2>
+          <p>@{profile.username}</p>
         </div>
       </div>
-    </Card>
+      <dl className='stolas-profile-facts'>
+        <div>
+          <dt>{t('Role')}</dt>
+          <dd>{getRoleLabel(profile.role)}</dd>
+        </div>
+        <div>
+          <dt>{t('User ID')}</dt>
+          <dd className='flex items-center gap-1'>
+            <span>{profile.id}</span>
+            <CopyButton
+              value={String(profile.id)}
+              className='size-6'
+              aria-label={`${t('Copy to clipboard')}: ${t('User ID')}`}
+            />
+          </dd>
+        </div>
+        <div>
+          <dt>{t('Email')}</dt>
+          <dd>{profile.email || t('Not set')}</dd>
+        </div>
+        <div>
+          <dt>{t('Group')}</dt>
+          <dd>{profile.group || t('Not set')}</dd>
+        </div>
+      </dl>
+      <dl className='stolas-profile-facts stolas-profile-usage'>
+        <div>
+          <dt>{t('Current Balance')}</dt>
+          <dd>{formatQuota(profile.quota)}</dd>
+        </div>
+        <div>
+          <dt>{t('Total Usage')}</dt>
+          <dd>{formatQuota(profile.used_quota)}</dd>
+        </div>
+        <div>
+          <dt>{t('API Requests')}</dt>
+          <dd>{formatCompactNumber(profile.request_count, locale)}</dd>
+        </div>
+      </dl>
+      {walletVisible && (
+        <Link to='/wallet' className='stolas-profile-wallet'>
+          {t('Open wallet')}
+          <ArrowUpRight aria-hidden='true' />
+        </Link>
+      )}
+    </aside>
   )
 }

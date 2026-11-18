@@ -102,6 +102,10 @@ async function renderFilter(
     await userEvent.click(
       await screen.findByRole('button', { name: /^Filter/ })
     )
+  } else {
+    await userEvent.click(
+      await screen.findByRole('button', { name: /^Filter/ })
+    )
   }
   await screen.findByRole('combobox', { name: 'Group' })
   return router

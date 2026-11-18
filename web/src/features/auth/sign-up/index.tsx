@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Link } from '@tanstack/react-router'
+import { Link, useSearch } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
 
 import { useStatus } from '@/hooks/use-status'
@@ -27,19 +27,21 @@ import { SignUpForm } from './components/sign-up-form'
 
 export function SignUp() {
   const { t } = useTranslation()
+  const { redirect } = useSearch({ from: '/(auth)/sign-up' })
   const { status } = useStatus()
 
   return (
     <AuthLayout>
       <div className='w-full space-y-8'>
         <div className='space-y-2'>
-          <h2 className='text-center text-2xl font-semibold tracking-tight sm:text-left'>
+          <h2 className='stolas-editorial text-3xl sm:text-4xl'>
             {t('Create an account')}
           </h2>
           <p className='text-muted-foreground text-left text-sm sm:text-base'>
             {t('Already have an account?')}{' '}
             <Link
               to='/sign-in'
+              search={{ redirect }}
               className='hover:text-primary font-medium underline underline-offset-4'
             >
               {t('Sign in')}
@@ -48,7 +50,7 @@ export function SignUp() {
           </p>
         </div>
 
-        <SignUpForm />
+        <SignUpForm redirectTo={redirect} />
 
         <TermsFooter
           variant='sign-up'

@@ -20,7 +20,7 @@ import { useQueryClient, useIsFetching, useQuery } from '@tanstack/react-query'
 import { useNavigate, getRouteApi } from '@tanstack/react-router'
 import type { Table } from '@tanstack/react-table'
 import { Eye, EyeOff } from 'lucide-react'
-import { useState, useCallback, useMemo } from 'react'
+import { useState, useCallback, useMemo, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Badge } from '@/components/ui/badge'
@@ -114,6 +114,7 @@ function buildSearchSourceKey(values: {
 
 interface CommonLogsFilterBarProps<TData> {
   table: Table<TData>
+  viewToggle?: ReactNode
 }
 
 export function CommonLogsFilterBar<TData>(
@@ -274,6 +275,8 @@ export function CommonLogsFilterBar<TData>(
     !!filters.model || !!filters.group || hasTypeFilter || hasExpandedFilters
 
   const expandedFilterCount = [
+    filters.group,
+    hasTypeFilter,
     filters.token,
     isAdmin ? filters.username : undefined,
     isAdmin ? filters.channel : undefined,
@@ -491,15 +494,20 @@ export function CommonLogsFilterBar<TData>(
       stats={statsBar}
       actionStart={sensitiveToggle}
       actionEnd={<ExportLogsDialog />}
+      viewToggle={props.viewToggle}
       primaryFilters={
         <>
           {dateRangeFilter}
           {modelFilter}
-          {groupFilter}
-          {typeFilter}
         </>
       }
-      advancedFilters={advancedFilters}
+      advancedFilters={
+        <>
+          {groupFilter}
+          {typeFilter}
+          {advancedFilters}
+        </>
+      }
       mobilePinnedFilters={dateRangeFilter}
       mobileFilters={
         <>
@@ -510,10 +518,11 @@ export function CommonLogsFilterBar<TData>(
         </>
       }
       mobileFilterCount={
-        [filters.model, filters.group, hasTypeFilter].filter(Boolean).length +
-        expandedFilterCount
+        [filters.model].filter(Boolean).length + expandedFilterCount
       }
-      hasAdvancedActiveFilters={hasExpandedFilters}
+      hasAdvancedActiveFilters={
+        hasExpandedFilters || !!filters.group || hasTypeFilter
+      }
       advancedFilterCount={expandedFilterCount}
       hasActiveFilters={hasAdditionalFilters}
       onSearch={() => handleApply()}

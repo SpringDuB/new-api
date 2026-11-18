@@ -54,7 +54,10 @@ export function ModelCategoryFilter(props: {
   const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
 
   return (
-    <div className='bg-muted/50 mx-auto mt-5 w-fit max-w-full overflow-x-auto rounded-2xl border p-1.5 sm:mt-6'>
+    <nav
+      aria-label={t('Model categories')}
+      className='stolas-catalog-categories'
+    >
       <ToggleGroup
         value={[props.value]}
         onValueChange={(values) => {
@@ -68,17 +71,17 @@ export function ModelCategoryFilter(props: {
         }}
         spacing={1}
         aria-label={t('Model categories')}
-        className='gap-1'
+        className='stolas-catalog-category-list'
       >
-        {[...MODEL_CATEGORIES, 'all' as const].map((category) => {
+        {['all' as const, ...MODEL_CATEGORIES].map((category) => {
           const Icon = categoryIcons[category]
           return (
             <ToggleGroupItem
               key={category}
               value={category}
-              className='text-muted-foreground aria-pressed:bg-background aria-pressed:text-foreground h-11 gap-2 rounded-xl px-3 text-sm aria-pressed:shadow-sm sm:h-13 sm:px-5 sm:text-base'
+              className='stolas-catalog-category'
             >
-              <Icon className='size-4 sm:size-5' aria-hidden='true' />
+              <Icon data-icon='inline-start' aria-hidden='true' />
               {labels[category]}
               <span className='text-muted-foreground ml-0.5 text-xs tabular-nums sm:text-sm'>
                 {formatNumber(props.counts[category], locale)}
@@ -87,6 +90,6 @@ export function ModelCategoryFilter(props: {
           )
         })}
       </ToggleGroup>
-    </div>
+    </nav>
   )
 }

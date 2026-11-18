@@ -20,8 +20,10 @@ import { Link } from '@tanstack/react-router'
 import { Fragment, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import { StolasLogo } from '@/components/stolas-logo'
 import { useStatus } from '@/hooks/use-status'
 import { useSystemConfig } from '@/hooks/use-system-config'
+import { DEFAULT_LOGO } from '@/lib/constants'
 import { cn } from '@/lib/utils'
 
 interface FooterLink {
@@ -255,17 +257,21 @@ export function Footer(props: FooterProps) {
           {/* Brand column */}
           <div className='shrink-0'>
             <Link to='/' className='group flex items-center gap-2.5'>
-              <img
-                src={displayLogo}
-                alt={displayName}
-                className='size-7 object-contain'
-              />
-              <span className='text-sm font-semibold tracking-tight'>
-                {displayName}
-              </span>
+              {displayLogo === DEFAULT_LOGO ? (
+                <StolasLogo />
+              ) : (
+                <img
+                  src={displayLogo}
+                  alt={displayName}
+                  className='size-7 object-contain'
+                />
+              )}
+              {displayName !== 'Stolas' && (
+                <span className='text-lg font-semibold'>{displayName}</span>
+              )}
             </Link>
             <p className='text-muted-foreground/60 mt-3 max-w-[200px] text-xs leading-relaxed'>
-              {t('Powerful API Management Platform')}
+              {t('A shared home for creators and developers.')}
             </p>
           </div>
 

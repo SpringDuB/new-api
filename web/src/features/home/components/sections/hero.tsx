@@ -16,233 +16,197 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { CherryStudio } from '@lobehub/icons'
+import {
+  ArrowRight01Icon,
+  CodeIcon,
+  Film01Icon,
+} from '@hugeicons/core-free-icons'
+import { HugeiconsIcon } from '@hugeicons/react'
 import { Link } from '@tanstack/react-router'
-import { ArrowRight, BookOpen } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
+import { CanvasEntry } from '@/components/canvas-entry'
 import { Button } from '@/components/ui/button'
-import { useStatus } from '@/hooks/use-status'
+import { Separator } from '@/components/ui/separator'
+import { cn } from '@/lib/utils'
 
-import { HeroTerminalDemo } from '../hero-terminal-demo'
-import { InfiniteCanvasCard } from '../infinite-canvas-card'
+import { StoryArt } from '../story-art'
 
 interface HeroProps {
   className?: string
   isAuthenticated?: boolean
 }
 
-// Stylized three-dots indicator representing "More"
-const MoreIcon = () => (
-  <svg
-    className='text-muted-foreground/60 group-hover:text-foreground size-6 shrink-0 transition-colors'
-    viewBox='0 0 24 24'
-    fill='none'
-    xmlns='http://www.w3.org/2000/svg'
-  >
-    <circle cx='6' cy='12' r='2' fill='currentColor' />
-    <circle cx='12' cy='12' r='2' fill='currentColor' />
-    <circle cx='18' cy='12' r='2' fill='currentColor' />
-  </svg>
-)
-
 export function Hero(props: HeroProps) {
   const { t } = useTranslation()
-  const { status } = useStatus()
-  const docsUrl =
-    (status?.docs_link as string | undefined) || 'https://docs.newapi.pro'
-
-  const renderDocsButton = () => {
-    const isExternal = docsUrl.startsWith('http')
-    if (isExternal) {
-      return (
-        <Button
-          variant='outline'
-          className='group border-border/50 hover:border-border hover:bg-muted/50 inline-flex h-11 items-center gap-1.5 rounded-lg px-5 text-sm font-medium'
-          render={
-            <a href={docsUrl} target='_blank' rel='noopener noreferrer' />
-          }
-        >
-          <BookOpen className='text-muted-foreground/80 group-hover:text-foreground size-4 transition-colors duration-200' />
-          <span>{t('Docs')}</span>
-        </Button>
-      )
-    }
-    return (
-      <Button
-        variant='outline'
-        className='group border-border/50 hover:border-border hover:bg-muted/50 inline-flex h-11 items-center gap-1.5 rounded-lg px-5 text-sm font-medium'
-        render={<Link to={docsUrl} />}
-      >
-        <BookOpen className='text-muted-foreground/80 group-hover:text-foreground size-4 transition-colors duration-200' />
-        <span>{t('Docs')}</span>
-      </Button>
-    )
-  }
-
   return (
-    <section className='relative z-10 overflow-hidden px-6 pt-24 pb-16 md:pt-32 md:pb-24 lg:pt-36 lg:pb-28'>
-      {/* Radial gradient background */}
-      <div
-        aria-hidden
-        className='pointer-events-none absolute inset-0 -z-10 opacity-25 dark:opacity-[0.12]'
-        style={{
-          background: [
-            'radial-gradient(ellipse 60% 50% at 20% 20%, oklch(0.72 0.18 250 / 80%) 0%, transparent 70%)',
-            'radial-gradient(ellipse 50% 40% at 80% 15%, oklch(0.65 0.15 200 / 60%) 0%, transparent 70%)',
-            'radial-gradient(ellipse 40% 35% at 40% 80%, oklch(0.70 0.12 280 / 40%) 0%, transparent 70%)',
-          ].join(', '),
-        }}
-      />
-      {/* Grid pattern */}
-      <div
-        aria-hidden
-        className='absolute inset-0 -z-10 bg-[linear-gradient(to_right,var(--border)_1px,transparent_1px),linear-gradient(to_bottom,var(--border)_1px,transparent_1px)] [mask-image:radial-gradient(ellipse_60%_50%_at_50%_30%,black_20%,transparent_100%)] bg-[size:4rem_4rem] opacity-[0.08]'
-      />
-
-      <div className='mx-auto grid max-w-6xl grid-cols-1 items-start gap-12 lg:grid-cols-12 lg:gap-8'>
-        {/* Left Column: Title, description, action buttons and application support */}
-        <div className='flex flex-col items-start text-left lg:col-span-6'>
-          {/* Top Pill Badge */}
-          <div
-            className='landing-animate-fade-up mb-5 inline-flex items-center gap-1.5 rounded-full border border-blue-500/20 bg-blue-500/5 px-3 py-1.5 text-[11px] font-medium text-blue-600 opacity-0 shadow-xs dark:border-blue-400/20 dark:bg-blue-400/5 dark:text-blue-400'
-            style={{ animationDelay: '0ms' }}
-          >
-            <span className='relative flex size-1.5'>
-              <span className='absolute inline-flex h-full w-full animate-ping rounded-full bg-blue-400 opacity-75' />
-              <span className='relative inline-flex size-1.5 rounded-full bg-blue-500 dark:bg-blue-400' />
-            </span>
-            <span>{t('AI Application Infrastructure Foundation')}</span>
-          </div>
-
-          <h1
-            className='landing-animate-fade-up text-[clamp(2.25rem,4.5vw,3.25rem)] leading-[1.15] font-bold tracking-tight'
-            style={{ animationDelay: '60ms' }}
-          >
-            {t('Unified API Gateway for')}
+    <main
+      className={cn(
+        'mx-auto max-w-7xl px-6 pt-28 pb-16 sm:px-10 lg:pt-36',
+        props.className
+      )}
+    >
+      <section className='grid items-center gap-14 pb-20 lg:grid-cols-[1.15fr_1fr] lg:gap-20'>
+        <div className='flex flex-col items-start gap-7'>
+          <p className='stolas-eyebrow'>
+            {t('For the things only you can imagine')}
+          </p>
+          <h1 className='stolas-editorial max-w-3xl text-5xl leading-[1.1] sm:text-6xl xl:text-7xl'>
+            {t('Stories take shape.')}
             <br />
-            <span className='bg-gradient-to-r from-blue-400 via-violet-400 to-purple-500 bg-clip-text text-transparent'>
-              {t('Vast Range of AI Models')}
-            </span>
+            <span className='text-primary'>{t('Possibilities open up.')}</span>
           </h1>
-          <p
-            className='landing-animate-fade-up text-muted-foreground/80 mt-5 max-w-xl text-base leading-relaxed opacity-0 md:text-[15px]'
-            style={{ animationDelay: '120ms' }}
-          >
+          <p className='text-muted-foreground max-w-lg text-base leading-relaxed sm:text-lg'>
             {t(
-              'Access a vast selection of models via a standard, unified API protocol. Power AI applications, manage digital assets, and connect the Future.'
+              'Create films on an open canvas. Build products with a unified API. Stolas brings your ideas and AI models together.'
             )}
           </p>
-
-          <div
-            className='landing-animate-fade-up mt-8 flex flex-wrap items-center gap-3 opacity-0'
-            style={{ animationDelay: '180ms' }}
-          >
-            {props.isAuthenticated ? (
-              <>
-                <Button
-                  className='group h-11 rounded-lg px-5 text-sm font-medium'
-                  render={<Link to='/dashboard' />}
-                >
-                  {t('Go to Dashboard')}
-                  <ArrowRight className='ml-1.5 size-4 transition-transform duration-200 group-hover:translate-x-0.5' />
-                </Button>
-                {renderDocsButton()}
-              </>
-            ) : (
-              <>
-                <Button
-                  className='group h-11 rounded-lg px-5 text-sm font-medium'
-                  render={<Link to='/sign-up' />}
-                >
-                  {t('Get Started')}
-                  <ArrowRight className='ml-1.5 size-4 transition-transform duration-200 group-hover:translate-x-0.5' />
-                </Button>
-                <Button
-                  variant='outline'
-                  className='border-border/50 hover:border-border hover:bg-muted/50 h-11 rounded-lg px-5 text-sm font-medium'
-                  render={<Link to='/pricing' />}
-                >
-                  {t('View Pricing')}
-                </Button>
-                {renderDocsButton()}
-              </>
-            )}
+          <div className='flex w-full flex-wrap gap-3'>
+            <CanvasEntry className='h-12 px-6' />
+            <Button
+              variant='outline'
+              size='lg'
+              className='h-12 px-6'
+              render={
+                <Link
+                  to={props.isAuthenticated ? '/keys' : '/sign-up'}
+                  search={
+                    props.isAuthenticated ? undefined : { redirect: '/keys' }
+                  }
+                />
+              }
+            >
+              {t('Build with the API')}
+              <HugeiconsIcon
+                icon={ArrowRight01Icon}
+                data-icon='inline-end'
+                aria-hidden='true'
+              />
+            </Button>
           </div>
-
-          <InfiniteCanvasCard />
-
-          {/* Supported Apps (参考图二样式，进行卡片化和信息扩充设计，增加视觉高度) */}
-          <div
-            className='landing-animate-fade-up mt-10 w-full max-w-xl opacity-0'
-            style={{ animationDelay: '240ms' }}
-          >
-            <div className='mb-4 flex flex-col gap-1'>
-              <span className='text-muted-foreground/50 text-[10px] font-bold tracking-[0.15em] uppercase'>
-                {t('Supported Applications')}
-              </span>
-              <p className='text-muted-foreground/60 text-xs leading-relaxed'>
+          <p className='text-muted-foreground text-xs'>
+            {t('One account. One model wallet. Room for every idea.')}
+          </p>
+        </div>
+        <StoryArt />
+      </section>
+      <Separator />
+      <section aria-labelledby='stolas-workspaces' className='py-14 sm:py-20'>
+        <div className='mb-10 flex flex-col justify-between gap-5 sm:flex-row sm:items-end'>
+          <div className='flex flex-col gap-4'>
+            <p className='stolas-eyebrow'>
+              {t('Two ways in. Your direction.')}
+            </p>
+            <h2
+              id='stolas-workspaces'
+              className='stolas-editorial text-3xl sm:text-4xl'
+            >
+              {t('What would you like to make?')}
+            </h2>
+          </div>
+          <Button variant='ghost' render={<Link to='/pricing' />}>
+            {t('Explore available models')}
+            <HugeiconsIcon
+              icon={ArrowRight01Icon}
+              data-icon='inline-end'
+              aria-hidden='true'
+            />
+          </Button>
+        </div>
+        <div className='grid gap-8 md:grid-cols-2 md:gap-0 md:divide-x'>
+          <article className='flex flex-col items-start gap-5 md:pr-12'>
+            <HugeiconsIcon
+              icon={Film01Icon}
+              className='text-primary size-8'
+              aria-hidden='true'
+            />
+            <p className='stolas-eyebrow'>{t('For creators')}</p>
+            <h3 className='stolas-editorial text-3xl'>
+              {t('From the first idea to the final frame.')}
+            </h3>
+            <p className='text-muted-foreground max-w-md text-sm leading-7'>
+              {t(
+                'Bring scripts, images and video together on an infinite canvas. Develop a scene, explore a visual direction and keep your story connected.'
+              )}
+            </p>
+            <CanvasEntry variant='outline' />
+          </article>
+          <article className='flex flex-col items-start gap-5 border-t pt-8 md:border-t-0 md:pt-0 md:pl-12'>
+            <HugeiconsIcon
+              icon={CodeIcon}
+              className='text-primary size-8'
+              aria-hidden='true'
+            />
+            <p className='stolas-eyebrow'>{t('For developers')}</p>
+            <h3 className='stolas-editorial text-3xl'>
+              {t('A clear route from prototype to product.')}
+            </h3>
+            <p className='text-muted-foreground max-w-md text-sm leading-7'>
+              {t(
+                'Connect your application to the models you need. Manage API keys, inspect usage and track spending in the Console.'
+              )}
+            </p>
+            <Button
+              variant='outline'
+              size='lg'
+              render={<Link to='/dashboard' />}
+            >
+              {t('Console')}
+              <HugeiconsIcon
+                icon={ArrowRight01Icon}
+                data-icon='inline-end'
+                aria-hidden='true'
+              />
+            </Button>
+          </article>
+        </div>
+      </section>
+      <section className='bg-secondary grid gap-8 p-8 sm:p-12 lg:grid-cols-[1fr_1.2fr]'>
+        <div className='flex flex-col gap-4'>
+          <p className='stolas-eyebrow'>STOLAS / ACCOUNT</p>
+          <h2 className='stolas-editorial text-3xl sm:text-4xl'>
+            {t('Your work, connected.')}
+          </h2>
+          <p className='text-muted-foreground max-w-sm text-sm leading-7'>
+            {t(
+              'Move between the canvas and your developer tools with the same Stolas account.'
+            )}
+          </p>
+        </div>
+        <ol className='divide-border flex flex-col divide-y'>
+          <li className='flex gap-5 pb-5'>
+            <span className='text-primary font-mono text-xs'>01</span>
+            <div>
+              <h3 className='font-medium'>{t('Choose where to begin')}</h3>
+              <p className='text-muted-foreground mt-2 text-sm'>
+                {t('Start in the canvas or connect your own application.')}
+              </p>
+            </div>
+          </li>
+          <li className='flex gap-5 py-5'>
+            <span className='text-primary font-mono text-xs'>02</span>
+            <div>
+              <h3 className='font-medium'>
+                {t('Keep control of your access')}
+              </h3>
+              <p className='text-muted-foreground mt-2 text-sm'>
+                {t('Manage model access and API credentials in your account.')}
+              </p>
+            </div>
+          </li>
+          <li className='flex gap-5 pt-5'>
+            <span className='text-primary font-mono text-xs'>03</span>
+            <div>
+              <h3 className='font-medium'>{t('Follow every request')}</h3>
+              <p className='text-muted-foreground mt-2 text-sm'>
                 {t(
-                  'Supports one-click configuration and perfectly adapts to NewAPI multi-protocol configuration.'
+                  'Review usage and your shared model balance whenever you need.'
                 )}
               </p>
             </div>
-            <div className='flex flex-wrap items-center gap-3'>
-              {/* Cherry Studio */}
-              <a
-                href='https://cherry-ai.com'
-                target='_blank'
-                rel='noopener noreferrer'
-                className='group border-border/40 bg-muted/15 text-foreground/80 hover:border-border hover:bg-muted/30 hover:text-foreground flex items-center gap-3 rounded-full border px-5 py-2.5 text-sm font-medium shadow-[0_1px_2.5px_rgba(0,0,0,0.01)] backdrop-blur-xs transition-all duration-300 hover:scale-[1.02]'
-              >
-                <CherryStudio.Color size={24} className='shrink-0' />
-                <span>Cherry Studio</span>
-              </a>
-
-              {/* CC Switch */}
-              <a
-                href='https://ccswitch.io'
-                target='_blank'
-                rel='noopener noreferrer'
-                className='group border-border/40 bg-muted/15 text-foreground/80 hover:border-border hover:bg-muted/30 hover:text-foreground flex items-center gap-3 rounded-full border px-5 py-2.5 text-sm font-medium shadow-[0_1px_2.5px_rgba(0,0,0,0.01)] backdrop-blur-xs transition-all duration-300 hover:scale-[1.02]'
-              >
-                <img
-                  src='https://ccswitch.io/favicon.png'
-                  alt='CC Switch'
-                  className='size-6 shrink-0 rounded-md object-contain'
-                  onError={(e) => {
-                    // Fallback to a styled text avatar if the remote favicon fails to load in sandbox or local environments
-                    e.currentTarget.style.display = 'none'
-                    const fallback = e.currentTarget.nextSibling as HTMLElement
-                    if (fallback) fallback.style.display = 'flex'
-                  }}
-                />
-                <span
-                  style={{ display: 'none' }}
-                  className='size-6 shrink-0 items-center justify-center rounded-md bg-blue-500/10 text-[10px] font-bold text-blue-600 dark:bg-blue-400/10 dark:text-blue-400'
-                >
-                  CC
-                </span>
-                <span>CC Switch</span>
-              </a>
-
-              {/* "更多" */}
-              <div className='group border-border/40 bg-muted/15 text-foreground/55 hover:border-border hover:bg-muted/30 hover:text-foreground flex cursor-default items-center gap-2.5 rounded-full border px-5 py-2.5 text-sm font-medium shadow-[0_1px_2.5px_rgba(0,0,0,0.01)] backdrop-blur-xs transition-all duration-300 hover:scale-[1.02]'>
-                <MoreIcon />
-                <span>{t('More Apps')}</span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Right Column: Hero Terminal API Demo */}
-        <div
-          className='landing-animate-fade-up flex w-full justify-center opacity-0 lg:col-span-6'
-          style={{ animationDelay: '320ms' }}
-        >
-          <HeroTerminalDemo className='mt-8 lg:mt-0' />
-        </div>
-      </div>
-    </section>
+          </li>
+        </ol>
+      </section>
+    </main>
   )
 }

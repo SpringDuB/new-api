@@ -16,12 +16,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Settings } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
-import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
-import { TitledCard } from '@/components/ui/titled-card'
 
 import type { UserProfile } from '../types'
 import { NotificationTab } from './tabs/notification-tab'
@@ -49,34 +46,37 @@ export function ProfileSettingsCard({
 
   if (loading) {
     return (
-      <Card data-card-hover='false' className='gap-0 overflow-hidden py-0'>
-        <CardHeader className='border-b p-3 !pb-3 sm:p-5 sm:!pb-5'>
+      <section className='stolas-profile-section' aria-busy='true'>
+        <header className='stolas-profile-section-heading'>
           <Skeleton className='h-6 w-32' />
           <Skeleton className='mt-2 h-4 w-48' />
-        </CardHeader>
-        <CardContent className='space-y-4 p-3 sm:p-5'>
+        </header>
+        <div className='flex flex-col gap-4'>
           {['notifications', 'threshold', 'preferences'].map((key) => (
             <Skeleton key={key} className='h-20 w-full' />
           ))}
-        </CardContent>
-      </Card>
+        </div>
+      </section>
     )
   }
 
   return (
-    <TitledCard
-      title={t('Settings')}
-      description={t('Settings & Preferences')}
-      icon={<Settings className='h-4 w-4' />}
-      iconTone='info'
-      disableHoverEffect
+    <section
+      className='stolas-profile-section'
+      aria-labelledby='profile-notifications-title'
     >
+      <header className='stolas-profile-section-heading'>
+        <h2 id='profile-notifications-title' className='stolas-editorial'>
+          {t('Notifications')}
+        </h2>
+        <p>{t('Choose where and when Stolas sends updates.')}</p>
+      </header>
       <NotificationTab
         profile={profile}
         onUpdate={onProfileUpdate}
         quotaRemindEnabled={quotaRemindEnabled}
         quotaRemindThreshold={quotaRemindThreshold}
       />
-    </TitledCard>
+    </section>
   )
 }

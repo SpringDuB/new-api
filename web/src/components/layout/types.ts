@@ -148,4 +148,6 @@ export type ResolvedSidebarView = {
   key: string
   view: SidebarView | null
   navGroups: NavGroup[]
+  /** Root destinations after role and administrator/user module filtering. */
+  rootNavGroups: NavGroup[]
 }

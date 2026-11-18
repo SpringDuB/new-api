@@ -1327,12 +1327,19 @@ export function buildFlowSankeySpec(
           value: (datum: Record<string, unknown>) => {
             const source = sankeyDatumValue(datum, 'source')
             const target = sankeyDatumValue(datum, 'target')
+            let title: string
             if (source && target) {
               const sourceLabel = sankeyDatumValue(datum, 'sourceLabel')
               const targetLabel = sankeyDatumValue(datum, 'targetLabel')
-              return `${sourceLabel ?? source} -> ${targetLabel ?? target}`
+              title = `${sourceLabel ?? source} -> ${targetLabel ?? target}`
+            } else {
+              title = `${sankeyDatumValue(datum, 'name') ?? sankeyDatumValue(datum, 'rawLabel') ?? ''}`
             }
-            return `${sankeyDatumValue(datum, 'name') ?? sankeyDatumValue(datum, 'rawLabel') ?? ''}`
+            // VChart inserts title strings as HTML, while names are user input.
+            return title
+              .replaceAll('&', '&amp;')
+              .replaceAll('<', '&lt;')
+              .replaceAll('>', '&gt;')
           },
         },
         content: tooltipMetricLines(valueFormatter, labels),

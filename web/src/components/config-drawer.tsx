@@ -67,7 +67,7 @@ import { useSidebar } from './ui/sidebar'
 
 const Item = RadioPrimitive.Root
 
-export function ConfigDrawer() {
+export function ConfigDrawer(props: { showSidebarSettings?: boolean }) {
   const { t } = useTranslation()
   const { setOpen } = useSidebar()
   const { resetDir } = useDirection()
@@ -111,8 +111,8 @@ export function ConfigDrawer() {
           <FontConfig />
           <RadiusConfig />
           <ScaleConfig />
-          <SidebarConfig />
-          <LayoutConfig />
+          {props.showSidebarSettings !== false && <SidebarConfig />}
+          {props.showSidebarSettings !== false && <LayoutConfig />}
           <ContentLayoutConfig />
           <DirConfig />
         </div>

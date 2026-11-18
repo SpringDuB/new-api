@@ -41,6 +41,8 @@ import {
 import { useTranslation } from 'react-i18next'
 
 import type { SidebarBadges, SidebarData } from '@/components/layout/types'
+import { getCanvasStartURL } from '@/features/canvas-connect/connection'
+import { useStatus } from '@/hooks/use-status'
 import { INFINITE_CANVAS_URL } from '@/lib/constants'
 import { ROLE } from '@/lib/roles'
 
@@ -52,37 +54,38 @@ import { ROLE } from '@/lib/roles'
  */
 export function useSidebarData(badges: SidebarBadges = {}): SidebarData {
   const { t } = useTranslation()
+  const { status } = useStatus()
 
   return {
     navGroups: [
       {
         id: 'chat',
-        title: t('Online Use'),
+        title: t('Infinite Canvas'),
         items: [
-          {
-            title: t('Playground'),
-            url: '/playground',
-            icon: FlaskConical,
-          },
           {
             title: t('Chat'),
             icon: MessageSquare,
             type: 'chat-presets',
           },
-          {
-            title: t('Infinite Canvas'),
-            url: INFINITE_CANVAS_URL,
-            icon: PanelsTopLeft,
-            external: true,
-          },
+          ...(status?.canvas_enabled === false
+            ? []
+            : [
+                {
+                  title: t('Infinite Canvas'),
+                  url: getCanvasStartURL(status),
+                  configUrls: [INFINITE_CANVAS_URL],
+                  icon: PanelsTopLeft,
+                  external: true,
+                },
+              ]),
         ],
       },
       {
         id: 'general',
-        title: t('General'),
+        title: t('API access'),
         items: [
           {
-            title: t('Overview'),
+            title: t('Console'),
             url: '/dashboard/overview',
             icon: Activity,
           },
@@ -96,6 +99,7 @@ export function useSidebarData(badges: SidebarBadges = {}): SidebarData {
             url: '/keys',
             icon: Key,
           },
+          { title: t('Playground'), url: '/playground', icon: FlaskConical },
           {
             title: t('Usage Logs'),
             url: '/usage-logs/common',

@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { flexRender, type Cell } from '@tanstack/react-table'
-import { ChevronRight, KeyRound } from 'lucide-react'
+import { ChevronRight } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -25,9 +25,7 @@ import { CopyButton } from '@/components/copy-button'
 import { Dialog } from '@/components/dialog'
 import { GroupBadge } from '@/components/group-badge'
 import { StatusBadge, type StatusVariant } from '@/components/status-badge'
-import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
-import { getUserAvatarFallback, getUserAvatarStyle } from '@/lib/avatar'
 import dayjs from '@/lib/dayjs'
 import { formatLogQuota, formatTimestampToDate } from '@/lib/format'
 
@@ -142,10 +140,11 @@ export function CommonLogMobileCard<TData>(props: {
       cacheWrite > 0)
 
   return (
-    <div className='min-w-0 space-y-2.5 text-sm leading-5'>
-      <div className='flex min-w-0 flex-wrap items-start gap-x-3 gap-y-2'>
+    <div className='stolas-activity-common min-w-0 text-sm leading-5'>
+      <div className='stolas-activity-identity'>
         {fields.model.visible && (
-          <div className='min-w-0 flex-[1_1_10rem]'>
+          <div className='min-w-0'>
+            <div className='stolas-activity-label'>{t('Model')}</div>
             <ModelBadge
               modelName={model.name}
               actualModel={model.actualModel}
@@ -155,14 +154,15 @@ export function CommonLogMobileCard<TData>(props: {
             />
           </div>
         )}
-        {fields.cost.visible && costCell && (
-          <div className='ml-auto max-w-full min-w-0 self-center [overflow-wrap:anywhere] [&_.inline-flex]:h-auto [&_.inline-flex]:min-h-6 [&_.inline-flex]:max-w-full [&_.inline-flex]:flex-wrap'>
-            {flexRender(costCell.column.columnDef.cell, costCell.getContext())}
-          </div>
-        )}
       </div>
+      {fields.cost.visible && costCell && (
+        <div className='stolas-activity-cost min-w-0 [overflow-wrap:anywhere]'>
+          <div className='stolas-activity-label'>{t('Cost')}</div>
+          {flexRender(costCell.column.columnDef.cell, costCell.getContext())}
+        </div>
+      )}
       <div
-        className='grid min-w-0 grid-cols-2 items-stretch gap-x-3'
+        className='stolas-activity-chronology grid min-w-0 grid-cols-2 items-stretch gap-x-3'
         data-slot='log-time-and-timing'
       >
         {fields.time.visible && (
@@ -181,7 +181,7 @@ export function CommonLogMobileCard<TData>(props: {
               onClick={() => setSelectedField('time')}
               className='text-muted-foreground h-auto min-h-6 px-0 py-0 text-xs font-normal whitespace-normal tabular-nums'
             >
-              {dayjs.unix(log.created_at).format('MM-DD HH:mm:ss')}
+              {dayjs.unix(log.created_at).format('YYYY-MM-DD HH:mm:ss')}
             </Button>
           </div>
         )}
@@ -218,7 +218,7 @@ export function CommonLogMobileCard<TData>(props: {
           )}
       </div>
       {visibleMetadata.length > 0 && (
-        <div className='grid min-w-0 grid-cols-2 gap-x-4 gap-y-0.5'>
+        <div className='stolas-activity-metadata'>
           {visibleMetadata.map((id) => {
             const field = fields[id]
             let fieldContent = <span className='truncate'>{field.value}</span>
@@ -230,37 +230,11 @@ export function CommonLogMobileCard<TData>(props: {
                   className='max-w-full text-sm'
                 />
               )
-            } else if (id === 'token') {
-              fieldContent = (
-                <StatusBadge
-                  label={field.value}
-                  copyable={false}
-                  icon={KeyRound}
-                  className='border-border/60 bg-muted/30 text-foreground max-w-full rounded-md border px-1.5 py-0.5 text-sm'
-                />
-              )
             }
             return (
               <div key={id} className='flex min-w-0 items-center gap-2'>
                 <span className='text-muted-foreground max-w-[40%] shrink-0 text-xs [overflow-wrap:anywhere]'>
-                  {id === 'user' ? (
-                    <Avatar className='ring-border/60 size-6 shrink-0 ring-1'>
-                      <AvatarFallback
-                        className='text-[11px] font-semibold'
-                        style={
-                          context.sensitiveVisible
-                            ? getUserAvatarStyle(log.username)
-                            : undefined
-                        }
-                      >
-                        {context.sensitiveVisible
-                          ? getUserAvatarFallback(log.username)
-                          : '•'}
-                      </AvatarFallback>
-                    </Avatar>
-                  ) : (
-                    field.label
-                  )}
+                  {field.label}
                 </span>
                 {context.sensitiveVisible ? (
                   <Button
@@ -289,7 +263,7 @@ export function CommonLogMobileCard<TData>(props: {
         </div>
       )}
       {showTokens && (
-        <div className='text-muted-foreground flex flex-wrap gap-x-3 gap-y-1 text-xs [overflow-wrap:anywhere]'>
+        <div className='stolas-activity-usage text-muted-foreground flex flex-wrap gap-x-3 gap-y-1 text-xs [overflow-wrap:anywhere]'>
           <span>
             {t('Input')}{' '}
             <span className='text-foreground tabular-nums'>
@@ -315,14 +289,15 @@ export function CommonLogMobileCard<TData>(props: {
         </div>
       )}
       {contentCell && (
-        <div className='relative min-w-0 border-t pt-2 [&_button]:min-h-8 [&_button]:w-full [&_button]:max-w-full [&_button]:pr-5 [&_button]:text-sm [&_button>span]:line-clamp-2 [&_button>span]:[overflow-wrap:anywhere] [&_button>span]:whitespace-normal'>
+        <div className='stolas-activity-details relative min-w-0 [&_button]:min-h-8 [&_button]:w-full [&_button]:max-w-full [&_button]:pr-5 [&_button]:text-sm [&_button>span]:line-clamp-2 [&_button>span]:[overflow-wrap:anywhere] [&_button>span]:whitespace-normal'>
+          <span className='stolas-activity-label'>{t('Details')}</span>
           {flexRender(
             contentCell.column.columnDef.cell,
             contentCell.getContext()
           )}
           <ChevronRight
             aria-hidden='true'
-            className='text-primary pointer-events-none absolute top-4 right-0 size-4'
+            className='text-primary pointer-events-none absolute right-0 bottom-2 size-4'
           />
         </div>
       )}

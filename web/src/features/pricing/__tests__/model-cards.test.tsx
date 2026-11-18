@@ -89,6 +89,103 @@ afterEach(() => {
 })
 
 describe('model cards', () => {
+  it.each([
+    undefined,
+    { avg_latency_ms: Number.NaN, avg_tps: 0, success_rate: Number.NaN },
+  ])(
+    'omits empty performance metrics from a directory entry and keeps its details action: %j',
+    async (perf) => {
+      const onClick = vi.fn()
+      render(
+        <ModelCard
+          model={pricingModel()}
+          onClick={onClick}
+          presentation='directory'
+          perf={perf}
+        />
+      )
+      const entry = screen.getByRole('article', { name: 'example-model' })
+      expect(
+        within(entry).getByRole('group', { name: 'Pricing' })
+      ).toBeVisible()
+      expect(
+        within(entry).queryByLabelText(
+          'Performance metrics for the last 24 hours'
+        )
+      ).not.toBeInTheDocument()
+      await userEvent
+        .setup()
+        .click(within(entry).getByRole('button', { name: 'Details' }))
+      expect(onClick).toHaveBeenCalledWith('example-model')
+    }
+  )
+
+  it('retains a reported zero success rate in the directory without treating it as missing data', () => {
+    render(
+      <ModelCard
+        model={pricingModel()}
+        onClick={vi.fn()}
+        presentation='directory'
+        perf={{
+          avg_latency_ms: Number.NaN,
+          avg_tps: Number.NaN,
+          success_rate: 0,
+        }}
+      />
+    )
+    expect(
+      screen.getByLabelText('Performance metrics for the last 24 hours')
+    ).toHaveTextContent('0.00%')
+  })
+
+  it('uses a flat paginated directory while preserving promotions, access metadata, and task price units', async () => {
+    vi.spyOn(api, 'get').mockResolvedValue({
+      data: { success: true, data: { models: [] } },
+    })
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ModelCardGrid
+          models={[
+            pricingModel({
+              description: 'A video model with an actual duration price.',
+              tags: 'video,production',
+              supported_endpoint_types: ['openai-video'],
+              square_display: {
+                badge: 'Studio choice',
+                note: 'Available today',
+                highlight: true,
+                color: 'red',
+              },
+              billing_mode: 'tiered_expr',
+              billing_expr: 'tier("base", u("seconds") * 0.4)',
+              billing_usage_schema: {
+                seconds: { type: 'number', unit: 'second' },
+              },
+            }),
+          ]}
+          onModelClick={vi.fn()}
+          presentation='directory'
+          tokenUnit='K'
+        />
+      </QueryClientProvider>
+    )
+    const directory = screen.getByRole('list', { name: 'Models' })
+    expect(directory).toHaveClass('stolas-model-directory')
+    const entry = within(directory).getByRole('article', {
+      name: 'example-model',
+    })
+    expect(within(entry).getByText('Studio choice')).toBeVisible()
+    expect(within(entry).getByText('Available today')).toBeVisible()
+    expect(
+      within(entry).getByText('A video model with an actual duration price.')
+    ).toBeVisible()
+    expect(within(entry).getByText('default')).toBeVisible()
+    expect(within(entry).getByText('openai-video')).toBeVisible()
+    const price = within(entry).getByRole('group', { name: 'Pricing' })
+    expect(price).toHaveTextContent('$0.4 / s')
+    expect(price).not.toHaveTextContent(/1K|1M/)
+  })
+
   it('shows a compound additional tag as one label alongside the original catalog tag', () => {
     const label = 'High quality; text|image'
     const [model] = applyModelSquareDisplay([pricingModel({ tags: 'chat' })], {

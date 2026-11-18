@@ -136,7 +136,7 @@ test('selecting Infinite Canvas in search opens a new tab and keeps the current 
   await userEvent.click(screen.getByRole('option', { name: 'Infinite Canvas' }))
 
   expect(open).toHaveBeenCalledExactlyOnceWith(
-    'https://canvas.stolas.cc',
+    'https://canvas.stolas.cc/api/auth/stolas/start',
     '_blank',
     'noopener,noreferrer'
   )

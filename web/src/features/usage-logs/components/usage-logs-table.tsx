@@ -25,7 +25,9 @@ import { useTranslation } from 'react-i18next'
 import {
   DataTablePage,
   DataTableRow,
+  DataTableViewModeToggle,
   useDataTable,
+  useDataTableViewMode,
 } from '@/components/data-table'
 import {
   getAdminPlans,
@@ -49,7 +51,10 @@ import { fetchLogsByCategory } from '../lib/utils'
 import type { LogCategory } from '../types'
 import { CommonLogsFilterBar } from './common-logs-filter-bar'
 import { TaskLogsFilterBar } from './task-logs-filter-bar'
-import { UsageLogsMobileList } from './usage-logs-mobile-card'
+import {
+  UsageLogActivityRecord,
+  UsageLogsMobileList,
+} from './usage-logs-mobile-card'
 import { useLogsViewScope, type LogsViewAccess } from './usage-logs-provider'
 
 const route = getRouteApi('/_authenticated/usage-logs/$section')
@@ -95,6 +100,10 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
     isRootView: isRoot,
     viewAccess,
   } = useLogsViewScope()
+  const [viewMode, setViewMode] = useDataTableViewMode({
+    storageKey: `usage-logs:${logCategory}:${viewAccess}:view-mode`,
+    defaultMode: 'card',
+  })
   const isMobile = useMediaQuery('(max-width: 640px)')
   const searchParams = route.useSearch()
   const userId = useAuthStore((state) => state.auth.user?.id)
@@ -226,10 +235,21 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
   })
 
   const isCommon = logCategory === 'common'
+  const viewToggle = (
+    <DataTableViewModeToggle value={viewMode} onChange={setViewMode} />
+  )
 
   return (
     <DataTablePage
+      className='stolas-activity'
       table={table}
+      enableCardView
+      viewMode={viewMode}
+      onViewModeChange={setViewMode}
+      cardGridClassName='stolas-activity-list grid grid-cols-1 gap-0'
+      renderCard={(row) => (
+        <UsageLogActivityRecord row={row} logCategory={logCategory} />
+      )}
       compactPagination={isMobile && isCommon}
       columns={columns as ColumnDef<Record<string, unknown>>[]}
       isLoading={isLoadingData}
@@ -244,17 +264,23 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
         '[&_[data-slot=table]]:text-[13px] [&_[data-slot=table]_td]:text-[13px] [&_[data-slot=table]_td_*]:text-[13px] [&_[data-slot=table]_th]:text-[13px] [&_[data-slot=table]_th_*]:text-[13px]'
       )}
       mobile={
-        <UsageLogsMobileList
-          table={table}
-          isLoading={isLoadingData}
-          logCategory={logCategory}
-        />
+        viewMode === 'card' ? (
+          <UsageLogsMobileList
+            table={table}
+            isLoading={isLoadingData}
+            logCategory={logCategory}
+          />
+        ) : undefined
       }
       toolbar={
         isCommon ? (
-          <CommonLogsFilterBar table={table} />
+          <CommonLogsFilterBar table={table} viewToggle={viewToggle} />
         ) : (
-          <TaskLogsFilterBar table={table} logCategory={logCategory} />
+          <TaskLogsFilterBar
+            table={table}
+            logCategory={logCategory}
+            viewToggle={viewToggle}
+          />
         )
       }
       renderRow={(row) => {

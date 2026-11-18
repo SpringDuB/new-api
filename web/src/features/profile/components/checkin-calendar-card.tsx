@@ -17,14 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useQuery } from '@tanstack/react-query'
-import {
-  CalendarDays,
-  ChevronDown,
-  ChevronLeft,
-  ChevronRight,
-  ChevronUp,
-  Sparkles,
-} from 'lucide-react'
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp } from 'lucide-react'
 import { useEffect, useState, useMemo, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -32,8 +25,6 @@ import { toast } from 'sonner'
 import { Dialog } from '@/components/dialog'
 import { Turnstile } from '@/components/turnstile'
 import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
-import { IconBadge } from '@/components/ui/icon-badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
   Tooltip,
@@ -227,7 +218,11 @@ export function CheckinCalendarCard({
 
   if (isLoading) {
     return (
-      <Card data-card-hover='false' className='gap-0 overflow-hidden py-0'>
+      <section
+        className='stolas-profile-checkin'
+        aria-label={t('Daily Check-in')}
+        aria-busy='true'
+      >
         <div className='p-6'>
           <div className='flex items-start justify-between gap-4'>
             <div className='flex items-center gap-3'>
@@ -240,7 +235,7 @@ export function CheckinCalendarCard({
             <Skeleton className='h-9 w-28 rounded-md' />
           </div>
         </div>
-      </Card>
+      </section>
     )
   }
 
@@ -283,47 +278,33 @@ export function CheckinCalendarCard({
         </div>
       </Dialog>
 
-      <Card data-card-hover='false' className='gap-0 overflow-hidden py-0'>
+      <section
+        className='stolas-profile-checkin'
+        aria-labelledby='profile-checkin-title'
+      >
         {/* Header */}
-        <div className='border-b p-4 sm:p-6'>
+        <div className='border-b pb-5'>
           <div className='flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4'>
-            <button
-              type='button'
-              className='flex min-w-0 flex-1 items-start gap-3 rounded-lg text-left whitespace-normal outline-none'
-              onClick={() => setCollapsed((v) => !v)}
-            >
-              <IconBadge tone='neutral' size='lg' className='sm:size-11'>
-                <CalendarDays
-                  className='h-4 w-4 sm:h-5 sm:w-5'
-                  strokeWidth={2}
-                />
-              </IconBadge>
-              <div className='min-w-0 flex-1'>
-                <div className='flex flex-wrap items-center gap-1.5 sm:gap-2'>
-                  <h3 className='text-base font-semibold tracking-tight sm:text-lg'>
-                    {t('Daily Check-in')}
-                  </h3>
-                  {checkedToday && (
-                    <div className='inline-flex items-center gap-1 rounded-md bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-600 sm:gap-1.5 sm:px-2.5 sm:text-xs dark:text-emerald-400'>
-                      <Sparkles className='h-2.5 w-2.5 sm:h-3 sm:w-3' />
-                      {t('Checked in')}
-                    </div>
-                  )}
-                  <span className='text-muted-foreground inline-flex items-center'>
-                    {collapsed ? (
-                      <ChevronDown className='h-4 w-4' />
-                    ) : (
-                      <ChevronUp className='h-4 w-4' />
-                    )}
+            <div className='min-w-0 flex-1'>
+              <div className='flex flex-wrap items-center gap-1.5 sm:gap-2'>
+                <h2
+                  id='profile-checkin-title'
+                  className='stolas-editorial text-2xl'
+                >
+                  {t('Daily Check-in')}
+                </h2>
+                {checkedToday && (
+                  <span className='text-muted-foreground text-xs'>
+                    {t('Checked in')}
                   </span>
-                </div>
-                <p className='text-muted-foreground mt-1 line-clamp-2 text-xs sm:text-sm'>
-                  {checkedToday && todayAward !== undefined
-                    ? `${t('Today')} +${formatQuotaWithCurrency(todayAward)}`
-                    : t('Check in daily to receive random quota rewards')}
-                </p>
+                )}
               </div>
-            </button>
+              <p className='text-muted-foreground mt-1 line-clamp-2 text-xs sm:text-sm'>
+                {checkedToday && todayAward !== undefined
+                  ? `${t('Today')} +${formatQuotaWithCurrency(todayAward)}`
+                  : t('Check in daily to receive random quota rewards')}
+              </p>
+            </div>
             <Button
               onClick={() => doCheckin()}
               disabled={checkinLoading || checkedToday}
@@ -333,157 +314,164 @@ export function CheckinCalendarCard({
               {checkinButtonLabel}
             </Button>
           </div>
+          <Button
+            variant='ghost'
+            size='sm'
+            className='mt-3'
+            aria-expanded={!collapsed}
+            aria-controls='profile-checkin-calendar'
+            onClick={() => setCollapsed((value) => !value)}
+          >
+            {t('Check-in history')}
+            {collapsed ? (
+              <ChevronDown aria-hidden='true' data-icon='inline-end' />
+            ) : (
+              <ChevronUp aria-hidden='true' data-icon='inline-end' />
+            )}
+          </Button>
         </div>
 
-        {!collapsed ? (
-          <>
-            {/* Stats */}
-            <div className='grid grid-cols-3 gap-px border-b'>
-              <div className='bg-card p-3 text-center sm:p-5'>
-                <div className='text-xl font-semibold tracking-tight tabular-nums sm:text-2xl'>
-                  {checkinData?.stats?.total_checkins || 0}
-                </div>
-                <div className='text-muted-foreground mt-0.5 text-[10px] font-medium sm:mt-1 sm:text-xs'>
-                  {t('Total check-ins')}
-                </div>
+        <div id='profile-checkin-calendar' hidden={collapsed}>
+          {/* Stats */}
+          <div className='grid grid-cols-3 gap-px border-b'>
+            <div className='bg-card p-3 text-center sm:p-5'>
+              <div className='text-xl font-semibold tracking-tight tabular-nums sm:text-2xl'>
+                {checkinData?.stats?.total_checkins || 0}
               </div>
-              <div className='bg-card p-3 text-center sm:p-5'>
-                <div className='text-xl font-semibold tracking-tight tabular-nums sm:text-2xl'>
-                  {formatQuotaWithCurrency(monthlyQuota, { digitsLarge: 0 })}
-                </div>
-                <div className='text-muted-foreground mt-0.5 text-[10px] font-medium sm:mt-1 sm:text-xs'>
-                  {t('This month')}
-                </div>
-              </div>
-              <div className='bg-card p-3 text-center sm:p-5'>
-                <div className='text-xl font-semibold tracking-tight tabular-nums sm:text-2xl'>
-                  {formatQuotaWithCurrency(
-                    checkinData?.stats?.total_quota || 0,
-                    {
-                      digitsLarge: 0,
-                    }
-                  )}
-                </div>
-                <div className='text-muted-foreground mt-0.5 text-[10px] font-medium sm:mt-1 sm:text-xs'>
-                  {t('Total earned')}
-                </div>
+              <div className='text-muted-foreground mt-0.5 text-[10px] font-medium sm:mt-1 sm:text-xs'>
+                {t('Total check-ins')}
               </div>
             </div>
+            <div className='bg-card p-3 text-center sm:p-5'>
+              <div className='text-xl font-semibold tracking-tight tabular-nums sm:text-2xl'>
+                {formatQuotaWithCurrency(monthlyQuota, { digitsLarge: 0 })}
+              </div>
+              <div className='text-muted-foreground mt-0.5 text-[10px] font-medium sm:mt-1 sm:text-xs'>
+                {t('This month')}
+              </div>
+            </div>
+            <div className='bg-card p-3 text-center sm:p-5'>
+              <div className='text-xl font-semibold tracking-tight tabular-nums sm:text-2xl'>
+                {formatQuotaWithCurrency(checkinData?.stats?.total_quota || 0, {
+                  digitsLarge: 0,
+                })}
+              </div>
+              <div className='text-muted-foreground mt-0.5 text-[10px] font-medium sm:mt-1 sm:text-xs'>
+                {t('Total earned')}
+              </div>
+            </div>
+          </div>
 
-            {/* Calendar */}
-            <div className='p-4 sm:p-6'>
-              <div className='space-y-3 sm:space-y-4'>
-                {/* Month navigation */}
-                <div className='flex items-center justify-between'>
-                  <h4 className='text-xs font-semibold sm:text-sm'>
-                    {dayjs(currentMonth).format('YYYY-MM')}
-                  </h4>
-                  <div className='flex items-center gap-0.5 sm:gap-1'>
-                    <Button
-                      variant='ghost'
-                      size='icon'
-                      className='h-7 w-7 sm:h-8 sm:w-8'
-                      onClick={handlePrevMonth}
-                    >
-                      <ChevronLeft className='h-3.5 w-3.5 sm:h-4 sm:w-4' />
-                    </Button>
-                    <Button
-                      variant='ghost'
-                      size='icon'
-                      className='h-7 w-7 sm:h-8 sm:w-8'
-                      onClick={handleNextMonth}
-                    >
-                      <ChevronRight className='h-3.5 w-3.5 sm:h-4 sm:w-4' />
-                    </Button>
+          {/* Calendar */}
+          <div className='pt-5'>
+            <div className='space-y-3 sm:space-y-4'>
+              {/* Month navigation */}
+              <div className='flex items-center justify-between'>
+                <h4 className='text-xs font-semibold sm:text-sm'>
+                  {dayjs(currentMonth).format('YYYY-MM')}
+                </h4>
+                <div className='flex items-center gap-0.5 sm:gap-1'>
+                  <Button
+                    variant='ghost'
+                    size='icon'
+                    aria-label={t('Previous month')}
+                    className='h-7 w-7 sm:h-8 sm:w-8'
+                    onClick={handlePrevMonth}
+                  >
+                    <ChevronLeft className='h-3.5 w-3.5 sm:h-4 sm:w-4' />
+                  </Button>
+                  <Button
+                    variant='ghost'
+                    size='icon'
+                    aria-label={t('Next month')}
+                    className='h-7 w-7 sm:h-8 sm:w-8'
+                    onClick={handleNextMonth}
+                  >
+                    <ChevronRight className='h-3.5 w-3.5 sm:h-4 sm:w-4' />
+                  </Button>
+                </div>
+              </div>
+
+              {/* Calendar grid */}
+              <div className='grid grid-cols-7 gap-0.5 sm:gap-1'>
+                {/* Week day headers */}
+                {weekDays.map((day) => (
+                  <div
+                    key={day}
+                    className='text-muted-foreground flex h-7 items-center justify-center text-[10px] font-medium sm:h-8 sm:text-xs'
+                  >
+                    {day}
                   </div>
-                </div>
+                ))}
 
-                {/* Calendar grid */}
-                <div className='grid grid-cols-7 gap-0.5 sm:gap-1'>
-                  {/* Week day headers */}
-                  {weekDays.map((day) => (
-                    <div
-                      key={day}
-                      className='text-muted-foreground flex h-7 items-center justify-center text-[10px] font-medium sm:h-8 sm:text-xs'
+                {/* Calendar days */}
+                {calendarDays.map((dayObj) => {
+                  const dateStr = `${dayObj.date.getFullYear()}-${String(
+                    dayObj.date.getMonth() + 1
+                  ).padStart(2, '0')}-${String(dayObj.date.getDate()).padStart(
+                    2,
+                    '0'
+                  )}`
+                  const isToday = dateStr === todayString
+                  const quotaAwarded = checkinRecordsMap[dateStr]
+                  const isCheckedIn = quotaAwarded !== undefined
+                  const dayNum = dayObj.date.getDate()
+
+                  const dayButton = (
+                    <Button
+                      key={dateStr}
+                      variant={isToday ? 'default' : 'ghost'}
+                      disabled={!dayObj.isCurrentMonth}
+                      className={cn(
+                        'relative flex h-9 w-full flex-col items-center justify-center rounded-lg px-0 text-xs font-medium sm:h-10 sm:text-sm',
+                        !dayObj.isCurrentMonth &&
+                          'text-muted-foreground/40 cursor-default',
+                        !isToday && isCheckedIn && 'font-semibold'
+                      )}
                     >
-                      {day}
-                    </div>
-                  ))}
+                      <span className='tabular-nums'>{dayNum}</span>
+                      {isCheckedIn && !isToday && (
+                        <span className='bg-success absolute bottom-0.5 size-1 rounded-full sm:bottom-1' />
+                      )}
+                    </Button>
+                  )
 
-                  {/* Calendar days */}
-                  {calendarDays.map((dayObj) => {
-                    const dateStr = `${dayObj.date.getFullYear()}-${String(
-                      dayObj.date.getMonth() + 1
-                    ).padStart(2, '0')}-${String(
-                      dayObj.date.getDate()
-                    ).padStart(2, '0')}`
-                    const isToday = dateStr === todayString
-                    const quotaAwarded = checkinRecordsMap[dateStr]
-                    const isCheckedIn = quotaAwarded !== undefined
-                    const dayNum = dayObj.date.getDate()
-
-                    const dayButton = (
-                      <Button
-                        key={dateStr}
-                        variant={isToday ? 'default' : 'ghost'}
-                        disabled={!dayObj.isCurrentMonth}
-                        className={cn(
-                          'relative flex h-9 w-full flex-col items-center justify-center rounded-lg px-0 text-xs font-medium sm:h-10 sm:text-sm',
-                          !dayObj.isCurrentMonth &&
-                            'text-muted-foreground/40 cursor-default',
-                          !isToday && isCheckedIn && 'font-semibold'
-                        )}
-                      >
-                        <span className='tabular-nums'>{dayNum}</span>
-                        {isCheckedIn && !isToday && (
-                          <span className='bg-success absolute bottom-0.5 size-1 rounded-full sm:bottom-1' />
-                        )}
-                      </Button>
-                    )
-
-                    if (isCheckedIn && dayObj.isCurrentMonth) {
-                      return (
-                        <Tooltip key={dateStr}>
-                          <TooltipTrigger render={dayButton} />
-                          <TooltipContent>
-                            <div className='text-xs'>
-                              <div className='font-medium'>
-                                {t('Checked in')}
-                              </div>
-                              <div className='text-muted-foreground mt-0.5'>
-                                +{formatQuotaWithCurrency(quotaAwarded)}
-                              </div>
+                  if (isCheckedIn && dayObj.isCurrentMonth) {
+                    return (
+                      <Tooltip key={dateStr}>
+                        <TooltipTrigger render={dayButton} />
+                        <TooltipContent>
+                          <div className='text-xs'>
+                            <div className='font-medium'>{t('Checked in')}</div>
+                            <div className='text-muted-foreground mt-0.5'>
+                              +{formatQuotaWithCurrency(quotaAwarded)}
                             </div>
-                          </TooltipContent>
-                        </Tooltip>
-                      )
-                    }
+                          </div>
+                        </TooltipContent>
+                      </Tooltip>
+                    )
+                  }
 
-                    return dayButton
-                  })}
-                </div>
+                  return dayButton
+                })}
+              </div>
 
-                {/* Footer hint */}
-                <div className='text-muted-foreground border-t pt-3 text-center text-[11px] sm:pt-4 sm:text-xs'>
-                  {t('You can only check in once per day')}
-                </div>
+              {/* Footer hint */}
+              <div className='text-muted-foreground border-t pt-3 text-center text-[11px] sm:pt-4 sm:text-xs'>
+                {t('You can only check in once per day')}
+              </div>
 
-                <div className='bg-muted/30 text-muted-foreground rounded-lg border p-3 text-xs'>
-                  <ul className='list-disc space-y-1 pl-5'>
-                    <li>
-                      {t('Check in daily to receive random quota rewards')}
-                    </li>
-                    <li>
-                      {t('Rewards will be added directly to your balance')}
-                    </li>
-                    <li>{t('Do not repeat check-in; only once per day')}</li>
-                  </ul>
-                </div>
+              <div className='bg-muted/30 text-muted-foreground rounded-lg border p-3 text-xs'>
+                <ul className='list-disc space-y-1 pl-5'>
+                  <li>{t('Check in daily to receive random quota rewards')}</li>
+                  <li>{t('Rewards will be added directly to your balance')}</li>
+                  <li>{t('Do not repeat check-in; only once per day')}</li>
+                </ul>
               </div>
             </div>
-          </>
-        ) : null}
-      </Card>
+          </div>
+        </div>
+      </section>
     </TooltipProvider>
   )
 }

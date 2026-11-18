@@ -95,22 +95,24 @@ function sidebarFor(admin?: object, user?: object, canConfigure = true) {
 }
 
 describe('online use sidebar', () => {
-  it('legacy settings show Infinite Canvas alongside Playground and Chat in Online Use', () => {
+  it('legacy settings keep Chat and Infinite Canvas visible after Playground moves to API access', () => {
     const { result } = sidebarFor(
       { chat: { enabled: true, playground: true, chat: true } },
       { chat: { enabled: true, playground: true, chat: true } }
     )
     const group = result.current.find((entry) => entry.id === 'chat')
-    expect(group?.title).toBe('Online Use')
+    expect(group?.title).toBe('Infinite Canvas')
     expect(group?.items.map((item) => item.title)).toEqual([
-      'Playground',
       'Chat',
       'Infinite Canvas',
     ])
     expect(group?.items.at(-1)).toMatchObject({
-      url: 'https://canvas.stolas.cc',
+      url: 'https://canvas.stolas.cc/api/auth/stolas/start',
       external: true,
     })
+    expect(
+      result.current.find((entry) => entry.id === 'general')?.items
+    ).toContainEqual(expect.objectContaining({ title: 'Playground' }))
   })
 
   it.each([
@@ -143,7 +145,10 @@ describe('online use sidebar', () => {
       result.current
         .find((group) => group.id === 'chat')
         ?.items.map((item) => item.title)
-    ).toEqual(['Playground', 'Chat'])
+    ).toEqual(['Chat'])
+    expect(
+      result.current.find((entry) => entry.id === 'general')?.items
+    ).toContainEqual(expect.objectContaining({ title: 'Playground' }))
   })
 })
 

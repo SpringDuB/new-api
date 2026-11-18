@@ -21,8 +21,8 @@ For commercial licensing, please contact support@quantumnous.com
  */
 
 // System Configuration Defaults
-export const DEFAULT_SYSTEM_NAME = 'New API'
-export const DEFAULT_LOGO = '/logo.png'
+export const DEFAULT_SYSTEM_NAME = 'Stolas'
+export const DEFAULT_LOGO = '/stolas/mark-orange.png'
 export const INFINITE_CANVAS_URL = 'https://canvas.stolas.cc'
 
 // LocalStorage Keys

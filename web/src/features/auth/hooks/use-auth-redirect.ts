@@ -107,9 +107,14 @@ export function useAuthRedirect() {
   /**
    * Redirect to login page
    */
-  const redirectToLogin = useCallback(() => {
-    void navigate({ to: '/sign-in', replace: true })
-  }, [navigate])
+  const redirectToLogin = useCallback(
+    (redirectTo?: string) => {
+      const redirect =
+        sanitizeAuthRedirect(redirectTo, window.location.origin) ?? undefined
+      void navigate({ to: '/sign-in', search: { redirect }, replace: true })
+    },
+    [navigate]
+  )
 
   /**
    * Redirect to register page

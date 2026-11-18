@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import { getCanvasStartURL } from '@/features/canvas-connect/connection'
 import { useStatus } from '@/hooks/use-status'
 import { parseHeaderNavModulesFromStatus } from '@/lib/nav-modules'
 import { useAuthStore } from '@/stores/auth-store'
@@ -67,6 +68,14 @@ export function useTopNavLinks(): TopNavLink[] {
     links.push({ title: t('Home'), href: '/' })
   }
 
+  if (status?.canvas_enabled !== false) {
+    links.push({
+      title: t('Infinite Canvas'),
+      href: getCanvasStartURL(status),
+      external: true,
+    })
+  }
+
   // Console -> /dashboard (new console path)
   if (modules?.console !== false) {
     links.push({ title: t('Console'), href: '/dashboard' })
@@ -76,14 +85,7 @@ export function useTopNavLinks(): TopNavLink[] {
   const pricing = modules?.pricing
   if (pricing && typeof pricing === 'object' && pricing.enabled) {
     const requiresAuth = pricing.requireAuth && !isAuthed
-    links.push({ title: t('Model Square'), href: '/pricing', requiresAuth })
-  }
-
-  // Rankings
-  const rankings = modules?.rankings
-  if (rankings && typeof rankings === 'object' && rankings.enabled) {
-    const requiresAuth = rankings.requireAuth && !isAuthed
-    links.push({ title: t('Rankings'), href: '/rankings', requiresAuth })
+    links.push({ title: t('Model library'), href: '/pricing', requiresAuth })
   }
 
   // Docs (supports external links)
@@ -93,11 +95,6 @@ export function useTopNavLinks(): TopNavLink[] {
     } else {
       links.push({ title: t('Docs'), href: '/docs' })
     }
-  }
-
-  // About
-  if (modules?.about !== false) {
-    links.push({ title: t('About'), href: '/about' })
   }
 
   return links

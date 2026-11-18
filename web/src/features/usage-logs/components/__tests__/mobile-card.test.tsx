@@ -359,11 +359,14 @@ it.each([false, true])(
   }
 )
 
-it('retains the user avatar and model badge in the mobile summary', () => {
+it('exposes the user by name and keeps model inspection available in the record summary', () => {
   renderLogs()
-  expect(screen.getByText('P')).toBeVisible()
+  expect(
+    screen.getByRole('button', { name: 'User: production-admin' })
+  ).toBeVisible()
+  expect(screen.getByText('User')).toBeVisible()
   const modelButton = screen.getByRole('button', { name: `Model: ${longName}` })
-  expect(modelButton.querySelector('[data-slot="status-badge"]')).not.toBeNull()
+  expect(modelButton).toBeVisible()
 })
 
 it('omits unused token and throughput placeholders for async jobs', () => {

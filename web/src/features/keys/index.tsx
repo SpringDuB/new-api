@@ -31,6 +31,11 @@ export function ApiKeys() {
     <ApiKeysProvider>
       <SectionPageLayout fixedContent>
         <SectionPageLayout.Title>{t('API Keys')}</SectionPageLayout.Title>
+        <SectionPageLayout.Description>
+          {t(
+            'Connect your tools and applications. Each key uses your shared Stolas balance.'
+          )}
+        </SectionPageLayout.Description>
         <SectionPageLayout.Actions>
           <ApiKeysPrimaryButtons />
         </SectionPageLayout.Actions>

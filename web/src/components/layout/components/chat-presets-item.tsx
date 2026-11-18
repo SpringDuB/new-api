@@ -30,6 +30,7 @@ import {
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
@@ -158,7 +159,13 @@ function DropdownPresetItem({
 /**
  * Dynamic chat presets navigation item
  */
-export function ChatPresetsItem({ item }: { item: NavChatPresets }) {
+export function ChatPresetsItem({
+  item,
+  presentation = 'sidebar',
+}: {
+  item: NavChatPresets
+  presentation?: 'sidebar' | 'menu'
+}) {
   const { t } = useTranslation()
   const { chatPresets, serverAddress } = useChatPresets()
   const { state, isMobile, setOpenMobile } = useSidebar()
@@ -230,26 +237,33 @@ export function ChatPresetsItem({ item }: { item: NavChatPresets }) {
   }
 
   // Collapsed state on non-mobile - render dropdown menu
-  if (state === 'collapsed' && !isMobile) {
+  if (presentation === 'menu' || (state === 'collapsed' && !isMobile)) {
     return (
       <SidebarMenuItem>
         <DropdownMenu>
           <DropdownMenuTrigger
-            render={<SidebarMenuButton tooltip={item.title} />}
+            render={
+              <SidebarMenuButton
+                tooltip={item.title}
+                isActive={normalizedHref.startsWith('/chat/')}
+              />
+            }
           >
             {item.icon && <item.icon className='h-4 w-4 shrink-0' />}
             <span className='min-w-0 flex-1 truncate'>{item.title}</span>
             <ChevronRight className='ms-auto h-4 w-4 shrink-0 opacity-70' />
           </DropdownMenuTrigger>
           <DropdownMenuContent align='start'>
-            {visiblePresets.map((preset) => (
-              <DropdownPresetItem
-                key={preset.id}
-                preset={preset}
-                loading={loadingPresetId === preset.id}
-                onOpen={handleOpenExternal}
-              />
-            ))}
+            <DropdownMenuGroup>
+              {visiblePresets.map((preset) => (
+                <DropdownPresetItem
+                  key={preset.id}
+                  preset={preset}
+                  loading={loadingPresetId === preset.id}
+                  onOpen={handleOpenExternal}
+                />
+              ))}
+            </DropdownMenuGroup>
           </DropdownMenuContent>
         </DropdownMenu>
       </SidebarMenuItem>

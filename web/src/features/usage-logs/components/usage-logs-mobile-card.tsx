@@ -16,7 +16,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { flexRender, type Cell, type Table } from '@tanstack/react-table'
+import {
+  flexRender,
+  type Cell,
+  type Row,
+  type Table,
+} from '@tanstack/react-table'
 import { Database } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
@@ -28,13 +33,15 @@ import {
   EmptyTitle,
 } from '@/components/ui/empty'
 import { Skeleton } from '@/components/ui/skeleton'
+import { formatLogQuota } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
 import { LOG_TYPE_ENUM } from '../constants'
 import type { UsageLog } from '../data/schema'
 import { TASK_MOBILE_SUMMARY_FIELDS } from '../lib/task-mobile-layout'
-import type { LogCategory } from '../types'
+import type { LogCategory, TaskLog } from '../types'
 import { CommonLogMobileCard } from './common-log-mobile-card'
+import { useLogsViewScope, useUsageLogsContext } from './usage-logs-provider'
 
 const logTypeRowTint: Record<number, string> = {
   [LOG_TYPE_ENUM.ERROR]:
@@ -136,13 +143,9 @@ function SummaryField<TData>({
   if (!cell) return null
 
   return (
-    <div
-      className={cn('bg-muted/20 min-w-0 rounded-md px-2 py-1.5', className)}
-    >
+    <div className={cn('stolas-activity-field min-w-0', className)}>
       {label != null && label !== '' && (
-        <div className='text-muted-foreground mb-1 text-[11px] leading-none font-medium select-none'>
-          {label}
-        </div>
+        <div className='stolas-activity-label'>{label}</div>
       )}
       <CompactCell
         cell={cell}
@@ -155,32 +158,61 @@ function SummaryField<TData>({
 
 function TaskLogsCard<TData>({
   cells,
+  log,
 }: {
   cells: Map<string, Cell<TData, unknown>>
+  log: TaskLog
 }) {
   const { t } = useTranslation()
+  const { isAdminView } = useLogsViewScope()
+  const { sensitiveVisible } = useUsageLogsContext()
 
   const taskIdCell = cells.get('task_id')
   const statusCell = cells.get('status')
 
   return (
-    <div className='space-y-2.5'>
-      <div className='flex min-w-0 items-start justify-between gap-3'>
-        <CompactCell cell={taskIdCell} className='flex-1' />
-        <CompactCell cell={statusCell} className='shrink-0 text-right' />
+    <div className='stolas-activity-task'>
+      <div className='stolas-activity-task-time'>
+        <SummaryField
+          label={t('Submit Time')}
+          cell={cells.get('submit_time')}
+        />
       </div>
-
-      <div className='grid grid-cols-2 gap-1.5'>
+      <div className='stolas-activity-identity'>
         {cells.has('model') ? (
           <SummaryField label={t('Model')} cell={cells.get('model')} />
         ) : null}
+        <CompactCell cell={taskIdCell} className='stolas-activity-task-id' />
+      </div>
+      <div className='stolas-activity-outcome'>
+        <CompactCell cell={statusCell} />
+        {isAdminView && (
+          <div className='stolas-activity-cost'>
+            <span className='stolas-activity-label'>{t('Cost')}</span>
+            <span className='font-semibold tabular-nums'>
+              {sensitiveVisible ? formatLogQuota(log.quota) : '••••'}
+            </span>
+          </div>
+        )}
+        <div className='flex flex-wrap items-start gap-x-5 gap-y-2'>
+          <SummaryField
+            label={t('Duration')}
+            cell={cells.get('duration')}
+            primaryOnly
+          />
+          <SummaryField label={t('Progress')} cell={cells.get('progress')} />
+        </div>
+      </div>
+      <div className='stolas-activity-metadata'>
         {cells.has('request_mode') ? (
           <SummaryField
             label={t('Request type')}
             cell={cells.get('request_mode')}
           />
         ) : null}
-        {TASK_MOBILE_SUMMARY_FIELDS.map((field) => (
+        {TASK_MOBILE_SUMMARY_FIELDS.filter((field) =>
+          ['user', 'plugin', 'channel_id'].includes(field.id)
+        ).map((field) => (
           <SummaryField
             key={field.id}
             label={t(field.label)}
@@ -188,13 +220,38 @@ function TaskLogsCard<TData>({
             primaryOnly={field.primaryOnly}
           />
         ))}
-        <SummaryField
-          label={t('Details')}
-          cell={cells.get('fail_reason')}
-          className='col-span-2 bg-transparent px-0 py-0'
-        />
+      </div>
+      <div className='stolas-activity-task-actions'>
+        <CompactCell cell={cells.get('artifacts')} />
+        <CompactCell cell={cells.get('fail_reason')} />
       </div>
     </div>
+  )
+}
+
+export function UsageLogActivityRecord<TData>(props: {
+  row: Row<TData>
+  logCategory: LogCategory
+}) {
+  const { t } = useTranslation()
+  const cells = new Map(
+    props.row.getVisibleCells().map((cell) => [cell.column.id, cell])
+  )
+
+  return (
+    <article
+      aria-label={t('Activity record')}
+      className='stolas-activity-record'
+    >
+      {props.logCategory === 'common' ? (
+        <CommonLogMobileCard
+          log={props.row.original as UsageLog}
+          cells={cells}
+        />
+      ) : (
+        <TaskLogsCard log={props.row.original as TaskLog} cells={cells} />
+      )}
+    </article>
   )
 }
 
@@ -235,18 +292,8 @@ export function UsageLogsMobileList<TData>({
   }
 
   return (
-    <div
-      className={cn(
-        logCategory === 'common'
-          ? 'min-w-0 space-y-3'
-          : 'border-border/50 bg-card overflow-hidden rounded-lg border'
-      )}
-    >
+    <div className='stolas-activity-list min-w-0'>
       {rows.map((row) => {
-        const cells = new Map(
-          row.getVisibleCells().map((cell) => [cell.column.id, cell])
-        )
-
         const logType = (row.original as Record<string, unknown>).type as
           | number
           | undefined
@@ -255,22 +302,9 @@ export function UsageLogsMobileList<TData>({
         return (
           <div
             key={row.id}
-            className={cn(
-              logCategory === 'common'
-                ? 'border-border/60 bg-card min-w-0 rounded-xl border p-3.5'
-                : 'border-border/40 border-b border-l-2 border-l-transparent p-3 transition-colors last:border-b-0',
-              tintClass
-            )}
+            className={cn('stolas-activity-record-wrapper min-w-0', tintClass)}
           >
-            {logCategory === 'common' && (
-              <CommonLogMobileCard
-                log={row.original as UsageLog}
-                cells={cells}
-              />
-            )}
-            {(logCategory === 'task' || logCategory === 'drawing') && (
-              <TaskLogsCard cells={cells} />
-            )}
+            <UsageLogActivityRecord row={row} logCategory={logCategory} />
           </div>
         )
       })}

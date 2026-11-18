@@ -26,12 +26,13 @@ import { Button } from '@/components/ui/button'
 import { ROLE } from '@/lib/roles'
 import { useAuthStore } from '@/stores/auth-store'
 
+import '@/styles/stolas-catalog.css'
+
 import {
   LoadingSkeleton,
   EmptyState,
   SearchBar,
   PricingTable,
-  PricingSidebar,
   PricingToolbar,
   ModelCardGrid,
   ModelDetailsDrawer,
@@ -146,6 +147,7 @@ export function Pricing() {
       return (
         <ModelCardGrid
           key={`${categoryFilter}:${familyFilter}`}
+          presentation='directory'
           models={filteredModels}
           onModelClick={handleModelClick}
           priceRate={priceRate}
@@ -174,7 +176,7 @@ export function Pricing() {
   if (isLoading) {
     return (
       <PublicLayout showMainContainer={false}>
-        <div className='mx-auto w-full max-w-[1800px] px-3 pt-16 pb-8 sm:px-6 sm:pt-20 sm:pb-10 xl:px-8'>
+        <div className='stolas-catalog'>
           <LoadingSkeleton viewMode={viewMode} />
         </div>
       </PublicLayout>
@@ -183,37 +185,19 @@ export function Pricing() {
 
   return (
     <PublicLayout showMainContainer={false}>
-      <div className='relative'>
-        <div
-          aria-hidden
-          className='pointer-events-none absolute inset-x-0 top-0 h-[600px] opacity-20 dark:opacity-[0.10]'
-          style={{
-            background: [
-              'radial-gradient(ellipse 60% 50% at 20% 20%, oklch(0.72 0.18 250 / 80%) 0%, transparent 70%)',
-              'radial-gradient(ellipse 50% 40% at 80% 15%, oklch(0.65 0.15 200 / 60%) 0%, transparent 70%)',
-              'radial-gradient(ellipse 40% 35% at 50% 70%, oklch(0.70 0.12 280 / 40%) 0%, transparent 70%)',
-            ].join(', '),
-            maskImage:
-              'linear-gradient(to bottom, black 40%, transparent 100%)',
-            WebkitMaskImage:
-              'linear-gradient(to bottom, black 40%, transparent 100%)',
-          }}
-        />
-        <PageTransition className='relative mx-auto w-full max-w-[1800px] px-3 pt-16 pb-8 sm:px-6 sm:pt-20 sm:pb-10 xl:px-8'>
-          <header className='mx-auto mb-5 max-w-3xl pt-5 text-center sm:mb-10 sm:pt-10'>
-            <h1 className='text-[clamp(2rem,5.5vw,3.5rem)] leading-[1.15] font-bold tracking-tight'>
-              {t('Model Square')}
+      <PageTransition className='stolas-catalog'>
+        <header className='stolas-catalog-header'>
+          <div className='stolas-catalog-introduction'>
+            <h1 className='stolas-editorial stolas-catalog-title'>
+              {t('Model library')}
             </h1>
-            <p className='text-muted-foreground/80 mt-3 text-sm sm:mt-4 sm:text-base'>
-              {t('This site currently has {{count}} models enabled', {
-                count: models?.length || 0,
-              })}
-            </p>
-            <p className='text-muted-foreground/60 mx-auto mt-2 max-w-2xl text-xs leading-relaxed sm:text-sm'>
+            <p className='text-muted-foreground stolas-catalog-purpose'>
               {t(
-                'Discover curated AI models, compare pricing and capabilities, and choose the right model for every scenario.'
+                'Compare capabilities and pricing, then choose a model for your next project.'
               )}
             </p>
+          </div>
+          <div className='stolas-catalog-search'>
             <SearchBar
               value={searchInput}
               onChange={setSearchInput}
@@ -221,125 +205,98 @@ export function Pricing() {
               placeholder={t(
                 'Search model name, provider, endpoint, or tag...'
               )}
-              className='mx-auto mt-4 max-w-2xl sm:mt-6'
-            />
-            <ModelCategoryFilter
-              value={categoryFilter}
-              counts={categoryCounts}
-              onChange={setCategoryFilter}
             />
             {canManage && (
               <Button
                 variant='outline'
                 size='sm'
-                className='mt-4'
                 onClick={() => setManagerOpen(true)}
               >
                 {t('Manage display')}
               </Button>
             )}
-          </header>
-
-          <div className='grid gap-4 xl:grid-cols-[280px_minmax(0,1fr)]'>
-            <PricingSidebar
-              familyFilter={familyFilter}
-              onFamilyChange={setFamilyFilter}
-              familyModels={familyModels}
-              quotaTypeFilter={quotaTypeFilter}
-              endpointTypeFilter={endpointTypeFilter}
-              vendorFilter={vendorFilter}
-              groupFilter={groupFilter}
-              tagFilter={tagFilter}
-              onQuotaTypeChange={setQuotaTypeFilter}
-              onEndpointTypeChange={setEndpointTypeFilter}
-              onVendorChange={setVendorFilter}
-              onGroupChange={setGroupFilter}
-              onTagChange={setTagFilter}
-              vendors={vendors || []}
-              groups={availableGroups}
-              groupRatios={groupRatio}
-              tags={availableTags}
-              models={sidebarModels}
-              hasActiveFilters={hasActiveFilters}
-              onClearFilters={clearFilters}
-              className='hover-scrollbar sticky top-20 hidden max-h-[calc(100dvh-6rem)] self-start overflow-y-auto xl:block'
-            />
-
-            <main className='min-w-0 space-y-4'>
-              <PricingToolbar
-                familyFilter={familyFilter}
-                onFamilyChange={setFamilyFilter}
-                familyModels={familyModels}
-                filteredCount={filteredModels.length}
-                totalCount={models?.length}
-                sortBy={sortBy}
-                onSortChange={setSortBy}
-                tokenUnit={tokenUnit}
-                onTokenUnitChange={setTokenUnit}
-                showRechargePrice={showRechargePrice}
-                onRechargePriceChange={setShowRechargePrice}
-                viewMode={viewMode}
-                onViewModeChange={setViewMode}
-                quotaTypeFilter={quotaTypeFilter}
-                endpointTypeFilter={endpointTypeFilter}
-                vendorFilter={vendorFilter}
-                groupFilter={groupFilter}
-                tagFilter={tagFilter}
-                onQuotaTypeChange={setQuotaTypeFilter}
-                onEndpointTypeChange={setEndpointTypeFilter}
-                onVendorChange={setVendorFilter}
-                onGroupChange={setGroupFilter}
-                onTagChange={setTagFilter}
-                vendors={vendors || []}
-                groups={availableGroups}
-                groupRatios={groupRatio}
-                tags={availableTags}
-                models={sidebarModels}
-                hasActiveFilters={hasActiveFilters}
-                activeFilterCount={activeFilterCount}
-                onClearFilters={clearFilters}
-              />
-
-              {renderPricingContent()}
-            </main>
           </div>
+        </header>
 
-          {selectedModel && (
-            <ModelDetailsDrawer
-              open={Boolean(selectedModel)}
-              onOpenChange={(open) => {
-                if (!open) setSelectedModelName(null)
-              }}
-              model={selectedModel}
-              groupRatio={groupRatio || {}}
-              usableGroup={usableGroup || {}}
-              endpointMap={
-                (endpointMap as Record<
-                  string,
-                  { path?: string; method?: string }
-                >) || {}
-              }
-              autoGroups={autoGroups || []}
-              priceRate={priceRate ?? 1}
-              usdExchangeRate={usdExchangeRate ?? 1}
-              tokenUnit={tokenUnit}
-              showRechargePrice={showRechargePrice}
+        <ModelCategoryFilter
+          value={categoryFilter}
+          counts={categoryCounts}
+          onChange={setCategoryFilter}
+        />
+
+        <main className='stolas-catalog-results'>
+          <PricingToolbar
+            familyFilter={familyFilter}
+            onFamilyChange={setFamilyFilter}
+            familyModels={familyModels}
+            filteredCount={filteredModels.length}
+            totalCount={models?.length}
+            sortBy={sortBy}
+            onSortChange={setSortBy}
+            tokenUnit={tokenUnit}
+            onTokenUnitChange={setTokenUnit}
+            showRechargePrice={showRechargePrice}
+            onRechargePriceChange={setShowRechargePrice}
+            viewMode={viewMode}
+            onViewModeChange={setViewMode}
+            quotaTypeFilter={quotaTypeFilter}
+            endpointTypeFilter={endpointTypeFilter}
+            vendorFilter={vendorFilter}
+            groupFilter={groupFilter}
+            tagFilter={tagFilter}
+            onQuotaTypeChange={setQuotaTypeFilter}
+            onEndpointTypeChange={setEndpointTypeFilter}
+            onVendorChange={setVendorFilter}
+            onGroupChange={setGroupFilter}
+            onTagChange={setTagFilter}
+            vendors={vendors || []}
+            groups={availableGroups}
+            groupRatios={groupRatio}
+            tags={availableTags}
+            models={sidebarModels}
+            hasActiveFilters={hasActiveFilters}
+            activeFilterCount={activeFilterCount}
+            onClearFilters={clearFilters}
+          />
+
+          {renderPricingContent()}
+        </main>
+
+        {selectedModel && (
+          <ModelDetailsDrawer
+            open={Boolean(selectedModel)}
+            onOpenChange={(open) => {
+              if (!open) setSelectedModelName(null)
+            }}
+            model={selectedModel}
+            groupRatio={groupRatio || {}}
+            usableGroup={usableGroup || {}}
+            endpointMap={
+              (endpointMap as Record<
+                string,
+                { path?: string; method?: string }
+              >) || {}
+            }
+            autoGroups={autoGroups || []}
+            priceRate={priceRate ?? 1}
+            usdExchangeRate={usdExchangeRate ?? 1}
+            tokenUnit={tokenUnit}
+            showRechargePrice={showRechargePrice}
+          />
+        )}
+        {canManage && managerOpen && (
+          <Suspense fallback={<LoadingState />}>
+            <ModelSquareManager
+              models={catalogModels}
+              initialCategory={categoryFilter}
+              initialFamily={familyFilter}
+              priceRate={priceRate}
+              usdExchangeRate={usdExchangeRate}
+              onClose={() => setManagerOpen(false)}
             />
-          )}
-          {canManage && managerOpen && (
-            <Suspense fallback={<LoadingState />}>
-              <ModelSquareManager
-                models={catalogModels}
-                initialCategory={categoryFilter}
-                initialFamily={familyFilter}
-                priceRate={priceRate}
-                usdExchangeRate={usdExchangeRate}
-                onClose={() => setManagerOpen(false)}
-              />
-            </Suspense>
-          )}
-        </PageTransition>
-      </div>
+          </Suspense>
+        )}
+      </PageTransition>
     </PublicLayout>
   )
 }

@@ -16,7 +16,6 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { dataScheme as vchartDefaultDataScheme } from '@visactor/vchart/esm/theme/color-scheme/builtin/default'
 
 import { MAX_CHART_TREND_POINTS } from '@/features/dashboard/constants'
 import type {
@@ -39,15 +38,23 @@ type TooltipLineItem = {
   shapeSize?: number
 }
 
-export function getDashboardChartColors(domainLength: number): string[] {
-  const scheme =
-    vchartDefaultDataScheme.find(
-      (item) => !item.maxDomainLength || domainLength <= item.maxDomainLength
-    ) ?? vchartDefaultDataScheme.at(-1)
+const STOLAS_CHART_COLORS = [
+  '#b56840',
+  '#72866a',
+  '#be9b52',
+  '#768d91',
+  '#a27972',
+  '#8a805c',
+  '#8d809c',
+  '#6a8d82',
+  '#c19178',
+  '#a4a779',
+  '#8a9aaa',
+  '#b1a092',
+]
 
-  return (scheme?.scheme ?? []).filter(
-    (color): color is string => typeof color === 'string'
-  )
+export function getDashboardChartColors(domainLength: number): string[] {
+  return STOLAS_CHART_COLORS.slice(0, Math.max(1, domainLength))
 }
 
 function renderQuotaCompat(rawQuota: number, digits = 4): string {
@@ -693,18 +700,7 @@ export function processChartData(
   }
 }
 
-const USER_COLORS = [
-  '#5B8FF9',
-  '#5AD8A6',
-  '#F6BD16',
-  '#E8684A',
-  '#6DC8EC',
-  '#9270CA',
-  '#FF9D4D',
-  '#269A99',
-  '#FF99C3',
-  '#5D7092',
-]
+const USER_COLORS = STOLAS_CHART_COLORS
 
 export function processUserChartData(
   data: QuotaDataItem[],

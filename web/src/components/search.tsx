@@ -25,15 +25,29 @@ import { cn } from '@/lib/utils'
 import { Button } from './ui/button'
 
 type SearchProps = {
+  compact?: boolean
   className?: string
   type?: React.HTMLInputTypeAttribute
   placeholder?: string
 }
 
-export function Search({ className = '', placeholder }: SearchProps) {
+export function Search({ className = '', placeholder, compact }: SearchProps) {
   const { t } = useTranslation()
   const { setOpen } = useSearch()
   const resolvedPlaceholder = placeholder ?? t('Search')
+  if (compact) {
+    return (
+      <Button
+        variant='ghost'
+        size='icon'
+        onClick={() => setOpen(true)}
+        aria-label={resolvedPlaceholder}
+        className={className}
+      >
+        <SearchIcon aria-hidden='true' />
+      </Button>
+    )
+  }
   return (
     <Button
       variant='outline'

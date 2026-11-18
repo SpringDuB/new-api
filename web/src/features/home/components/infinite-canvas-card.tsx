@@ -28,13 +28,15 @@ import {
   CardTitle,
 } from '@/components/ui/card'
 import { IconBadge } from '@/components/ui/icon-badge'
-import { INFINITE_CANVAS_URL } from '@/lib/constants'
+import { getCanvasStartURL } from '@/features/canvas-connect/connection'
+import { useStatus } from '@/hooks/use-status'
 
 export function InfiniteCanvasCard() {
   const { t } = useTranslation()
+  const { status } = useStatus()
 
   return (
-    <Card className='mt-6 w-full max-w-xl gap-3 bg-blue-500/5 py-4 ring-blue-500/15 dark:bg-blue-400/5 dark:ring-blue-400/20'>
+    <Card className='mt-6 w-full max-w-xl gap-3 py-4'>
       <CardHeader className='flex flex-row items-start gap-3'>
         <IconBadge tone='info'>
           <Video aria-hidden='true' />
@@ -57,7 +59,7 @@ export function InfiniteCanvasCard() {
           className='h-auto min-h-8 max-w-full justify-start py-1.5 text-left whitespace-normal'
           render={
             <a
-              href={INFINITE_CANVAS_URL}
+              href={getCanvasStartURL(status)}
               target='_blank'
               rel='noopener noreferrer'
             />

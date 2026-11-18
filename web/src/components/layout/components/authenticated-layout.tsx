@@ -19,22 +19,18 @@ For commercial licensing, please contact support@quantumnous.com
 import { CommandMenu } from '@/components/command-menu'
 import { AnimatedOutlet } from '@/components/page-transition'
 import { SkipToMain } from '@/components/skip-to-main'
-import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar'
+import { SidebarProvider } from '@/components/ui/sidebar'
 import { LayoutProvider } from '@/context/layout-provider'
 import { SearchProvider } from '@/context/search-provider'
-import { getCookie } from '@/lib/cookies'
-import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/auth-store'
 
-import { AppHeader } from './app-header'
-import { AppSidebar } from './app-sidebar'
+import { WorkspaceNavigation } from './workspace-navigation'
 
 type AuthenticatedLayoutProps = {
   children?: React.ReactNode
 }
 
 export function AuthenticatedLayout(props: AuthenticatedLayoutProps) {
-  const defaultOpen = getCookie('sidebar_state') !== 'false'
   const signedIn = useAuthStore((s) => !!s.auth.user)
   // Unmount pages on sign-out, otherwise their queries refetch and toast "Session expired!" / "invalid access token"
   if (!signedIn) return null
@@ -42,21 +38,15 @@ export function AuthenticatedLayout(props: AuthenticatedLayoutProps) {
   return (
     <LayoutProvider>
       <SearchProvider>
-        <SidebarProvider defaultOpen={defaultOpen} className='flex-col'>
+        <SidebarProvider className='stolas-surface stolas-shell h-dvh min-h-0 flex-col overflow-hidden'>
           <SkipToMain />
-          <AppHeader />
-          <div className='flex min-h-0 w-full flex-1'>
-            <AppSidebar />
-            <SidebarInset
-              className={cn(
-                '@container/content',
-                'h-[calc(100svh-var(--app-header-height,0px))]',
-                'min-h-0 overflow-hidden',
-                'peer-data-[variant=inset]:h-[calc(100svh-var(--app-header-height,0px)-(var(--spacing)*4))]'
-              )}
-            >
-              {props.children ?? <AnimatedOutlet />}
-            </SidebarInset>
+          <WorkspaceNavigation />
+          <div
+            id='content'
+            tabIndex={-1}
+            className='@container/content flex min-h-0 w-full flex-1 flex-col overflow-hidden outline-none'
+          >
+            {props.children ?? <AnimatedOutlet />}
           </div>
         </SidebarProvider>
         <CommandMenu />

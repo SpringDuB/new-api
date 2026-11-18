@@ -30,6 +30,7 @@ import {
 import {
   STATUS_QUERY_KEY,
   ensureStatus,
+  mapStatusDataToConfig,
   statusQueryOptions,
 } from '@/lib/status-query'
 import { useSystemConfigStore } from '@/stores/system-config-store'
@@ -90,6 +91,17 @@ afterEach(() => {
 })
 
 describe('shared status query deduplication', () => {
+  test('uses Stolas presentation defaults while preserving configured site branding', () => {
+    expect(
+      mapStatusDataToConfig({ system_name: 'New API', logo: '/logo.png' })
+    ).toMatchObject({ systemName: 'Stolas', logo: '/stolas/mark-orange.png' })
+    expect(
+      mapStatusDataToConfig({
+        system_name: 'Custom studio',
+        logo: '/custom.png',
+      })
+    ).toMatchObject({ systemName: 'Custom studio', logo: '/custom.png' })
+  })
   test.each(['cold', 'stale'] as const)(
     'deduplicates %s cache requests across guards and hook consumers',
     async (cacheState) => {

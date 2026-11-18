@@ -55,6 +55,7 @@ export interface ModelCardProps {
   showRechargePrice?: boolean
   selectedGroup?: string
   perf?: ModelPerfBadgeData
+  presentation?: 'card' | 'directory'
 }
 
 export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
@@ -74,6 +75,22 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
   const isUnconfiguredTaskUsage = isUnconfiguredTaskUsageModel(props.model)
   const billingTime = useBillingTime(props.model.billing_expr)
   const currency = useSystemConfigStore((state) => state.config.currency)
+  const isDirectory = props.presentation === 'directory'
+  const hasPerfMetrics =
+    props.perf != null &&
+    ([props.perf.avg_latency_ms, props.perf.avg_tps].some(
+      (value) => Number.isFinite(value) && value > 0
+    ) ||
+      (Number.isFinite(props.perf.success_rate) &&
+        props.perf.success_rate >= 0 &&
+        props.perf.success_rate <= 100) ||
+      props.perf.recent_success_series?.some(
+        (point) =>
+          Number.isFinite(point.ts) &&
+          Number.isFinite(point.success_rate) &&
+          point.success_rate >= 0 &&
+          point.success_rate <= 100
+      ))
   const dynamicPriceOptions = useMemo(
     () => ({
       now: billingTime === undefined ? undefined : new Date(billingTime),
@@ -268,20 +285,41 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
     )
   }
 
+  const detailsAction = (
+    <Button
+      variant='ghost'
+      size='sm'
+      onClick={() => props.onClick(props.model.model_name || '')}
+      className={cn(isDirectory && 'stolas-model-details')}
+    >
+      {t('Details')}
+      <ChevronRight aria-hidden data-icon='inline-end' />
+    </Button>
+  )
+
   return (
     <Card
+      role={isDirectory ? 'article' : undefined}
+      aria-label={isDirectory ? props.model.model_name : undefined}
+      data-highlight={props.model.square_display?.highlight || undefined}
       className={cn(
         'hover:ring-foreground/20 h-full min-w-0 gap-3 transition-colors',
+        isDirectory && 'stolas-model-entry',
         props.model.square_display?.highlight &&
           MODEL_SQUARE_COLORS[props.model.square_display.color ?? 'red'].ring
       )}
     >
-      {props.model.square_display?.badge && (
+      {!isDirectory && props.model.square_display?.badge && (
         <div className='px-4 pb-1'>
           <ModelPromotionBadge decoration={props.model.square_display} />
         </div>
       )}
-      <CardHeader className='flex flex-row items-start gap-3'>
+      <CardHeader
+        className={cn(
+          'flex flex-row items-start gap-3',
+          isDirectory && 'stolas-model-identity'
+        )}
+      >
         <div
           aria-hidden
           className='bg-muted/50 flex size-10 shrink-0 items-center justify-center rounded-lg'
@@ -307,6 +345,11 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
               {props.model.vendor_name}
             </p>
           )}
+          {isDirectory && props.model.square_display?.badge && (
+            <div className='mt-2'>
+              <ModelPromotionBadge decoration={props.model.square_display} />
+            </div>
+          )}
         </div>
         <CopyButton
           value={props.model.model_name}
@@ -315,8 +358,18 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
           iconClassName='size-3.5'
         />
       </CardHeader>
-      <CardContent className='flex flex-1 flex-col gap-3'>
-        <div className='flex min-w-0 flex-col gap-1.5'>
+      <CardContent
+        className={cn(
+          'flex flex-1 flex-col gap-3',
+          isDirectory && 'stolas-model-content'
+        )}
+      >
+        <div
+          className={cn(
+            'flex min-w-0 flex-col gap-1.5',
+            isDirectory && 'stolas-model-description'
+          )}
+        >
           <p className='text-muted-foreground line-clamp-2 text-[13px] leading-5 break-words'>
             {props.model.description || t('No description available.')}
           </p>
@@ -341,7 +394,10 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
         <div
           role='group'
           aria-label={t('Pricing')}
-          className='mt-auto flex min-w-0 flex-col gap-1.5'
+          className={cn(
+            'mt-auto flex min-w-0 flex-col gap-1.5',
+            isDirectory && 'stolas-model-pricing'
+          )}
         >
           <ModelBillingModeBadge model={props.model} appearance='caption' />
           {dynamicSummary?.providerCount && (
@@ -372,6 +428,7 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
           <dl
             className={cn(
               'grid min-w-0 grid-cols-2 gap-3 text-xs',
+              isDirectory && 'stolas-model-access',
               (groups.length === 0 || endpoints.length === 0) && 'grid-cols-1'
             )}
           >
@@ -418,20 +475,30 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
           </dl>
         )}
       </CardContent>
-      <CardFooter className='mt-auto border-0 bg-transparent pt-0'>
-        <ModelPerfBadge
-          perf={props.perf}
-          className='border-border/60 border-t pt-2'
-        >
-          <Button
-            variant='ghost'
-            size='sm'
-            onClick={() => props.onClick(props.model.model_name || '')}
+      <CardFooter
+        className={cn(
+          'mt-auto border-0 bg-transparent pt-0',
+          isDirectory && 'stolas-model-footer'
+        )}
+      >
+        {isDirectory ? (
+          <>
+            {hasPerfMetrics && (
+              <ModelPerfBadge
+                perf={props.perf}
+                className='stolas-model-metrics'
+              />
+            )}
+            {detailsAction}
+          </>
+        ) : (
+          <ModelPerfBadge
+            perf={props.perf}
+            className='border-border/60 border-t pt-2'
           >
-            {t('Details')}
-            <ChevronRight aria-hidden className='size-3.5' />
-          </Button>
-        </ModelPerfBadge>
+            {detailsAction}
+          </ModelPerfBadge>
+        )}
       </CardFooter>
     </Card>
   )

@@ -268,10 +268,13 @@ describe('model series', () => {
           .getAllByRole('listitem')
           .map((item) => item.textContent)
       ).toEqual(expected)
+      await userEvent
+        .setup()
+        .click(screen.getByRole('combobox', { name: 'Model series' }))
       expect(
-        screen.getAllByRole('button').flatMap((button) => {
+        screen.getAllByRole('option').flatMap((option) => {
           const family = families.find((name) =>
-            button.textContent?.startsWith(name)
+            option.textContent?.startsWith(name)
           )
           return family ? [family] : []
         })
@@ -352,17 +355,19 @@ describe('model series', () => {
     renderCatalog()
     const user = userEvent.setup()
     await screen.findByRole('button', { name: /^Videos\s*3$/ })
+    await user.click(screen.getByRole('combobox', { name: 'Model series' }))
     expect(
-      screen.queryByRole('button', { name: /^Image 2\s*1$/ })
+      screen.queryByRole('option', { name: /^Image 2 · 1$/ })
     ).not.toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: /^Seedance 2.5\s*2$/ }))
+    await user.click(screen.getByRole('option', { name: /^Seedance 2.5 · 2$/ }))
     expect(
       within(screen.getByRole('list', { name: 'Visible models' }))
         .getAllByRole('listitem')
         .map((el) => el.textContent)
     ).toEqual(['first-seedance-2-5', 'second-seedance2.5'])
+    await user.click(screen.getByRole('combobox', { name: 'Model series' }))
     expect(
-      screen.getByRole('button', { name: /^Seedance 2.0\s*1$/ })
+      screen.getByRole('option', { name: /^Seedance 2.0 · 1$/ })
     ).toBeVisible()
     await user.click(screen.getByRole('button', { name: 'Reset' }))
     expect(
@@ -373,36 +378,33 @@ describe('model series', () => {
         'listitem'
       )
     ).toHaveLength(3)
-    await user.click(screen.getByRole('button', { name: /^Seedance 2.5\s*2$/ }))
+    await user.click(screen.getByRole('combobox', { name: 'Model series' }))
+    await user.click(screen.getByRole('option', { name: /^Seedance 2.5 · 2$/ }))
     await user.click(screen.getByRole('button', { name: /^Images\s*1$/ }))
     expect(
       within(screen.getByRole('list', { name: 'Visible models' })).getAllByRole(
         'listitem'
       )
     ).toHaveLength(1)
+    await user.click(screen.getByRole('combobox', { name: 'Model series' }))
     expect(
-      screen.getByRole('button', { name: /^Image 2\s*1$/ })
-    ).toHaveAttribute('aria-pressed', 'false')
+      screen.getByRole('option', { name: /^Image 2 · 1$/ })
+    ).toHaveAttribute('aria-selected', 'false')
   })
 
   it('loads a series query and updates its sibling counts with search', async () => {
     renderCatalog('/pricing/?category=video&family=series%3ASeedance%202.5')
     const user = userEvent.setup()
-    const family = await screen.findByRole('button', {
-      name: /^Seedance 2.5\s*2$/,
-    })
-    expect(family).toHaveAttribute('aria-pressed', 'true')
+    const family = await screen.findByRole('combobox', { name: 'Model series' })
+    expect(family).toHaveValue('Seedance 2.5 · 2')
     await user.type(
       screen.getByRole('textbox', { name: 'Search models' }),
       'first'
     )
-    await waitFor(() =>
-      expect(
-        screen.getByRole('button', { name: /^Seedance 2.5\s*1$/ })
-      ).toBeVisible()
-    )
+    await waitFor(() => expect(family).toHaveValue('Seedance 2.5 · 1'))
+    await user.click(family)
     expect(
-      screen.queryByRole('button', { name: /^Seedance 2.0/ })
+      screen.queryByRole('option', { name: /^Seedance 2.0/ })
     ).not.toBeInTheDocument()
     expect(
       within(screen.getByRole('list', { name: 'Visible models' })).getByRole(

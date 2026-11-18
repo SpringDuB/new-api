@@ -88,6 +88,8 @@ export interface ApiResponse<T = unknown> {
 // ============================================================================
 
 export interface SystemStatus {
+  canvas_enabled?: boolean
+  canvas_url?: string
   success?: boolean
   message?: string
   data?: {

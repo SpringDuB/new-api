@@ -16,13 +16,15 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
+
 import { Main } from '@/components/layout'
-import {
-  CardStaggerContainer,
-  CardStaggerItem,
-} from '@/components/page-transition'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useStatus } from '@/hooks/use-status'
 import { useAuthStore } from '@/stores/auth-store'
+
+import '@/styles/stolas-profile.css'
 
 import { CheckinCalendarCard } from './components/checkin-calendar-card'
 import { LanguagePreferencesCard } from './components/language-preferences-card'
@@ -32,8 +34,10 @@ import { SidebarModulesCard } from './components/sidebar-modules-card'
 import { useProfile } from './hooks'
 
 export function Profile() {
+  const { t } = useTranslation()
   const { profile, loading, refreshProfile } = useProfile()
   const { status } = useStatus()
+  const [selectedTab, setSelectedTab] = useState('notifications')
   const permissions = useAuthStore((s) => s.auth.user?.permissions)
 
   const checkinEnabled = status?.checkin_enabled === true
@@ -45,18 +49,57 @@ export function Profile() {
   // Older cached status payloads lack these fields; the site default is on.
   const quotaRemindEnabled = status?.quota_remind_enabled !== false
   const quotaRemindThreshold = status?.quota_remind_threshold ?? 0
+  let activeTab = selectedTab
+  if (
+    (selectedTab === 'navigation' && !canConfigureSidebar) ||
+    (selectedTab === 'checkin' && !checkinEnabled)
+  ) {
+    activeTab = 'notifications'
+  }
 
   return (
     <Main>
-      <div className='min-h-0 flex-1 overflow-auto px-3 py-3 sm:px-4 sm:py-6'>
-        <CardStaggerContainer className='mx-auto flex w-full max-w-7xl flex-col gap-4 sm:gap-6'>
-          <CardStaggerItem>
-            <ProfileHeader profile={profile} loading={loading} />
-          </CardStaggerItem>
+      <div className='stolas-profile-scroll'>
+        <div className='stolas-profile'>
+          <header className='stolas-profile-heading'>
+            <p className='stolas-eyebrow'>{t('Your Stolas account')}</p>
+            <h1 className='stolas-editorial'>{t('Personal Settings')}</h1>
+            <p>{t('Manage how Stolas works for you.')}</p>
+          </header>
 
-          <CardStaggerItem>
-            <div className='grid gap-4 sm:gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(360px,0.46fr)] xl:items-start'>
-              <div className='space-y-4 sm:space-y-6'>
+          <div className='stolas-profile-layout'>
+            <ProfileHeader profile={profile} loading={loading} />
+
+            <Tabs
+              value={activeTab}
+              onValueChange={setSelectedTab}
+              className='stolas-profile-preferences'
+            >
+              <TabsList
+                variant='line'
+                activateOnFocus
+                aria-label={t('Settings & Preferences')}
+                className='stolas-profile-tabs'
+              >
+                <TabsTrigger value='notifications'>
+                  {t('Notifications')}
+                </TabsTrigger>
+                <TabsTrigger value='language'>
+                  {t('Language Preferences')}
+                </TabsTrigger>
+                {canConfigureSidebar && (
+                  <TabsTrigger value='navigation'>
+                    {t('Navigation preferences')}
+                  </TabsTrigger>
+                )}
+                {checkinEnabled && (
+                  <TabsTrigger value='checkin'>
+                    {t('Daily Check-in')}
+                  </TabsTrigger>
+                )}
+              </TabsList>
+
+              <TabsContent value='notifications' keepMounted>
                 <ProfileSettingsCard
                   profile={profile}
                   loading={loading}
@@ -64,25 +107,30 @@ export function Profile() {
                   quotaRemindEnabled={quotaRemindEnabled}
                   quotaRemindThreshold={quotaRemindThreshold}
                 />
+              </TabsContent>
+              <TabsContent value='language' keepMounted>
                 <LanguagePreferencesCard
                   profile={profile}
                   onProfileUpdate={refreshProfile}
                 />
-              </div>
-
-              <div className='space-y-4 sm:space-y-6 xl:sticky xl:top-6'>
-                {checkinEnabled && (
+              </TabsContent>
+              {canConfigureSidebar && (
+                <TabsContent value='navigation' keepMounted>
+                  <SidebarModulesCard />
+                </TabsContent>
+              )}
+              {checkinEnabled && (
+                <TabsContent value='checkin' keepMounted>
                   <CheckinCalendarCard
                     checkinEnabled={checkinEnabled}
                     turnstileEnabled={turnstileEnabled}
                     turnstileSiteKey={turnstileSiteKey}
                   />
-                )}
-                {canConfigureSidebar && <SidebarModulesCard />}
-              </div>
-            </div>
-          </CardStaggerItem>
-        </CardStaggerContainer>
+                </TabsContent>
+              )}
+            </Tabs>
+          </div>
+        </div>
       </div>
     </Main>
   )

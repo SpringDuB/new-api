@@ -78,6 +78,7 @@ export function useSidebarView(): ResolvedSidebarView {
       key: view.id,
       view,
       navGroups: view.getNavGroups(t, badges),
+      rootNavGroups,
     }
   }
 
@@ -85,5 +86,6 @@ export function useSidebarView(): ResolvedSidebarView {
     key: ROOT_VIEW_KEY,
     view: null,
     navGroups: rootNavGroups,
+    rootNavGroups,
   }
 }

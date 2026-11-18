@@ -1,0 +1,197 @@
+/*
+Copyright (C) 2023-2026 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
+.stolas-health {
+  margin-block: 1.5rem;
+  border-block: 1px solid var(--border);
+}
+.stolas-health-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 1.25rem;
+  padding-block: 2rem 1.75rem;
+}
+.stolas-health-heading h2 {
+  margin-block: 0.5rem 0.75rem;
+  font-size: clamp(1.9rem, 3vw, 2.8rem);
+  line-height: 1.12;
+}
+.stolas-health-heading p:last-child {
+  color: var(--muted-foreground);
+  font-size: 0.875rem;
+}
+.stolas-health-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border-block: 1px solid var(--border);
+  padding-block: 0.5rem;
+}
+.stolas-health-controls [data-slot='tabs-list'] {
+  height: 2.5rem;
+  gap: 1.5rem;
+}
+.stolas-health-controls [data-slot='tabs-trigger'] {
+  padding-inline: 0.15rem;
+  font-size: 0.8rem;
+}
+.stolas-health-controls [data-slot='tabs-trigger']::after {
+  bottom: -0.5rem;
+  background: var(--primary);
+}
+.stolas-health-model,
+.stolas-health-channel {
+  display: grid;
+  grid-template-columns: minmax(12rem, 1.2fr) minmax(8rem, 1fr) minmax(
+      22rem,
+      1.7fr
+    );
+  align-items: center;
+  gap: 2rem;
+  border-bottom: 1px solid var(--border);
+  padding-block: 1.75rem;
+}
+.stolas-health-model-name {
+  min-width: 0;
+}
+.stolas-health-model-name h3 {
+  overflow-wrap: anywhere;
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+.stolas-health-model-name p {
+  margin-top: 0.5rem;
+  color: var(--muted-foreground);
+  font-size: 0.7rem;
+}
+.stolas-health-history {
+  min-width: 0;
+}
+.stolas-health-slots {
+  display: grid;
+  grid-template-columns: repeat(24, minmax(0, 1fr));
+  gap: 3px;
+  height: 1.8rem;
+}
+.stolas-health-slot {
+  border-radius: 1px;
+}
+.stolas-health-slot[data-observed='false'] {
+  background: color-mix(
+    in srgb,
+    var(--muted-foreground) 14%,
+    var(--background)
+  );
+}
+.stolas-health-history-caption {
+  display: block;
+  margin-top: 0.5rem;
+  color: var(--muted-foreground);
+  font-size: 0.65rem;
+}
+.stolas-health-model-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: start;
+  gap: 1rem;
+}
+.stolas-health-model-metrics dt {
+  margin-bottom: 0.6rem;
+  color: var(--muted-foreground);
+  font-size: 0.65rem;
+  line-height: 1.4;
+}
+.stolas-health-model-metrics dd {
+  overflow-wrap: anywhere;
+  font-family: var(--font-mono);
+  font-size: 0.9rem;
+  font-variant-numeric: tabular-nums;
+}
+.stolas-health-note {
+  max-width: 65rem;
+  padding-block: 1.25rem;
+  color: var(--muted-foreground);
+  font-size: 0.7rem;
+  line-height: 1.7;
+}
+.stolas-health-more {
+  width: 100%;
+  margin-top: 0.5rem;
+}
+.stolas-health-loading {
+  display: grid;
+  gap: 1.5rem;
+  padding-block: 2rem;
+}
+.stolas-health-channel .stolas-health-model-metrics {
+  grid-template-columns: 2fr 1fr;
+}
+.stolas-health-channel-state {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.8rem;
+}
+.stolas-health-channel-state > span {
+  width: 0.45rem;
+  height: 0.45rem;
+  background: var(--muted-foreground);
+  border-radius: 50%;
+}
+.stolas-health-channel-state[data-enabled='true'] > span {
+  background: var(--success);
+}
+.stolas-health-channel-footer {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-block: 1rem;
+  color: var(--muted-foreground);
+  font-size: 0.7rem;
+}
+@media (max-width: 68rem) {
+  .stolas-health-model,
+  .stolas-health-channel {
+    grid-template-columns: minmax(10rem, 1fr) minmax(16rem, 1.4fr);
+    gap: 1.25rem;
+  }
+  .stolas-health-model-name {
+    grid-column: 1 / -1;
+  }
+}
+@media (max-width: 40rem) {
+  .stolas-health-model,
+  .stolas-health-channel {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .stolas-health-model-name {
+    grid-column: auto;
+  }
+  .stolas-health-model-metrics {
+    gap: 0.75rem;
+  }
+  .stolas-health-slots {
+    height: 1.5rem;
+  }
+}

@@ -87,4 +87,21 @@ describe('flow sankey tooltip', () => {
     expect(root.querySelector('b')).toBeNull()
     expect(root.textContent).toContain(markupName)
   })
+
+  test('renders link endpoint names as text without decoding literal entities', () => {
+    const result = buildDashboardFlowData([row], 'quota', { role: 'root' })
+    const spec = buildFlowSankeySpec(result.flow, 'Flow')
+    const title = spec.tooltip.mark.title.value({
+      source: 'token:11',
+      target: 'channel:101',
+      sourceLabel: '<b>token</b> &amp;',
+      targetLabel: '<img src=x onerror=alert(1)>',
+    })
+    const root = new TitleRenderingTooltipHandler().renderTitle(title)
+
+    expect(root.querySelector('b, img')).toBeNull()
+    expect(root.textContent).toContain(
+      '<b>token</b> &amp; -> <img src=x onerror=alert(1)>'
+    )
+  })
 })

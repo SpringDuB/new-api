@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import type { Table } from '@tanstack/react-table'
-import { ChevronDown, Loader2 } from 'lucide-react'
+import { ChevronDown, Loader2, SlidersHorizontal } from 'lucide-react'
 import { useState, type ComponentProps, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -40,6 +40,8 @@ import { Input } from '@/components/ui/input'
 import { useMediaQuery } from '@/hooks'
 import { cn } from '@/lib/utils'
 
+import '@/styles/stolas-activity.css'
+
 interface LogsFilterToolbarProps<TData> {
   table: Table<TData>
   primaryFilters: ReactNode
@@ -51,6 +53,7 @@ interface LogsFilterToolbarProps<TData> {
   stats?: ReactNode
   actionStart?: ReactNode
   actionEnd?: ReactNode
+  viewToggle?: ReactNode
   hasActiveFilters: boolean
   hasAdvancedActiveFilters?: boolean
   advancedFilterCount?: number
@@ -124,7 +127,8 @@ export function LogsFilterToolbar<TData>(props: LogsFilterToolbarProps<TData>) {
           'text-primary hover:text-primary'
       )}
     >
-      {advancedOpen ? t('Collapse') : t('Expand')}
+      <SlidersHorizontal aria-hidden='true' className='size-3.5' />
+      {t('Filter')}
       {activeAdvancedCount > 0 && (
         <Badge className='ml-0.5 size-5 justify-center p-0 text-[10px]'>
           {activeAdvancedCount}
@@ -144,7 +148,7 @@ export function LogsFilterToolbar<TData>(props: LogsFilterToolbarProps<TData>) {
       <Drawer open={mobileFiltersOpen} onOpenChange={setMobileFiltersOpen}>
         <DataTableMobileFilterPanel
           compact={props.compactMobile}
-          className={props.className}
+          className={cn('stolas-activity-filters', props.className)}
           actions={
             <>
               {props.actionStart}
@@ -184,6 +188,7 @@ export function LogsFilterToolbar<TData>(props: LogsFilterToolbarProps<TData>) {
               </Button>
               {props.actionEnd}
               <DataTableViewOptions table={props.table} />
+              {props.viewToggle}
             </>
           }
         >
@@ -243,33 +248,14 @@ export function LogsFilterToolbar<TData>(props: LogsFilterToolbarProps<TData>) {
   }
 
   return (
-    <div
-      className={cn(
-        'bg-card/50 rounded-lg border p-2.5 sm:p-3',
-        props.className
-      )}
-    >
-      <div className='flex flex-wrap items-start gap-2'>
-        <div className='grid min-w-0 flex-1 grid-cols-1 gap-2 sm:grid-cols-[repeat(auto-fit,minmax(10rem,1fr))]'>
+    <div className={cn('stolas-activity-filters', props.className)}>
+      <div className='stolas-activity-quick-row'>
+        <div className='stolas-activity-quick-fields'>
           {props.primaryFilters}
         </div>
-        {advancedToggle && (
-          <div className='flex shrink-0 items-center justify-end'>
-            {advancedToggle}
-          </div>
-        )}
-      </div>
-
-      {advancedOpen && props.advancedFilters && (
-        <div className='mt-2 grid grid-cols-1 gap-2 sm:grid-cols-[repeat(auto-fit,minmax(10rem,1fr))]'>
-          {props.advancedFilters}
-        </div>
-      )}
-
-      <div className='mt-2 flex flex-wrap items-center gap-2'>
-        {props.stats}
-        <div className='ms-auto flex flex-wrap items-center justify-end gap-1.5 sm:gap-2'>
+        <div className='stolas-activity-filter-actions'>
           {props.actionStart}
+          {advancedToggle}
           <Button
             type='button'
             variant='outline'
@@ -282,14 +268,24 @@ export function LogsFilterToolbar<TData>(props: LogsFilterToolbarProps<TData>) {
             type='button'
             onClick={props.onSearch}
             disabled={props.searchLoading}
+            aria-busy={props.searchLoading}
           >
             {props.searchLoading && <Loader2 className='animate-spin' />}
             {t('Search')}
           </Button>
           {props.actionEnd}
           <DataTableViewOptions table={props.table} />
+          {props.viewToggle}
         </div>
       </div>
+      {advancedOpen && props.advancedFilters && (
+        <div className='stolas-activity-expanded-filters'>
+          {props.advancedFilters}
+        </div>
+      )}
+      {props.stats && (
+        <div className='stolas-activity-stats-row'>{props.stats}</div>
+      )}
     </div>
   )
 }

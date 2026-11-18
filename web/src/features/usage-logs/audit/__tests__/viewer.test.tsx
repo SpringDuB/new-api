@@ -546,7 +546,7 @@ it('administrator scope uses the admin endpoint and exposes the username filter'
     data: { success: true, data: { items: [], total: 0 } },
   })
   renderViewer('all')
-  await userEvent.click(screen.getByRole('button', { name: 'Expand' }))
+  await userEvent.click(screen.getByRole('button', { name: /^Filter/ }))
   fireEvent.change(screen.getByLabelText('Username'), {
     target: { value: 'alice' },
   })

@@ -16,17 +16,19 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Bell, Loader2, Mail, Server, Webhook } from 'lucide-react'
+import { Loader2 } from 'lucide-react'
 import { useState, useEffect, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
 import { PasswordInput } from '@/components/password-input'
 import { Button } from '@/components/ui/button'
+import { FieldLegend, FieldSet } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
+import { Separator } from '@/components/ui/separator'
 import { Switch } from '@/components/ui/switch'
-import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import {
   SettingsControlChildren,
   SettingsControlGroup,
@@ -45,13 +47,6 @@ import { updateUserSettings } from '../../api'
 import { NOTIFICATION_METHODS } from '../../constants'
 import { normalizeUserSettings } from '../../lib/user-settings'
 import type { UserProfile, NotifyType } from '../../types'
-
-const NOTIFICATION_ICONS: Record<NotifyType, typeof Mail> = {
-  email: Mail,
-  webhook: Webhook,
-  bark: Bell,
-  gotify: Server,
-}
 
 // ============================================================================
 // Settings Tab Component
@@ -131,7 +126,7 @@ export function NotificationTab({
   const tokensOnly = getCurrencyDisplay().meta.kind === 'tokens'
 
   return (
-    <div className='space-y-4 sm:space-y-6'>
+    <div className='stolas-profile-notification-form'>
       {!quotaRemindEnabled && !isAdmin && (
         <p className='text-muted-foreground text-sm'>
           {t('No notifications are available to you right now')}
@@ -141,39 +136,33 @@ export function NotificationTab({
       {(quotaRemindEnabled || isAdmin) && (
         <>
           {/* Notification Type */}
-          <div className='space-y-2.5'>
-            <Label>{t('Notification Method')}</Label>
-            <ToggleGroup
-              value={[notifyType]}
+          <FieldSet>
+            <FieldLegend variant='label'>
+              {t('Notification Method')}
+            </FieldLegend>
+            <RadioGroup
+              value={notifyType}
               onValueChange={(value) => {
-                const nextValue = value.find((item) => item !== notifyType)
-                if (nextValue) {
-                  updateField('notify_type', nextValue as NotifyType)
-                }
+                updateField('notify_type', value as NotifyType)
               }}
               aria-label={t('Notification Method')}
-              variant='outline'
-              size='lg'
-              spacing={2}
-              className='grid w-full grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3'
+              className='stolas-profile-methods'
             >
-              {NOTIFICATION_METHODS.map((method) => {
-                const Icon = NOTIFICATION_ICONS[method.value]
-                return (
-                  <ToggleGroupItem
-                    key={method.value}
+              {NOTIFICATION_METHODS.map((method) => (
+                <Label
+                  key={method.value}
+                  htmlFor={`profile-notify-${method.value}`}
+                  className='stolas-profile-method'
+                >
+                  <RadioGroupItem
+                    id={`profile-notify-${method.value}`}
                     value={method.value}
-                    className='h-auto min-h-14 w-full flex-col gap-1.5 px-3 py-3 sm:min-h-16'
-                  >
-                    <Icon className='h-4 w-4 sm:h-5 sm:w-5' />
-                    <span className='max-w-full truncate text-xs font-medium sm:text-sm'>
-                      {t(method.label)}
-                    </span>
-                  </ToggleGroupItem>
-                )
-              })}
-            </ToggleGroup>
-          </div>
+                  />
+                  {t(method.label)}
+                </Label>
+              ))}
+            </RadioGroup>
+          </FieldSet>
 
           {/* Email Settings */}
           {notifyType === 'email' && (
@@ -291,7 +280,7 @@ export function NotificationTab({
                   )}
                 </p>
               </div>
-              <div className='bg-muted/50 rounded-lg border p-3 sm:p-4'>
+              <div className='stolas-profile-instructions'>
                 <h5 className='mb-1.5 text-sm font-medium sm:mb-2'>
                   {t('Setup Instructions')}
                 </h5>
@@ -322,7 +311,7 @@ export function NotificationTab({
             <h4 className='text-sm font-medium'>
               {t('Notifications to receive')}
             </h4>
-            <SettingsControlGroup>
+            <SettingsControlGroup className='stolas-profile-control-group'>
               {quotaRemindEnabled && (
                 <>
                   <SettingsSwitchField
@@ -406,7 +395,7 @@ export function NotificationTab({
       )}
 
       {/* Divider */}
-      <div className='border-t' />
+      <Separator />
 
       {/* Preferences Section */}
       <div className='space-y-3'>
@@ -418,7 +407,7 @@ export function NotificationTab({
         </div>
 
         {/* Accept Unset Model Price */}
-        <div className='flex items-start justify-between gap-3 rounded-lg border p-3 sm:items-center sm:p-4'>
+        <div className='stolas-profile-preference-row'>
           <div className='space-y-0.5'>
             <Label htmlFor='acceptUnsetPrice'>
               {t('Accept Unpriced Models')}
@@ -439,9 +428,11 @@ export function NotificationTab({
       </div>
 
       {/* Save Button */}
-      <div className='flex justify-end'>
+      <div className='stolas-profile-actions'>
         <Button onClick={handleSave} disabled={loading}>
-          {loading && <Loader2 className='mr-2 h-4 w-4 animate-spin' />}
+          {loading && (
+            <Loader2 data-icon='inline-start' className='animate-spin' />
+          )}
           {loading ? t('Saving...') : t('Save Settings')}
         </Button>
       </div>

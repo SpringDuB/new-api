@@ -1,0 +1,310 @@
+/*
+Copyright (C) 2023-2026 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
+.stolas-profile-scroll {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+}
+
+.stolas-profile {
+  width: 100%;
+  max-width: 88rem;
+  margin-inline: auto;
+  padding: 2.5rem var(--stolas-page-gutter, 1.5rem) 4rem;
+}
+
+.stolas-profile-heading {
+  padding-bottom: 2rem;
+}
+
+.stolas-profile-heading h1 {
+  margin-block: 0.5rem 0.65rem;
+  font-size: clamp(2rem, 3.4vw, 3rem);
+  line-height: 1.12;
+}
+
+.stolas-profile-heading > p:last-child,
+.stolas-profile-section-heading p {
+  max-width: 42rem;
+  color: var(--muted-foreground);
+  font-size: 0.875rem;
+  line-height: 1.7;
+}
+
+.stolas-profile-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: 2rem;
+  border-top: 1px solid var(--border);
+}
+
+.stolas-profile-identity {
+  min-width: 0;
+  padding-block: 1.75rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.stolas-profile-account-mark {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  color: var(--muted-foreground);
+  font-size: 0.7rem;
+}
+
+.stolas-profile-account-mark img {
+  width: 1.65rem;
+  height: 1.65rem;
+  object-fit: contain;
+}
+
+.stolas-profile-person {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  margin-block: 1.5rem 1.75rem;
+}
+
+.stolas-profile-person h2 {
+  overflow-wrap: anywhere;
+  font-size: 1.55rem;
+  line-height: 1.3;
+}
+
+.stolas-profile-person p {
+  margin-top: 0.25rem;
+  overflow-wrap: anywhere;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+}
+
+.stolas-profile-initials {
+  border-radius: 0.3rem;
+  background: var(--secondary);
+  color: var(--secondary-foreground);
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+.stolas-profile-facts {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  font-size: 0.75rem;
+}
+
+.stolas-profile-facts > div {
+  display: grid;
+  grid-template-columns: minmax(5.5rem, 0.8fr) minmax(0, 1.2fr);
+  align-items: baseline;
+  gap: 1rem;
+}
+
+.stolas-profile-facts dt {
+  color: var(--muted-foreground);
+}
+
+.stolas-profile-facts dd {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+
+.stolas-profile-usage {
+  margin-top: 1.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--border);
+}
+
+.stolas-profile-wallet {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 1.35rem;
+  padding-block: 0.35rem;
+  color: var(--primary);
+  font-size: 0.75rem;
+  font-weight: 500;
+  text-underline-offset: 0.25rem;
+}
+
+.stolas-profile-wallet svg {
+  width: 0.9rem;
+  height: 0.9rem;
+}
+
+.stolas-profile-wallet:hover {
+  text-decoration: underline;
+}
+
+.stolas-profile-wallet:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 0.3rem;
+}
+
+.stolas-profile-preferences {
+  min-width: 0;
+  gap: 0;
+}
+
+.stolas-profile-tabs {
+  width: 100%;
+  max-width: 100%;
+  min-height: 3.75rem;
+  justify-content: flex-start;
+  gap: 1.4rem;
+  overflow-x: auto;
+  padding: 0;
+  border-bottom: 1px solid var(--border);
+  scrollbar-width: thin;
+}
+
+.stolas-profile-tabs [data-slot='tabs-trigger'] {
+  flex: 0 0 auto;
+  height: calc(3.75rem - 1px);
+  padding-inline: 0;
+  border-radius: 0;
+  font-size: 0.75rem;
+}
+
+.stolas-profile-tabs [data-slot='tabs-trigger']::after {
+  bottom: 0;
+  background: var(--primary);
+}
+
+.stolas-profile-tabs [data-slot='tabs-trigger'][data-active] {
+  color: var(--primary);
+}
+
+.stolas-profile-section {
+  min-width: 0;
+  padding-block: 1.9rem 1rem;
+}
+
+.stolas-profile-section-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-bottom: 1.75rem;
+}
+
+.stolas-profile-section-heading h2 {
+  font-size: 1.6rem;
+  line-height: 1.25;
+}
+
+.stolas-profile-notification-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.stolas-profile-methods {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.5rem;
+}
+
+.stolas-profile-method {
+  min-height: 2.25rem;
+  gap: 0.55rem;
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 400;
+}
+
+.stolas-profile-control-group {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.stolas-profile-instructions {
+  padding-left: 1rem;
+  border-left: 2px solid var(--border);
+}
+
+.stolas-profile-preference-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.5rem;
+  padding-block: 0.5rem;
+}
+
+.stolas-profile-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--border);
+}
+
+.stolas-profile-module-group + .stolas-profile-module-group {
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--border);
+}
+
+.stolas-profile-modules {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  column-gap: 2rem;
+  margin-top: 0.75rem;
+}
+
+.stolas-profile-module {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-block: 0.8rem;
+}
+
+.stolas-profile-module[data-disabled] {
+  opacity: 0.5;
+}
+
+.stolas-profile-checkin {
+  max-width: 42rem;
+  padding-top: 1.9rem;
+}
+
+@media (min-width: 40rem) {
+  .stolas-profile-modules {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 58rem) {
+  .stolas-profile-layout {
+    grid-template-columns: minmax(15rem, 0.75fr) minmax(0, 2fr);
+    gap: clamp(2rem, 4vw, 4.5rem);
+  }
+
+  .stolas-profile-identity {
+    padding-right: 2rem;
+    border-right: 1px solid var(--border);
+    border-bottom: 0;
+  }
+}

@@ -80,6 +80,7 @@ async function renderFilter() {
       <RouterProvider router={router} />
     </QueryClientProvider>
   )
+  await userEvent.click(await screen.findByRole('button', { name: /^Filter/ }))
   await screen.findByRole('combobox', { name: 'Type' })
   return router
 }
