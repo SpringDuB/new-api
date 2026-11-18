@@ -906,4 +906,14 @@ export const STATIC_I18N_KEYS = [
   'Channel priorities changed. Refresh and try again.',
   'Invalid channel priority move',
   'Channel priority is outside the sortable range',
+  // Model documentation parameter labels.
+  'Video duration',
+  'Output resolution',
+  'Aspect ratio',
+  'Reference images',
+  'Reference videos',
+  'Reference audio',
+  'First frame',
+  'Last frame',
+  'Image size',
 ] as const

@@ -6,6 +6,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -291,4 +292,44 @@ func TestCacheUpdateChannelSyncsAdvancedCustomConfig(t *testing.T) {
 	CacheUpdateChannel(channel)
 
 	assert.Nil(t, channel2advancedCustomConfig[401])
+}
+
+func TestPricingTaskProtocolEndpointsRespectModelScope(t *testing.T) {
+	const source = `
+export const meta = {
+ apiVersion:1,key:"catalog-protocols",name:"Catalog protocols",version:"1.0.0",author:{name:"Test"},
+ models:["catalog-video","catalog-image","catalog-native"],fetchMode:"per_task",
+ protocols:[{name:"openai_video",models:["catalog-video"]},{name:"openai_image",models:["catalog-image"]}]
+};
+export function buildSubmitRequest(){return {};}
+export function parseSubmitResponse(){return {};}
+export function buildQueryRequest(){return {};}
+export function parseTaskResult(){return {};}
+export function listArtifacts(){return [];}
+export function buildContentRequest(){return {};}
+export const protocols = {
+ openai_video:{decodeRequest(){return {};},render(){return {};}},
+ openai_image:{decodeRequest(){return {};},render(){return {data:[]};}}
+};`
+	_, err := jsplugin.DefaultRegistry.Register(source, jsplugin.Options{})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, jsplugin.DefaultRegistry.Unregister("catalog-protocols")) })
+	for _, tc := range []struct {
+		name      string
+		endpoints []constant.EndpointType
+	}{
+		{"catalog-video", []constant.EndpointType{constant.EndpointTypeOpenAIVideo}},
+		{"catalog-image", []constant.EndpointType{constant.EndpointTypeImageGeneration}},
+		{"catalog-native", []constant.EndpointType{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := getPricingEndpointTypesForAbility(AbilityWithChannel{Ability: Ability{Model: tc.name}, ChannelType: constant.ChannelTypeTaskPlugin}, nil)
+			assert.Equal(t, tc.endpoints, got)
+			for _, endpoint := range got {
+				info, ok := common.GetDefaultEndpointInfo(endpoint)
+				require.True(t, ok)
+				assert.NotEqual(t, "/v1/chat/completions", info.Path)
+			}
+		})
+	}
 }

@@ -23,7 +23,7 @@ import {
   createRouter,
   RouterProvider,
 } from '@tanstack/react-router'
-import { act, cleanup, render, screen, within } from '@testing-library/react'
+import { act, cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -112,75 +112,87 @@ async function renderWorkspace(
 }
 
 describe('Stolas workspace navigation', () => {
-  it('marks the developer area and current API key page without showing other areas in the context navigation', async () => {
+  it('keeps destinations in one top navigation and marks the current API page in its menu', async () => {
     await renderWorkspace('/keys')
-    const areas = screen.getByRole('navigation', { name: 'Workspace areas' })
-    expect(
-      within(areas).getByRole('link', { name: 'API access' })
-    ).toHaveAttribute('aria-current', 'location')
-    const pages = screen.getByRole('navigation', { name: 'Workspace pages' })
-    expect(
-      within(pages).getByRole('link', { name: 'API Keys' })
-    ).toHaveAttribute('aria-current', 'page')
-    expect(
-      within(pages).queryByRole('link', { name: 'Wallet' })
-    ).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Model library' })).toHaveAttribute(
+      'href',
+      '/pricing'
+    )
     expect(
       screen.queryByRole('button', { name: 'Toggle Sidebar' })
     ).not.toBeInTheDocument()
-  })
-
-  it('keeps administrator destinations out of a regular user workspace', async () => {
-    await renderWorkspace('/wallet')
-    expect(
-      screen.queryByRole('link', { name: 'Administration' })
-    ).not.toBeInTheDocument()
-    expect(
-      screen.queryByRole('link', { name: 'Channels' })
-    ).not.toBeInTheDocument()
-    expect(
-      screen.getByRole('link', { name: 'Account & billing' })
-    ).toHaveAttribute('aria-current', 'page')
-  })
-
-  it('honors administrator and user module visibility in the reorganized developer navigation', async () => {
-    await renderWorkspace('/keys', {
-      userModules: { console: { log: false, audit: false } },
-    })
-    const pages = screen.getByRole('navigation', { name: 'Workspace pages' })
-    expect(within(pages).getByRole('link', { name: 'API Keys' })).toBeVisible()
-    expect(
-      within(pages).queryByRole('link', { name: 'Usage Logs' })
-    ).not.toBeInTheDocument()
-  })
-
-  it('keeps system settings reachable through contextual menus while retaining the admin area', async () => {
-    await renderWorkspace('/system-settings/billing/model-pricing', {
-      role: ROLE.SUPER_ADMIN,
-    })
-    expect(
-      screen.getByRole('link', { name: 'Administration' })
-    ).toHaveAttribute('aria-current', 'location')
-    const trigger = screen.getByRole('button', { name: /Billing & Payment/ })
-    trigger.focus()
+    const menu = screen.getByRole('button', { name: /API Keys/ })
+    menu.focus()
     await userEvent.setup().keyboard('{Enter}')
     expect(
-      await screen.findByRole('menuitem', { name: /Model Pricing/ })
-    ).toHaveAttribute('href', '/system-settings/billing/model-pricing')
-  })
-
-  it('preserves the drawing log alias as the active task page on a narrow viewport', async () => {
-    vi.stubGlobal('innerWidth', 390)
-    await renderWorkspace('/usage-logs/drawing')
-    expect(screen.getByRole('link', { name: 'Task Logs' })).toHaveAttribute(
+      await screen.findByRole('menuitem', { name: 'API Keys' })
+    ).toHaveAttribute('href', '/keys')
+    expect(screen.getByRole('menuitem', { name: 'API Keys' })).toHaveAttribute(
       'aria-current',
       'page'
     )
+  })
+  it('keeps administrator destinations out of a regular user workspace', async () => {
+    await renderWorkspace('/wallet')
     expect(
-      screen.getByRole('navigation', { name: 'Workspace areas' })
-    ).toHaveClass('overflow-x-auto')
+      screen.queryByRole('button', { name: /Admin/ })
+    ).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Wallet/ })).toBeVisible()
+  })
+  it('honors module visibility within the API menu', async () => {
+    await renderWorkspace('/keys', {
+      userModules: { console: { log: false, audit: false } },
+    })
+    await userEvent
+      .setup()
+      .click(screen.getByRole('button', { name: /API Keys/ }))
+    expect(
+      await screen.findByRole('menuitem', { name: 'API Keys' })
+    ).toBeVisible()
+    expect(
+      screen.queryByRole('menuitem', { name: 'Usage Logs' })
+    ).not.toBeInTheDocument()
+  })
+  it('keeps system settings reachable from the top navigation', async () => {
+    await renderWorkspace('/system-settings/billing/model-pricing', {
+      role: ROLE.SUPER_ADMIN,
+    })
+    await userEvent
+      .setup()
+      .click(screen.getByRole('button', { name: /System Settings/ }))
+    expect(
+      await screen.findByRole('menuitem', { name: 'Model Pricing' })
+    ).toHaveAttribute('href', '/system-settings/billing/model-pricing')
+  })
+  it('preserves the drawing alias as the current task page and the canvas entry', async () => {
+    await renderWorkspace('/usage-logs/drawing')
+    expect(screen.getByRole('button', { name: /Task Logs/ })).toBeVisible()
+    expect(
+      screen.getByRole('link', { name: /Infinite Canvas/ })
+    ).toHaveAttribute('target', '_blank')
     expect(
       screen.getByRole('navigation', { name: 'Workspace pages' })
     ).toHaveClass('overflow-x-auto')
+  })
+  it('uses a compact current-page menu on mobile and retains every destination', async () => {
+    vi.stubGlobal('innerWidth', 390)
+    await renderWorkspace('/keys')
+    const menu = screen.getByRole('button', { name: 'API Keys' })
+    expect(menu).toHaveAttribute('aria-expanded', 'false')
+    await userEvent.setup().click(menu)
+    expect(
+      await screen.findByRole('menuitem', { name: 'API Keys' })
+    ).toHaveAttribute('aria-current', 'page')
+    expect(screen.getByRole('menuitem', { name: 'Wallet' })).toBeVisible()
+    expect(
+      screen.getByRole('menuitem', { name: 'Infinite Canvas' })
+    ).toHaveAttribute('target', '_blank')
+  })
+
+  it('hides the canvas entry when integration is disabled', async () => {
+    await renderWorkspace('/keys', { canvasEnabled: false })
+    expect(
+      screen.queryByRole('link', { name: /Infinite Canvas/ })
+    ).not.toBeInTheDocument()
   })
 })

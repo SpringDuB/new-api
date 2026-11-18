@@ -34,6 +34,8 @@ import { useAuthStore } from '@/stores/auth-store'
 
 import { Pricing } from '..'
 
+const refreshCatalog = vi.hoisted(() => vi.fn().mockResolvedValue({}))
+
 vi.mock('@visactor/react-vchart', () => ({ VChart: () => null }))
 
 vi.mock('@/components/layout', () => ({
@@ -85,6 +87,7 @@ vi.mock('../hooks/use-pricing-data', () => {
       endpointMap: {},
       autoGroups: [],
       isLoading: false,
+      refetch: refreshCatalog,
       priceRate: 1,
       usdExchangeRate: 1,
     }),
@@ -159,38 +162,38 @@ describe('model library layout', () => {
     ).not.toBeInTheDocument()
   })
 
-  it('keeps the selected category and filter state when closing and reopening the right panel, and resets within that category', async () => {
+  it('reveals all additional choices inline and keeps the group active after collapsing', async () => {
     renderCatalog('/pricing/?category=video')
     const user = userEvent.setup()
-    const trigger = await screen.findByRole('button', {
-      name: 'Filters and display',
-    })
-    await user.click(trigger)
-    const panel = await screen.findByRole('dialog', {
-      name: 'Filters and display',
-    })
-    await user.click(within(panel).getByRole('combobox', { name: 'Groups' }))
-    await user.click(screen.getByRole('option', { name: /premium/ }))
-    await user.keyboard('{Escape}')
-    const directory = await screen.findByRole('list', { name: 'Models' })
-    expect(within(directory).getAllByRole('article')).toHaveLength(1)
+    const more = await screen.findByRole('button', { name: 'More filters' })
     expect(
-      within(directory).getByRole('article', { name: 'seedance-2-5-studio' })
-    ).toBeVisible()
-    const activeTrigger = screen.getByRole('button', {
-      name: /Filters and display\s*\(1\)/,
-    })
-    expect(activeTrigger).toHaveFocus()
-    await user.click(activeTrigger)
-    const reopened = await screen.findByRole('dialog', {
-      name: 'Filters and display',
-    })
-    expect(reopened).toHaveAttribute('data-side', 'right')
+      screen.queryByRole('group', { name: 'Groups' })
+    ).not.toBeInTheDocument()
+    await user.click(more)
+    await user.click(
+      within(screen.getByRole('group', { name: 'Groups' })).getByRole(
+        'button',
+        { name: 'premium' }
+      )
+    )
     expect(
-      within(reopened).getByRole('combobox', { name: 'Groups' })
-    ).toHaveValue('premium · x2')
-    await user.click(within(reopened).getByRole('button', { name: 'Reset' }))
-    await user.keyboard('{Escape}')
+      within(screen.getByRole('list', { name: 'Models' })).getAllByRole(
+        'article'
+      )
+    ).toHaveLength(1)
+    await user.click(screen.getByRole('button', { name: /Fewer filters/ }))
+    expect(
+      screen.queryByRole('group', { name: 'Groups' })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: /More filters/ })
+    ).toHaveTextContent('premium')
+    expect(
+      within(screen.getByRole('list', { name: 'Models' })).getAllByRole(
+        'article'
+      )
+    ).toHaveLength(1)
+    await user.click(screen.getByRole('button', { name: 'Reset' }))
     expect(
       screen.getByRole('button', { name: /^Videos\s*2$/ })
     ).toHaveAttribute('aria-pressed', 'true')
@@ -227,39 +230,43 @@ describe('model library layout', () => {
     expect(images).toHaveAttribute('aria-pressed', 'true')
   })
 
-  it('loads display choices from the URL and preserves the active group when changing layout across tabs', async () => {
+  it('preserves group and URL display choices when switching layouts', async () => {
     renderCatalog(
       '/pricing/?category=video&group=premium&tokenUnit=K&rechargePrice=true'
     )
     const user = userEvent.setup()
-    await user.click(
-      await screen.findByRole('button', { name: /Filters and display/ })
-    )
-    expect(screen.getByRole('combobox', { name: 'Groups' })).toHaveValue(
-      'premium · x2'
-    )
-    await user.click(screen.getByRole('tab', { name: 'Display' }))
+    expect(
+      await screen.findByRole('button', { name: 'premium' })
+    ).toHaveAttribute('aria-pressed', 'true')
+    await user.click(screen.getByRole('button', { name: 'Display' }))
     expect(screen.getByRole('radio', { name: 'Recharge' })).toBeChecked()
     expect(screen.getByRole('radio', { name: '/1K' })).toBeChecked()
-    expect(screen.getByRole('radio', { name: 'List view' })).toBeChecked()
-    await user.click(screen.getByRole('tab', { name: 'Filter' }))
-    expect(screen.getByRole('combobox', { name: 'Groups' })).toHaveValue(
-      'premium · x2'
-    )
-    await user.click(screen.getByRole('tab', { name: 'Display' }))
     await user.click(screen.getByRole('radio', { name: 'Table view' }))
     await user.keyboard('{Escape}')
     expect(await screen.findByRole('table')).toBeVisible()
-    await user.click(
-      screen.getByRole('button', { name: /Filters and display/ })
+    expect(screen.getByRole('button', { name: 'premium' })).toHaveAttribute(
+      'aria-pressed',
+      'true'
     )
-    await user.click(screen.getByRole('tab', { name: 'Display' }))
+    await user.click(screen.getByRole('button', { name: 'Display' }))
     expect(screen.getByRole('radio', { name: 'Table view' })).toBeChecked()
     expect(screen.getByRole('radio', { name: '/1K' })).toBeChecked()
-    expect(screen.getByRole('radio', { name: 'Recharge' })).toBeChecked()
-    await user.click(screen.getByRole('tab', { name: 'Filter' }))
-    expect(screen.getByRole('combobox', { name: 'Groups' })).toHaveValue(
-      'premium · x2'
+  })
+
+  it('refreshes endpoint and price metadata when opening a model detail', async () => {
+    renderCatalog()
+    const user = userEvent.setup()
+    const model = await screen.findByRole('article', {
+      name: 'seedance-2-5-studio',
+    })
+    await user.click(within(model).getByRole('button', { name: 'Details' }))
+    expect(refreshCatalog).toHaveBeenCalledOnce()
+    expect(
+      screen.getByRole('dialog', { name: 'seedance-2-5-studio' })
+    ).toBeVisible()
+    await user.click(screen.getByRole('button', { name: 'Close' }))
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     )
   })
 

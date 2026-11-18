@@ -237,6 +237,7 @@ function SidebarMenuCollapsible({
             <SidebarMenuSubItem key={subItem.title}>
               <SidebarMenuSubButton
                 isActive={checkIsActive(href, subItem)}
+                aria-current={checkIsActive(href, subItem) ? 'page' : undefined}
                 render={
                   <Link
                     to={subItem.url}
@@ -299,6 +300,7 @@ function SidebarMenuCollapsedDropdown({
             {item.items.map((sub) => (
               <DropdownMenuItem
                 key={`${sub.title}-${sub.url}`}
+                aria-current={checkIsActive(href, sub) ? 'page' : undefined}
                 render={
                   <Link
                     to={sub.url}

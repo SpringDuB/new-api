@@ -37,7 +37,6 @@ import {
   ModelCardGrid,
   ModelDetailsDrawer,
 } from './components'
-import { ModelCategoryFilter } from './components/model-category-filter'
 import { EXCLUDED_GROUPS, VIEW_MODES } from './constants'
 import { useFilters } from './hooks/use-filters'
 import { usePricingData } from './hooks/use-pricing-data'
@@ -59,7 +58,6 @@ export function Pricing() {
   const {
     models,
     catalogModels,
-    vendors,
     groupRatio,
     usableGroup,
     endpointMap,
@@ -67,7 +65,8 @@ export function Pricing() {
     isLoading,
     priceRate,
     usdExchangeRate,
-  } = usePricingData()
+    refetch,
+  } = usePricingData(true, { refetchOnMount: 'always' })
 
   const {
     categoryFilter,
@@ -79,35 +78,30 @@ export function Pricing() {
     setCategoryFilter,
     searchInput,
     sortBy,
-    vendorFilter,
     groupFilter,
-    quotaTypeFilter,
-    endpointTypeFilter,
-    tagFilter,
     tokenUnit,
     viewMode,
     showRechargePrice,
     setSearchInput,
     setSortBy,
-    setVendorFilter,
     setGroupFilter,
-    setQuotaTypeFilter,
-    setEndpointTypeFilter,
-    setTagFilter,
     setTokenUnit,
     setViewMode,
     setShowRechargePrice,
     filteredModels,
     hasActiveFilters,
     activeFilterCount,
-    availableTags,
     clearFilters,
     clearSearch,
   } = useFilters(models || [])
 
-  const handleModelClick = useCallback((modelName: string) => {
-    setSelectedModelName(modelName)
-  }, [])
+  const handleModelClick = useCallback(
+    (modelName: string) => {
+      setSelectedModelName(modelName)
+      void refetch()
+    },
+    [refetch]
+  )
 
   const selectedModel = useMemo(
     () =>
@@ -198,14 +192,6 @@ export function Pricing() {
             </p>
           </div>
           <div className='stolas-catalog-search'>
-            <SearchBar
-              value={searchInput}
-              onChange={setSearchInput}
-              onClear={clearSearch}
-              placeholder={t(
-                'Search model name, provider, endpoint, or tag...'
-              )}
-            />
             {canManage && (
               <Button
                 variant='outline'
@@ -218,14 +204,19 @@ export function Pricing() {
           </div>
         </header>
 
-        <ModelCategoryFilter
-          value={categoryFilter}
-          counts={categoryCounts}
-          onChange={setCategoryFilter}
-        />
-
         <main className='stolas-catalog-results'>
           <PricingToolbar
+            categoryFilter={categoryFilter}
+            categoryCounts={categoryCounts}
+            onCategoryChange={setCategoryFilter}
+            search={
+              <SearchBar
+                value={searchInput}
+                onChange={setSearchInput}
+                onClear={clearSearch}
+                placeholder={t('Search models...')}
+              />
+            }
             familyFilter={familyFilter}
             onFamilyChange={setFamilyFilter}
             familyModels={familyModels}
@@ -239,20 +230,9 @@ export function Pricing() {
             onRechargePriceChange={setShowRechargePrice}
             viewMode={viewMode}
             onViewModeChange={setViewMode}
-            quotaTypeFilter={quotaTypeFilter}
-            endpointTypeFilter={endpointTypeFilter}
-            vendorFilter={vendorFilter}
             groupFilter={groupFilter}
-            tagFilter={tagFilter}
-            onQuotaTypeChange={setQuotaTypeFilter}
-            onEndpointTypeChange={setEndpointTypeFilter}
-            onVendorChange={setVendorFilter}
             onGroupChange={setGroupFilter}
-            onTagChange={setTagFilter}
-            vendors={vendors || []}
             groups={availableGroups}
-            groupRatios={groupRatio}
-            tags={availableTags}
             models={sidebarModels}
             hasActiveFilters={hasActiveFilters}
             activeFilterCount={activeFilterCount}

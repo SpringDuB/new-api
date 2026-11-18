@@ -44,6 +44,7 @@ import { useAuthStore } from '@/stores/auth-store'
 import { defaultTopNavLinks } from '../config/top-nav.config'
 import type { TopNavLink } from '../types'
 import { HeaderLogo } from './header-logo'
+import { StolasNavigationIcon } from './stolas-navigation-icon'
 
 const AUTH_PROMPT_SECONDS = 5
 
@@ -279,10 +280,11 @@ export function PublicHeader(props: PublicHeaderProps) {
                       tabIndex={link.disabled ? -1 : undefined}
                       onClick={(event) => handleNavLinkClick(event, link)}
                       className={cn(
-                        'text-muted-foreground hover:text-foreground min-w-0 truncate rounded-lg px-3 py-1.5 text-sm font-medium transition-colors duration-200',
+                        'stolas-public-nav-link text-muted-foreground hover:text-foreground inline-flex min-w-0 items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors duration-200',
                         link.disabled && 'pointer-events-none opacity-50'
                       )}
                     >
+                      <StolasNavigationIcon destination={link.href} />
                       {t(link.title)}
                     </a>
                   )
@@ -293,15 +295,17 @@ export function PublicHeader(props: PublicHeaderProps) {
                     to={link.href}
                     title={t(link.title)}
                     disabled={link.disabled}
+                    aria-current={isActive ? 'page' : undefined}
                     onClick={(event) => handleNavLinkClick(event, link)}
                     className={cn(
-                      'min-w-0 truncate rounded-lg px-3 py-1.5 text-sm font-medium transition-colors duration-200',
+                      'stolas-public-nav-link inline-flex min-w-0 items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors duration-200',
                       isActive
                         ? 'text-foreground'
                         : 'text-muted-foreground hover:text-foreground',
                       link.disabled && 'pointer-events-none opacity-50'
                     )}
                   >
+                    <StolasNavigationIcon destination={link.href} />
                     {t(link.title)}
                   </Link>
                 )
@@ -426,6 +430,7 @@ export function PublicHeader(props: PublicHeaderProps) {
                     className={linkClassName}
                     style={transitionStyle}
                   >
+                    <StolasNavigationIcon destination={link.href} />
                     {t(link.title)}
                   </a>
                 )
@@ -439,6 +444,7 @@ export function PublicHeader(props: PublicHeaderProps) {
                   className={linkClassName}
                   style={transitionStyle}
                 >
+                  <StolasNavigationIcon destination={link.href} tile />
                   {t(link.title)}
                 </Link>
               )

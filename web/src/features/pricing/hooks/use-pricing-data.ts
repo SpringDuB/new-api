@@ -25,13 +25,17 @@ import { requireServerSuccess } from '@/lib/server-error-message'
 import { getPricing } from '../api'
 import { applyModelSquareDisplay } from '../lib/model-square-display'
 
-export function usePricingData(enabled = true) {
+export function usePricingData(
+  enabled = true,
+  options?: { refetchOnMount?: 'always' }
+) {
   const { status } = useStatus()
 
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['pricing'],
     queryFn: async () => requireServerSuccess(await getPricing()),
     staleTime: 5 * 60 * 1000,
+    refetchOnMount: options?.refetchOnMount,
     enabled,
   })
 

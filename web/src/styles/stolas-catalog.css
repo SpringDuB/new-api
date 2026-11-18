@@ -27,64 +27,67 @@ For commercial licensing, please contact support@quantumnous.com
 }
 
 .stolas-catalog-header {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(18rem, 25rem);
+  display: flex;
   align-items: end;
-  gap: 2rem 4rem;
+  justify-content: space-between;
+  gap: 1.5rem;
   padding-bottom: 2.5rem;
 }
-
 .stolas-catalog-title {
   font-size: clamp(2.75rem, 5vw, 4.5rem);
   line-height: 1.1;
 }
-
 .stolas-catalog-purpose {
-  max-width: 36rem;
+  max-width: 38rem;
   margin-top: 1rem;
   font-size: 0.9rem;
   line-height: 1.7;
   text-wrap: pretty;
 }
-
 .stolas-catalog-search {
+  flex-shrink: 0;
+}
+.stolas-catalog-discovery {
   display: flex;
-  min-width: 0;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 0.75rem;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1rem;
 }
-
-.stolas-catalog-search > button {
-  align-self: end;
+.stolas-catalog-discovery-search {
+  flex: 1 1 14rem;
+  min-width: 12rem;
 }
-
 .stolas-catalog-categories {
+  min-width: 0;
   max-width: 100%;
-  overflow-x: auto;
-  border-bottom: 1px solid var(--border);
 }
-
 .stolas-catalog-category-list {
-  gap: clamp(0.5rem, 2vw, 2rem);
-  border-radius: 0;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  border-radius: 0.65rem;
+  padding: 0.3rem;
+  background: var(--background);
 }
-
 .stolas-catalog-category-list .stolas-catalog-category {
-  height: 3.5rem;
-  gap: 0.5rem;
-  border-radius: 0;
-  border-bottom: 2px solid transparent;
-  padding-inline: 0.25rem;
+  height: 2.5rem;
+  gap: 0.45rem;
+  border: 1px solid transparent;
+  border-radius: 0.45rem;
+  padding-inline: 0.85rem;
   color: var(--muted-foreground);
-  font-size: 0.85rem;
+  font-size: 0.8rem;
   background: transparent;
 }
-
 .stolas-catalog-category-list .stolas-catalog-category[aria-pressed='true'] {
-  border-bottom-color: var(--primary);
+  border-color: var(--border);
   color: var(--foreground);
-  background: transparent;
+  background: var(--card);
+  box-shadow: 0 1px 3px #00000008;
+}
+.stolas-catalog-active-group {
+  max-width: 8rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .stolas-catalog-results {
@@ -92,7 +95,61 @@ For commercial licensing, please contact support@quantumnous.com
 }
 
 .stolas-catalog-toolbar {
+  padding: 1rem 1.25rem 0.8rem;
+  margin-bottom: 1.5rem;
+  border: 1px solid var(--border);
+  border-radius: 0.85rem;
+  background: var(--card);
+}
+
+.stolas-catalog-filter-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  margin-top: 1.25rem;
   padding-block: 1.25rem;
+  border-top: 1px solid var(--border);
+}
+.stolas-catalog-filter-row {
+  display: flex;
+  align-items: baseline;
+  gap: 1.5rem;
+  min-width: 0;
+}
+.stolas-catalog-filter-label {
+  flex: 0 0 4.5rem;
+  color: var(--muted-foreground);
+  font-size: 0.78rem;
+}
+.stolas-catalog-choices {
+  min-width: 0;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  gap: 0.4rem;
+}
+.stolas-catalog-choices .stolas-catalog-choice {
+  min-height: 2rem;
+  height: auto;
+  max-width: 100%;
+  gap: 0.6rem;
+  border: 1px solid transparent;
+  border-radius: 0.4rem;
+  padding: 0.35rem 0.7rem;
+  font-size: 0.78rem;
+  color: var(--muted-foreground);
+}
+.stolas-catalog-choices .stolas-catalog-choice[aria-pressed='true'] {
+  background: var(--accent);
+  border-color: color-mix(in srgb, var(--primary) 25%, var(--border));
+  color: var(--accent-foreground);
+}
+.stolas-catalog-toolbar-bottom {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-top: 0.85rem;
 }
 
 .stolas-catalog-toolbar-actions {
@@ -286,5 +343,31 @@ For commercial licensing, please contact support@quantumnous.com
 @media (prefers-reduced-motion: reduce) {
   .stolas-model-entry {
     transition: none;
+  }
+}
+
+@media (max-width: 639px) {
+  .stolas-catalog-header {
+    align-items: start;
+  }
+  .stolas-catalog-discovery-search {
+    flex-basis: 100%;
+    order: 2;
+  }
+  .stolas-catalog-category-list .stolas-catalog-category {
+    padding-inline: 0.6rem;
+  }
+  .stolas-catalog-category svg {
+    display: none;
+  }
+  .stolas-catalog-filter-row {
+    flex-direction: column;
+    gap: 0.6rem;
+  }
+  .stolas-catalog-filter-label {
+    flex-basis: auto;
+  }
+  .stolas-catalog-toolbar {
+    padding-inline: 0.85rem;
   }
 }

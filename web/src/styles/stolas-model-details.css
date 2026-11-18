@@ -1,0 +1,196 @@
+/*
+Copyright (C) 2023-2026 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
+.stolas-model-detail-dialog[data-slot='dialog-content'] {
+  width: min(64rem, calc(100vw - 2rem));
+  max-width: 64rem;
+  max-height: calc(100dvh - 3rem);
+  padding: 0;
+  gap: 0;
+  border-radius: 0.8rem;
+  background: var(--card);
+}
+.stolas-model-detail-dialog-body {
+  padding: clamp(1.5rem, 4vw, 3rem);
+}
+.stolas-model-detail {
+  min-width: 0;
+  color: var(--foreground);
+}
+.stolas-model-detail-header {
+  padding-bottom: 2rem;
+}
+.stolas-model-detail-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  margin-bottom: 1.25rem;
+  color: var(--muted-foreground);
+  font-size: 0.78rem;
+}
+.stolas-model-detail-name {
+  min-width: 0;
+  font-size: clamp(1.4rem, 3vw, 2.1rem);
+  line-height: 1.25;
+  font-weight: 550;
+  letter-spacing: -0.035em;
+  overflow-wrap: anywhere;
+}
+.stolas-model-detail-description {
+  max-width: 50rem;
+  margin-top: 1rem;
+  color: var(--muted-foreground);
+  font-size: 0.875rem;
+  line-height: 1.9;
+  overflow-wrap: anywhere;
+  white-space: pre-line;
+}
+.stolas-model-detail-notes {
+  min-width: 0;
+}
+.stolas-model-detail-tabs {
+  display: flex;
+  justify-content: flex-start;
+  gap: clamp(0.75rem, 3vw, 2rem);
+  width: 100%;
+  height: auto;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  padding: 0;
+}
+.stolas-model-detail-tabs [data-slot='tabs-trigger'] {
+  flex: none;
+  height: 2.75rem;
+  color: var(--muted-foreground);
+}
+.stolas-model-detail-tabs [data-slot='tabs-trigger'][data-active] {
+  color: var(--foreground);
+}
+.stolas-model-detail-pricing {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2.5rem;
+}
+.stolas-model-detail-pricing > section + section {
+  border-top: 1px solid var(--border);
+  padding-top: 1.5rem;
+}
+.stolas-model-detail h2 {
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0;
+  color: var(--foreground);
+  text-transform: none;
+}
+@media (max-width: 639px) {
+  .stolas-model-detail-dialog[data-slot='dialog-content'] {
+    width: calc(100vw - 1rem);
+    max-height: calc(100dvh - 1rem);
+  }
+  .stolas-model-detail-dialog-body {
+    padding: 2rem 1.25rem 1.25rem;
+  }
+  .stolas-model-detail-header {
+    padding-bottom: 1.25rem;
+  }
+  .stolas-catalog-filter-row {
+    flex-direction: column;
+    gap: 0.6rem;
+  }
+  .stolas-catalog-filter-label {
+    flex-basis: auto;
+  }
+}
+
+.stolas-model-capabilities {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+.stolas-model-output {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.5rem;
+  padding-bottom: 1.5rem;
+  border-bottom: 1px solid var(--border);
+}
+.stolas-model-capability-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
+  gap: 1rem;
+}
+.stolas-model-capability-grid > div {
+  min-width: 0;
+  padding: 1.25rem;
+  border-radius: 0.65rem;
+  background: var(--background);
+}
+.stolas-model-capability-grid dt {
+  font-size: 0.75rem;
+  color: var(--muted-foreground);
+}
+.stolas-model-capability-grid dd {
+  margin-top: 0.65rem;
+  font-size: 0.85rem;
+  line-height: 1.85;
+  overflow-wrap: anywhere;
+}
+.stolas-model-requirements > div {
+  display: grid;
+  grid-template-columns: 9rem minmax(0, 1fr);
+  gap: 1.5rem;
+  padding-block: 1rem;
+  border-bottom: 1px solid var(--border);
+}
+.stolas-model-requirements dt {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: start;
+  align-content: start;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+  font-weight: 500;
+}
+.stolas-model-requirements dd {
+  font-size: 0.8rem;
+  color: var(--muted-foreground);
+  line-height: 1.85;
+  overflow-wrap: anywhere;
+}
+.stolas-model-api {
+  min-width: 0;
+}
+.stolas-model-api [data-slot='tabs-list'] {
+  max-width: 100%;
+  flex-wrap: wrap;
+  height: auto;
+}
+.stolas-model-video-workflow {
+  padding: 1.25rem;
+  background: var(--background);
+  border-radius: 0.65rem;
+}
+@media (max-width: 639px) {
+  .stolas-model-requirements > div {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.5rem;
+  }
+}

@@ -1,6 +1,7 @@
 package model
 
 import (
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -120,6 +121,47 @@ func GetModelSupportEndpointTypes(model string) []constant.EndpointType {
 }
 
 func getPricingEndpointTypesForAbility(ability AbilityWithChannel, advancedCustomConfigs map[int]*dto.AdvancedCustomConfig) []constant.EndpointType {
+	generation := jsplugin.DefaultRegistry.Generation()
+	plugin, isPluginChannel := generation.GetByChannelType(ability.ChannelType)
+	modelName := ability.Model
+	if ability.ChannelType == constant.ChannelTypeTaskPlugin || ability.ChannelType == constant.ChannelTypeNewAPI {
+		if canonical, ok := generation.CanonicalModel(modelName); ok {
+			modelName = canonical
+		}
+		plugin, isPluginChannel = generation.GetByModel(modelName)
+		if !isPluginChannel {
+			if target, ok := ResolveTaskModelAlias(generation, modelName); ok && target.Declared != "" {
+				plugin, isPluginChannel = generation.Get(target.PluginKey)
+				modelName = target.Declared
+			}
+		}
+	}
+	if isPluginChannel || ability.ChannelType == constant.ChannelTypeTaskPlugin {
+		endpoints := make([]constant.EndpointType, 0)
+		if plugin == nil {
+			return endpoints
+		}
+		for _, claim := range plugin.Meta.Protocols {
+			if len(claim.Models) > 0 && !slices.ContainsFunc(claim.Models, func(name string) bool { return strings.EqualFold(name, modelName) }) {
+				continue
+			}
+			var endpoint constant.EndpointType
+			switch claim.Name {
+			case "openai_video":
+				endpoint = constant.EndpointTypeOpenAIVideo
+			case "openai_image":
+				endpoint = constant.EndpointTypeImageGeneration
+			case "openai_responses":
+				endpoint = constant.EndpointTypeOpenAIResponse
+			default:
+				continue
+			}
+			if !slices.Contains(endpoints, endpoint) {
+				endpoints = append(endpoints, endpoint)
+			}
+		}
+		return endpoints
+	}
 	if ability.ChannelType != constant.ChannelTypeAdvancedCustom {
 		return common.GetEndpointTypesByChannelType(ability.ChannelType, ability.Model)
 	}
