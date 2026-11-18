@@ -1,5 +1,29 @@
 # 用户鉴权与登录会话
 
+## Stolas 画布接入
+
+配置 `STOLAS_CANVAS_URL` 为画布的精确 HTTPS 根地址，并通过部署环境注入至少 32 字符的 `STOLAS_CANVAS_CLIENT_SECRET`，开启专用画布桥接。画布端配置相同密钥的 `CANVAS_STOLAS_CLIENT_SECRET`、指向本主站的 `CANVAS_STOLAS_BASE_URL` 和自身的 `CANVAS_PUBLIC_BASE_URL`。公开 `/api/status` 只返回 `canvas_enabled` 与 `canvas_url`，不会返回客户端密钥。
+
+主站 `/canvas/connect` 恢复当前浏览器登录状态，调用 `POST /api/canvas/authorize`。授权仅接受已完成验证的面板会话，不接受管理 PAT；固定回调为配置画布根地址加 `/api/auth/stolas/callback`，强制 S256 PKCE。授权码存储在既有 `auth_flows`，HMAC 摘要入库，有效期 60 秒。画布后端调用 `POST /api/canvas/exchange`，使用桥接密钥、原回调和 verifier 兑换；消费事务再次校验原用户及 Session 版本、状态、过期时间，并确保单次使用。
+
+兑换响应仅向受信任画布后端返回最小用户信息、默认模型令牌和钱包展示元数据。URL 只带短期 code 和 state，不携带密码、面板 access token 或模型 Key。桥接响应禁止缓存，相关访问日志不记录授权查询参数。此专用协议复用现有认证机制，不宣称实现完整 OIDC 身份提供方。
+
+兑换用户信息包含当前 `role`。画布将 role 10/100 映射为该外部用户本次请求的管理员权限，role 1 保持普通权限；外部身份与初始化画布管理员各自独立，不按邮箱或名称合并，不永久提升画布用户表中的角色。`GET /api/canvas/identity` 同时要求用户模型 Key 和 `X-Stolas-Client-Secret`，从主数据库核验启用账号、明确默认令牌关联、令牌归属、状态与有效期，仅返回 `{id,status,role}`。画布会话及管理操作据此重新验证权限，主站撤权、禁用、令牌失效或核验不可用时拒绝请求。原画布管理员可通过独立 `/admin/login` 登录，公开登录页不展示救援切换入口。
+
+身份核验按令牌所属用户使用独立额度，默认每分钟 600 次，由 `STOLAS_IDENTITY_RATE_LIMIT` 调整；不会占用钱包的 `TOKEN_USAGE_RATE_LIMIT`。身份核验与元数据各自使用独立入口额度，上限均受 `STOLAS_BRIDGE_INGRESS_RATE_LIMIT` 约束。画布后台读取模型目录和测试模型使用当前管理员的默认模型 Key，模型生成使用任务所属用户 Key，不依赖系统共享 Key。
+
+`users.default_token_id` 是可空、唯一的默认模型令牌关联。NULL 表示从未初始化；完整 Stolas 配置启用时，用户创建与默认 Key 创建保持同一事务，普通注册和第三方注册共用该逻辑。既有用户首次接入时只在 NULL 状态初始化，不按令牌名称或列表顺序发现历史 Key。默认令牌没有模型白名单或独立额度上限，允许查询所属用户钱包；用户分组、账号状态、渠道权限和余额校验照常生效。
+
+令牌禁用、过期或删除后保留原关联，画布兑换失败，不通过重新初始化或公共 Key 绕过撤销。要恢复应由用户按明确的凭据恢复流程处理；既有资金和令牌不会自动合并或替换。
+
+直接从画布输入主站账号密码时，画布后端使用既有密码登录、密码加密与二次验证接口，只有完整登录成功后的面板 access token 才能申请画布授权。密码只用于当前请求，不作为画布密码保存。注册入口使用主站 `/sign-up?redirect=%2Fcanvas%2Fconnect`，注册完成后继续主站登录并返回固定画布流程；站内回跳校验仍拒绝外站 URL。
+
+画布后端向固定主站地址发送 `X-Stolas-Client-Secret`，主站以常量时间校验它来区分可信服务请求；不信任自报用户 ID 或转发 IP。可信元数据查询、密码登录、MFA 与临时会话清理分别使用每 IP 每分钟 600 次的独立入口额度，授权/兑换使用独立桥接入口额度；密码尝试仍按规范化标识及真实账号限流，MFA 按验证流程限流，沿用严格认证额度。普通或错误密钥请求保留既有公开认证限流。
+
+`GET /api/usage/token/` 在令牌验证后按所属用户计数，默认每分钟 120 次，多个 Key 共用所属用户额度；另有每 IP 每分钟 600 次的入口保护。这样画布所有用户经由同一后端出口时不会消耗匿名登录的严格共享额度。部署可分别用 `STOLAS_BRIDGE_INGRESS_RATE_LIMIT` 和 `TOKEN_USAGE_RATE_LIMIT` 调整每分钟上限；不能用伪造转发 IP 或关闭公开认证限流替代。
+
+画布内密码/MFA 登录新建的临时主站 Session 在授权兑换后尝试撤销，交换失败也执行清理，避免长期积累无人持有 Refresh Cookie 的会话；从主站现有登录态进入画布不会撤销原 Session。画布和主站各自维护 Cookie，此接入不实现跨站全局退出，主站退出不代表画布已退出。模型请求仍校验用户令牌与上游账号状态。
+
 面板鉴权采用短期 Access Token、HttpOnly Refresh Cookie 与服务端登录会话控制面的组合。面板请求不再依赖 Gin session，也不再要求 `New-Api-User` 请求头。
 
 ## 鉴权模型

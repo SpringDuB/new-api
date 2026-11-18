@@ -62,6 +62,9 @@ func Login(c *gin.Context) {
 		return
 	}
 	username := loginRequest.Username
+	if !middleware.CanvasAuthAttemptRateLimit(c, "identifier", 0, username) {
+		return
+	}
 	password := loginRequest.Password
 	if common.PasswordLoginEncryptionEnabled {
 		if loginRequest.PasswordEncrypted == "" || loginRequest.EncryptionKeyID == "" {
@@ -83,6 +86,9 @@ func Login(c *gin.Context) {
 		Password: password,
 	}
 	err = user.ValidateAndFill()
+	if user.Id > 0 && !middleware.CanvasAuthAttemptRateLimit(c, "password", user.Id, "") {
+		return
+	}
 	if err != nil {
 		switch {
 		case errors.Is(err, model.ErrDatabase):
@@ -299,7 +305,8 @@ func Register(c *gin.Context) {
 		return
 	}
 	// 生成默认令牌
-	if constant.GenerateDefaultToken {
+	_, _, stolasEnabled := common.StolasCanvasConfiguration()
+	if constant.GenerateDefaultToken && !stolasEnabled {
 		key, err := common.GenerateKey()
 		if err != nil {
 			common.ApiErrorT(c, "Failed to generate default token")

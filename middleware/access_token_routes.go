@@ -49,6 +49,7 @@ var accessTokenRouteRules = map[string]accessTokenRouteRule{
 	"GET /api/perf-metrics":               accessTokenAnyRule,
 	"GET /api/rankings":                   accessTokenAnyRule,
 	"POST /api/oauth/state":               accessTokenSessionRule,
+	"POST /api/canvas/authorize":          accessTokenSessionRule,
 	"POST /api/oauth/email/bind/start":    accessTokenScopeRule("account_security:write"),
 	"POST /api/oauth/email/bind/resend":   accessTokenScopeRule("account_security:write"),
 	"POST /api/oauth/email/bind":          accessTokenScopeRule("account_security:write"),

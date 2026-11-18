@@ -16,6 +16,7 @@ import (
 
 const (
 	AuthFlowPurposeOAuth             = "oauth"
+	AuthFlowPurposeCanvas            = "canvas_authorization"
 	AuthFlowPurposeTwoFALogin        = "2fa_login"
 	AuthFlowPurposeLoginVerification = "login_verification"
 	AuthFlowPurposeLoginPasskey      = "login_passkey"
@@ -145,7 +146,11 @@ func authFlowTokenHash(token string) string {
 }
 
 func CreateAuthFlow(input AuthFlowCreate) (string, *AuthFlow, error) {
-	return createAuthFlowWithTx(DB, input)
+	return CreateAuthFlowWithTx(DB, input)
+}
+
+func CreateAuthFlowWithTx(tx *gorm.DB, input AuthFlowCreate) (string, *AuthFlow, error) {
+	return createAuthFlowWithTx(tx, input)
 }
 
 func createAuthFlowWithTx(tx *gorm.DB, input AuthFlowCreate) (string, *AuthFlow, error) {

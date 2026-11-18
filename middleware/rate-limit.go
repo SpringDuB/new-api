@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
@@ -181,10 +182,103 @@ func GlobalWebRateLimit(frontendFS static.ServeFileSystem) func(c *gin.Context) 
 }
 
 func GlobalAPIRateLimit() func(c *gin.Context) {
+	ordinary := defNext
 	if common.GlobalApiRateLimitEnable {
-		return rateLimitFactory(common.GlobalApiRateLimitNum, common.GlobalApiRateLimitDuration, "GA")
+		ordinary = rateLimitFactory(common.GlobalApiRateLimitNum, common.GlobalApiRateLimitDuration, "GA")
 	}
-	return defNext
+	// These exact routes serve many users behind the canvas backend's address.
+	// Each still has a bounded ingress bucket, independent of login's CT/GA.
+	maximum := max(1, common.GetEnvOrDefault("STOLAS_BRIDGE_INGRESS_RATE_LIMIT", 600))
+	usage := rateLimitFactory(maximum, 60, "CANVAS:usage")
+	authorize := rateLimitFactory(maximum, 60, "CANVAS:authorize")
+	exchange := rateLimitFactory(maximum, 60, "CANVAS:exchange")
+	login := rateLimitFactory(maximum, 60, "CANVAS:login")
+	verification := rateLimitFactory(maximum, 60, "CANVAS:verification")
+	sessionCleanup := rateLimitFactory(maximum, 60, "CANVAS:session-cleanup")
+	metadata := rateLimitFactory(maximum, 60, "CANVAS:metadata")
+	identity := rateLimitFactory(maximum, 60, "CANVAS:identity-ingress")
+	return func(c *gin.Context) {
+		switch c.Request.Method + " " + c.FullPath() {
+		case "GET /api/usage/token/":
+			usage(c)
+			return
+		case "GET /api/canvas/identity":
+			identity(c)
+			return
+		case "POST /api/canvas/authorize":
+			authorize(c)
+			return
+		case "POST /api/canvas/exchange":
+			exchange(c)
+			return
+		}
+		if common.IsStolasCanvasClient(c.GetHeader("X-Stolas-Client-Secret")) {
+			switch c.Request.Method + " " + c.FullPath() {
+			case "GET /api/status", "GET /api/user/login/encryption-key":
+				metadata(c)
+				return
+			case "POST /api/user/login":
+				login(c)
+				return
+			case "POST /api/user/login/verify", "POST /api/user/login/2fa":
+				verification(c)
+				return
+			case "DELETE /api/user/sessions/:sid":
+				sessionCleanup(c)
+				return
+			}
+		}
+		ordinary(c)
+	}
+}
+
+// CanvasLoginRateLimit preserves the public login throttle. Authenticated
+// canvas transport uses the dedicated API ingress plus account/flow budgets.
+func CanvasLoginRateLimit() gin.HandlerFunc {
+	ordinary := CriticalRateLimit()
+	return func(c *gin.Context) {
+		if common.IsStolasCanvasClient(c.GetHeader("X-Stolas-Client-Secret")) {
+			c.Next()
+			return
+		}
+		ordinary(c)
+	}
+}
+
+// CanvasAuthAttemptRateLimit limits a trusted transport's password identifier,
+// resolved account, or verification flow. Identifiers and flow tokens are
+// HMACed so neither Redis nor errors reveal authentication material.
+func CanvasAuthAttemptRateLimit(c *gin.Context, scope string, userID int, identifier string) bool {
+	if !common.CriticalRateLimitEnable || !common.IsStolasCanvasClient(c.GetHeader("X-Stolas-Client-Secret")) {
+		return true
+	}
+	identity := "user:" + strconv.Itoa(userID)
+	if userID <= 0 {
+		identity = "identifier:" + common.GenerateHMACWithKey([]byte("canvas-login-v1:"+common.SessionSecret), strings.ToLower(strings.TrimSpace(identifier)))
+	}
+	key := redisRateLimitNamespace + ":canvas-auth:" + scope + ":" + identity
+	if common.RedisEnabled {
+		userRedisRateLimiter(c, common.CriticalRateLimitNum, common.CriticalRateLimitDuration, key)
+		return !c.IsAborted()
+	}
+	inMemoryRateLimiter.Init(common.RateLimitKeyExpirationDuration)
+	if !inMemoryRateLimiter.Request(key, common.CriticalRateLimitNum, common.CriticalRateLimitDuration) {
+		writeRateLimited(c, common.CriticalRateLimitDuration)
+		return false
+	}
+	return true
+}
+
+// TokenUsageRateLimit must follow TokenAuthReadOnly so untrusted token IDs
+// cannot select another user's allowance. Multiple keys share their owner.
+func TokenUsageRateLimit() gin.HandlerFunc {
+	maximum := max(1, common.GetEnvOrDefault("TOKEN_USAGE_RATE_LIMIT", 120))
+	return userRateLimitFactory(maximum, 60, "TOKEN:usage")
+}
+
+func CanvasIdentityRateLimit() gin.HandlerFunc {
+	maximum := max(1, common.GetEnvOrDefault("STOLAS_IDENTITY_RATE_LIMIT", 600))
+	return userRateLimitFactory(maximum, 60, "CANVAS:identity")
 }
 
 func CriticalRateLimit() func(c *gin.Context) {

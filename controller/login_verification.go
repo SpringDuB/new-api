@@ -6,6 +6,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/i18n"
+	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
 	passkeysvc "github.com/QuantumNous/new-api/service/passkey"
@@ -22,6 +23,9 @@ func VerifyLogin(c *gin.Context) {
 	}
 	if common.DecodeJson(c.Request.Body, &request) != nil || request.FlowToken == "" || request.Code == "" {
 		common.ApiErrorT(c, "Invalid parameters")
+		return
+	}
+	if !middleware.CanvasAuthAttemptRateLimit(c, "verification", 0, request.FlowToken) {
 		return
 	}
 	if request.Method == "" {

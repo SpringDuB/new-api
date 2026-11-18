@@ -46,8 +46,11 @@ func GetStatus(c *gin.Context) {
 	defer common.OptionMapRWMutex.RUnlock()
 
 	legalSetting := system_setting.GetLegalSettings()
+	canvasURL, _, canvasEnabled := common.StolasCanvasConfiguration()
 
 	data := gin.H{
+		"canvas_enabled":              canvasEnabled,
+		"canvas_url":                  canvasURL,
 		"version":                     common.Version,
 		"start_time":                  common.StartTime,
 		"email_verification":          common.EmailVerificationEnabled,
