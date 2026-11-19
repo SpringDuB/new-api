@@ -71,7 +71,7 @@ export function PricingToolbar(props: PricingToolbarProps) {
   }))
   return (
     <>
-      <div className='stolas-catalog-toolbar sticky top-[var(--stolas-public-header-offset,5rem)] z-30'>
+      <div className='stolas-catalog-toolbar'>
         <div className='stolas-catalog-discovery'>
           <ModelCategoryFilter
             value={props.categoryFilter}

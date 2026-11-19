@@ -59,6 +59,7 @@ For commercial licensing, please contact support@quantumnous.com
 }
 
 .stolas-surface {
+  --stolas-public-header-offset: 4rem;
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-body);
@@ -173,7 +174,7 @@ For commercial licensing, please contact support@quantumnous.com
   }
 }
 .stolas-shell {
-  --app-header-height: 4rem;
+  --app-header-height: 3.5rem;
   --stolas-content-width: 100rem;
   --stolas-page-gutter: clamp(1rem, 3vw, 3rem);
 }
@@ -195,7 +196,7 @@ For commercial licensing, please contact support@quantumnous.com
   display: flex;
   align-items: center;
   gap: 0.2rem;
-  padding-block: 0.4rem;
+  padding-block: 0.25rem;
   min-width: 0;
   flex-wrap: wrap;
 }
@@ -208,7 +209,7 @@ For commercial licensing, please contact support@quantumnous.com
   flex: none;
 }
 .stolas-workspace-link {
-  height: 2.4rem;
+  height: 2.125rem;
   padding-inline: 0.85rem;
   border-radius: 0.5rem;
   color: var(--muted-foreground);

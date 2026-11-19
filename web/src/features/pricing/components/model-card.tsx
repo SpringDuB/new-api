@@ -64,26 +64,48 @@ export interface ModelCardProps {
   presentation?: 'card' | 'directory'
 }
 
+function DirectoryPrice(props: {
+  amount: string
+  unit: string
+  label?: string
+  showLabel?: boolean
+}) {
+  return (
+    <span
+      className='stolas-model-price-entry'
+      title={`${props.label ? `${props.label}: ` : ''}${props.amount} / ${props.unit}`}
+    >
+      {props.showLabel && props.label && (
+        <span className='text-muted-foreground'>{props.label}: </span>
+      )}
+      <span className='font-semibold tabular-nums'>{props.amount}</span>
+      <span className='text-muted-foreground'> / {props.unit}</span>
+    </span>
+  )
+}
+
 export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
   const { t, i18n } = useTranslation()
+  const isDirectory = props.presentation === 'directory'
   const tokenUnit = props.tokenUnit ?? DEFAULT_TOKEN_UNIT
   const priceRate = props.priceRate ?? 1
   const usdExchangeRate = props.usdExchangeRate ?? 1
   const showRechargePrice = props.showRechargePrice ?? false
   const isTokenBased = isTokenBasedModel(props.model)
   const tokenUnitLabel = tokenUnit === 'K' ? '1K' : '1M'
-  const tags = parseTags(props.model.tags)
   const groups = props.model.enable_groups || []
   const endpoints = props.model.supported_endpoint_types || []
   const modelIconKey =
     props.model.icon?.trim() || props.model.vendor_icon?.trim()
-  const modelIcon = modelIconKey ? getLobeIcon(modelIconKey, 28) : null
+  const modelIcon = modelIconKey
+    ? getLobeIcon(modelIconKey, isDirectory ? 16 : 28)
+    : null
   const vendorIconKey = props.model.vendor_icon?.trim()
   const initial = props.model.model_name?.charAt(0).toUpperCase() || '?'
   const isUnconfiguredTaskUsage = isUnconfiguredTaskUsageModel(props.model)
   const billingTime = useBillingTime(props.model.billing_expr)
   const currency = useSystemConfigStore((state) => state.config.currency)
-  const isDirectory = props.presentation === 'directory'
+  const tags = isDirectory ? [] : parseTags(props.model.tags)
   const artwork = isDirectory ? props.cover : undefined
   const hasPerfMetrics =
     props.perf != null &&
@@ -129,87 +151,98 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
     [props.model, dynamicPriceOptions, currency]
   )
   const cardExamplePrice = useMemo(
-    () => getCardExamplePrice(props.model, dynamicPriceOptions),
+    () =>
+      isDirectory
+        ? null
+        : getCardExamplePrice(props.model, dynamicPriceOptions),
     // Currency is read indirectly by the price formatter.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [props.model, dynamicPriceOptions, currency]
+    [props.model, dynamicPriceOptions, currency, isDirectory]
   )
   let priceSummary: ReactNode
   if (dynamicSummary) {
     const cacheReadEntries = dynamicSummary.secondaryEntries.filter(
       (entry) => entry.field === 'cacheReadPrice' && entry.unit === 'token'
     )
+    const entries = [
+      ...dynamicSummary.primaryEntries.slice(
+        0,
+        dynamicSummary.providerCount ? 2 : undefined
+      ),
+      ...cacheReadEntries,
+    ]
     if (dynamicSummary.isSpecialExpression) {
       priceSummary = (
         <div className='col-span-full min-w-0'>
           <span className='text-warning'>
             {t('Special billing expression')}
           </span>
-          <code className='text-muted-foreground mt-1 line-clamp-2 block font-mono text-xs break-all'>
-            {dynamicSummary.rawExpression}
-          </code>
+          {!isDirectory && (
+            <code className='text-muted-foreground mt-1 line-clamp-2 block font-mono text-xs break-all'>
+              {dynamicSummary.rawExpression}
+            </code>
+          )}
         </div>
       )
-    } else if (
-      dynamicSummary.primaryEntries.length > 0 ||
-      cacheReadEntries.length > 0
-    ) {
+    } else if (entries.length > 0) {
       priceSummary = (
         <>
-          {[
-            dynamicSummary.primaryEntries.slice(
-              0,
-              dynamicSummary.providerCount ? 2 : undefined
-            ),
-            cacheReadEntries,
-          ]
-            .flat()
-            .map((entry) => {
-              const unitLabelKey = getDynamicPriceUnitLabelKey(entry)
-              const unitLabel = taskUsageUnitLabel(
-                entry,
-                i18n.language,
-                unitLabelKey ? t(unitLabelKey) : tokenUnitLabel
-              )
-              let label: ReactNode = null
-              if (entry.labelKind !== 'schema') {
-                label = t(entry.shortLabel)
-              } else {
-                label = taskPriceLabel(
-                  entry.description,
-                  entry.shortLabel,
-                  i18n.language
-                )
-              }
+          {entries.map((entry) => {
+            const unitLabelKey = getDynamicPriceUnitLabelKey(entry)
+            const unitLabel = taskUsageUnitLabel(
+              entry,
+              i18n.language,
+              unitLabelKey ? t(unitLabelKey) : tokenUnitLabel
+            )
+            const label =
+              entry.labelKind === 'schema'
+                ? taskPriceLabel(
+                    entry.description,
+                    entry.shortLabel,
+                    i18n.language
+                  )
+                : t(entry.shortLabel)
+            const amount = entry.formattedRange ?? entry.formatted
+            if (isDirectory) {
               return (
-                <div
+                <DirectoryPrice
                   key={entry.key}
-                  className={cn(
-                    'flex min-w-0 flex-col gap-1',
-                    dynamicSummary.isTaskUsage && 'col-span-full'
-                  )}
-                >
-                  {label && (
-                    <span className='text-muted-foreground text-xs break-words whitespace-normal'>
-                      {label}
-                    </span>
-                  )}
-                  <span className='flex flex-wrap items-baseline gap-x-1 font-mono text-sm font-semibold tabular-nums'>
-                    <span>{entry.formattedRange ?? entry.formatted}</span>
-                    <span className='text-muted-foreground text-xs font-normal whitespace-nowrap'>
-                      {' '}
-                      / {unitLabel}
-                    </span>
-                  </span>
-                </div>
+                  amount={amount}
+                  unit={unitLabel}
+                  label={label}
+                  showLabel={entries.length > 1}
+                />
               )
-            })}
-          {dynamicSummary.isTimePricing && (
+            }
+            return (
+              <div
+                key={entry.key}
+                className={cn(
+                  'flex min-w-0 flex-col gap-1',
+                  dynamicSummary.isTaskUsage && 'col-span-full'
+                )}
+              >
+                {label && (
+                  <span className='text-muted-foreground text-xs break-words whitespace-normal'>
+                    {label}
+                  </span>
+                )}
+                <span className='flex flex-wrap items-baseline gap-x-1 font-mono text-sm font-semibold tabular-nums'>
+                  <span>{amount}</span>
+                  <span className='text-muted-foreground text-xs font-normal whitespace-nowrap'>
+                    {' '}
+                    / {unitLabel}
+                  </span>
+                </span>
+              </div>
+            )
+          })}
+          {!isDirectory && dynamicSummary.isTimePricing && (
             <span className='text-muted-foreground col-span-full text-xs'>
               {t('Current period price')}
             </span>
           )}
-          {dynamicSummary.isMixedBilling && (
+          {!isDirectory && dynamicSummary.isMixedBilling && (
             <span className='text-muted-foreground col-span-full text-xs'>
               {t('Token or per-call pricing')}
             </span>
@@ -219,7 +252,8 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
               {cardExamplePrice.label} ≈ {cardExamplePrice.formatted}
             </span>
           )}
-          {dynamicSummary.isTaskUsage &&
+          {!isDirectory &&
+            dynamicSummary.isTaskUsage &&
             dynamicSummary.tierCount > 1 &&
             dynamicSummary.tier?.label &&
             !dynamicSummary.primaryEntries.some(
@@ -254,56 +288,125 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
         ? [{ type: 'cache' as const, label: t('Cached') }]
         : []),
     ]
-    priceSummary = prices.map((price) => (
-      <div key={price.type} className='flex min-w-0 flex-col gap-1'>
-        <span className='text-muted-foreground text-xs'>{price.label}</span>
-        <span className='font-mono text-sm font-semibold tabular-nums'>
-          {formatPrice(
-            props.model,
-            price.type,
-            tokenUnit,
-            showRechargePrice,
-            priceRate,
-            usdExchangeRate,
-            props.selectedGroup
-          )}
-          <span className='text-muted-foreground text-xs font-normal'>
-            {' '}
-            / {tokenUnitLabel}
+    priceSummary = prices.map((price) => {
+      const amount = formatPrice(
+        props.model,
+        price.type,
+        tokenUnit,
+        showRechargePrice,
+        priceRate,
+        usdExchangeRate,
+        props.selectedGroup
+      )
+      if (isDirectory) {
+        return (
+          <DirectoryPrice
+            key={price.type}
+            amount={amount}
+            unit={tokenUnitLabel}
+            label={price.label}
+            showLabel
+          />
+        )
+      }
+      return (
+        <div key={price.type} className='flex min-w-0 flex-col gap-1'>
+          <span className='text-muted-foreground text-xs'>{price.label}</span>
+          <span className='font-mono text-sm font-semibold tabular-nums'>
+            {amount}
+            <span className='text-muted-foreground text-xs font-normal'>
+              {' '}
+              / {tokenUnitLabel}
+            </span>
           </span>
-        </span>
-      </div>
-    ))
+        </div>
+      )
+    })
   } else {
-    priceSummary = (
+    const amount = formatRequestPrice(
+      props.model,
+      showRechargePrice,
+      priceRate,
+      usdExchangeRate,
+      props.selectedGroup
+    )
+    const unit = t('request')
+    priceSummary = isDirectory ? (
+      <DirectoryPrice amount={amount} unit={unit} />
+    ) : (
       <div className='col-span-full flex min-w-0 flex-col gap-1'>
         <span className='font-mono text-sm font-semibold tabular-nums'>
-          {formatRequestPrice(
-            props.model,
-            showRechargePrice,
-            priceRate,
-            usdExchangeRate,
-            props.selectedGroup
-          )}
+          {amount}
           <span className='text-muted-foreground text-xs font-normal'>
             {' '}
-            / {t('request')}
+            / {unit}
           </span>
         </span>
       </div>
     )
   }
 
+  const promotionNote = props.model.square_display?.note && (
+    <p
+      className={cn(
+        'font-semibold',
+        isDirectory ? 'truncate text-xs' : 'text-sm break-words',
+        MODEL_SQUARE_COLORS[props.model.square_display.color ?? 'red'].note
+      )}
+      title={isDirectory ? props.model.square_display.note : undefined}
+    >
+      {props.model.square_display.note}
+    </p>
+  )
+  const pricing = isDirectory ? (
+    <div
+      role='group'
+      aria-label={t('Pricing')}
+      className='min-w-0 truncate text-xs'
+    >
+      {priceSummary}
+    </div>
+  ) : (
+    <div
+      role='group'
+      aria-label={t('Pricing')}
+      className='mt-auto flex min-w-0 flex-col gap-1.5'
+    >
+      <ModelBillingModeBadge model={props.model} appearance='caption' />
+      {dynamicSummary?.providerCount && (
+        <span className='text-muted-foreground text-xs break-words'>
+          {t('{{count}} providers', { count: dynamicSummary.providerCount })}
+          {dynamicSummary.hasUnconfiguredProviders &&
+            ` · ${t('Not configured for some providers')}`}
+        </span>
+      )}
+      <div className='grid grid-cols-[repeat(auto-fit,minmax(88px,1fr))] gap-x-3 gap-y-2'>
+        {priceSummary}
+      </div>
+      {promotionNote}
+    </div>
+  )
+
   const detailsAction = (
     <Button
       variant='ghost'
-      size='sm'
+      size={isDirectory ? 'icon-xs' : 'sm'}
+      aria-label={isDirectory ? t('Details') : undefined}
+      title={isDirectory ? t('Details') : undefined}
       onClick={() => props.onClick(props.model.model_name || '')}
       className={cn(isDirectory && 'stolas-model-details')}
     >
-      {t('Details')}
+      {!isDirectory && t('Details')}
       <ChevronRight aria-hidden data-icon='inline-end' />
     </Button>
+  )
+  const copyAction = (
+    <CopyButton
+      value={props.model.model_name}
+      tooltip={t('Copy model name')}
+      className={isDirectory ? 'ms-auto size-5' : 'size-7'}
+      iconClassName={isDirectory ? 'size-3' : 'size-3.5'}
+    />
   )
 
   return (
@@ -333,8 +436,8 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
             />
           ) : (
             <div aria-hidden='true' className='stolas-model-cover-icon'>
-              {(vendorIconKey && getLobeIcon(vendorIconKey, 64)) ||
-                (modelIconKey && getLobeIcon(modelIconKey, 64)) || (
+              {(vendorIconKey && getLobeIcon(vendorIconKey, 48)) ||
+                (modelIconKey && getLobeIcon(modelIconKey, 48)) || (
                   <span>{initial}</span>
                 )}
             </div>
@@ -370,9 +473,12 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
         {(!isDirectory || artwork) && (
           <div
             aria-hidden
-            className='bg-muted/50 flex size-10 shrink-0 items-center justify-center rounded-lg'
+            className={cn(
+              'bg-muted/50 flex shrink-0 items-center justify-center rounded-lg',
+              isDirectory ? 'size-6 rounded-md' : 'size-10'
+            )}
           >
-            {(artwork && vendorIconKey && getLobeIcon(vendorIconKey, 24)) ||
+            {(artwork && vendorIconKey && getLobeIcon(vendorIconKey, 16)) ||
               modelIcon || (
                 <span className='text-muted-foreground text-sm font-bold'>
                   {initial}
@@ -382,21 +488,27 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
         )}
         <div className='min-w-0 flex-1'>
           <h3
-            className='line-clamp-2 font-mono text-[15px] leading-snug font-semibold [overflow-wrap:anywhere]'
+            className={cn(
+              'font-mono text-[15px] leading-snug font-semibold',
+              isDirectory ? 'truncate' : 'line-clamp-2 [overflow-wrap:anywhere]'
+            )}
             title={props.model.model_name}
           >
             {props.model.model_name}
           </h3>
-          {artwork ? (
+          {isDirectory ? (
             <div className='stolas-model-meta'>
-              <span className='stolas-model-category'>
-                {getModelCategoryLabels(t)[getModelCategory(props.model)]}
-              </span>
+              {artwork && (
+                <span className='stolas-model-category'>
+                  {getModelCategoryLabels(t)[getModelCategory(props.model)]}
+                </span>
+              )}
               {props.model.vendor_name && (
                 <span className='truncate' title={props.model.vendor_name}>
                   {props.model.vendor_name}
                 </span>
               )}
+              {copyAction}
             </div>
           ) : (
             props.model.vendor_name && (
@@ -409,12 +521,7 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
             )
           )}
         </div>
-        <CopyButton
-          value={props.model.model_name}
-          tooltip={t('Copy model name')}
-          className='size-7'
-          iconClassName='size-3.5'
-        />
+        {!isDirectory && copyAction}
       </CardHeader>
       <CardContent
         className={cn(
@@ -428,9 +535,15 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
             isDirectory && 'stolas-model-description'
           )}
         >
-          <p className='text-muted-foreground line-clamp-2 text-[13px] leading-5 break-words'>
+          <p
+            className={cn(
+              'text-muted-foreground text-[13px] leading-5 break-words',
+              isDirectory ? 'line-clamp-3' : 'line-clamp-2'
+            )}
+          >
             {props.model.description || t('No description available.')}
           </p>
+          {isDirectory && promotionNote}
           {tags.length > 0 && (
             <div
               role='group'
@@ -449,51 +562,15 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
             </div>
           )}
         </div>
-        <div
-          role='group'
-          aria-label={t('Pricing')}
-          className={cn(
-            'mt-auto flex min-w-0 flex-col gap-1.5',
-            isDirectory && 'stolas-model-pricing'
-          )}
-        >
-          {!isDirectory && (
-            <ModelBillingModeBadge model={props.model} appearance='caption' />
-          )}
-          {dynamicSummary?.providerCount && (
-            <span className='text-muted-foreground text-xs break-words'>
-              {t('{{count}} providers', {
-                count: dynamicSummary.providerCount,
-              })}
-              {dynamicSummary.hasUnconfiguredProviders &&
-                ` · ${t('Not configured for some providers')}`}
-            </span>
-          )}
-          <div className='grid grid-cols-[repeat(auto-fit,minmax(88px,1fr))] gap-x-3 gap-y-2'>
-            {priceSummary}
-          </div>
-          {props.model.square_display?.note && (
-            <p
-              className={cn(
-                'text-sm font-semibold break-words',
-                MODEL_SQUARE_COLORS[props.model.square_display.color ?? 'red']
-                  .note
-              )}
-            >
-              {props.model.square_display.note}
-            </p>
-          )}
-        </div>
-        {((!isDirectory && groups.length > 0) || endpoints.length > 0) && (
+        {!isDirectory && pricing}
+        {!isDirectory && (groups.length > 0 || endpoints.length > 0) && (
           <dl
             className={cn(
               'grid min-w-0 grid-cols-2 gap-3 text-xs',
-              isDirectory && 'stolas-model-access',
-              (isDirectory || groups.length === 0 || endpoints.length === 0) &&
-                'grid-cols-1'
+              (groups.length === 0 || endpoints.length === 0) && 'grid-cols-1'
             )}
           >
-            {!isDirectory && groups.length > 0 && (
+            {groups.length > 0 && (
               <div className='flex min-w-0 items-baseline gap-1.5'>
                 <dt className='text-muted-foreground shrink-0'>
                   {t('Groups')}
@@ -544,13 +621,14 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
       >
         {isDirectory ? (
           <>
+            {pricing}
+            {detailsAction}
             {hasPerfMetrics && (
               <ModelPerfBadge
                 perf={props.perf}
                 className='stolas-model-metrics'
               />
             )}
-            {detailsAction}
           </>
         ) : (
           <ModelPerfBadge

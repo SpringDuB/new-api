@@ -240,9 +240,13 @@ For commercial licensing, please contact support@quantumnous.com
 }
 
 .stolas-model-gallery {
+  --gallery-gap: 1rem;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 17.25rem), 1fr));
-  gap: 1.25rem;
+  grid-template-columns: repeat(
+    auto-fill,
+    minmax(min(100%, max(14rem, (100% - 3 * var(--gallery-gap)) / 4)), 1fr)
+  );
+  gap: 1.5rem var(--gallery-gap);
   align-items: stretch;
 }
 .stolas-model-tile[data-slot='card'] {
@@ -268,7 +272,7 @@ For commercial licensing, please contact support@quantumnous.com
 }
 .stolas-model-tile[data-artwork] .stolas-model-cover {
   min-height: 0;
-  aspect-ratio: 2.25;
+  aspect-ratio: 16 / 9;
   overflow: hidden;
   background: var(--muted);
 }
@@ -283,7 +287,7 @@ For commercial licensing, please contact support@quantumnous.com
   display: grid;
   place-items: center;
   color: var(--primary);
-  font-size: 3rem;
+  font-size: 2.5rem;
   font-weight: 600;
 }
 .stolas-model-cover-promotion {
@@ -302,13 +306,13 @@ For commercial licensing, please contact support@quantumnous.com
 }
 .stolas-model-tile .stolas-model-identity {
   align-items: start;
-  gap: 0.5rem;
-  padding: 0.75rem 0.9rem 0.5rem;
+  gap: 0.375rem;
+  padding: 0.5rem 0.75rem;
 }
 .stolas-model-tile .stolas-model-identity h3 {
   color: var(--card-foreground);
   font-family: inherit;
-  font-size: 1.125rem;
+  font-size: 0.8125rem;
   font-weight: 700;
   line-height: 1.3;
 }
@@ -316,7 +320,7 @@ For commercial licensing, please contact support@quantumnous.com
   display: flex;
   align-items: center;
   gap: 0.45rem;
-  margin-top: 0.28rem;
+  margin-top: 0.125rem;
   color: var(--muted-foreground);
   font-size: 0.72rem;
 }
@@ -331,32 +335,25 @@ For commercial licensing, please contact support@quantumnous.com
   font-weight: 600;
 }
 .stolas-model-tile .stolas-model-content {
-  gap: 0.65rem;
-  padding: 0 0.9rem;
+  flex: 0 0 auto;
+  padding: 0 0.75rem 0.625rem;
 }
 .stolas-model-description > p {
-  line-height: 1.42;
+  font-size: 0.75rem;
+  line-height: 1.4;
 }
-.stolas-model-tile .stolas-model-access {
-  display: flex;
-  order: 1;
+.stolas-model-price-entry + .stolas-model-price-entry::before {
+  content: ' · ';
   color: var(--muted-foreground);
-  font-size: 0.65rem;
-}
-.stolas-model-tile .stolas-model-pricing {
-  order: 2;
-  border-top: 1px solid var(--border);
-  padding-top: 0.6rem;
 }
 .stolas-model-tile .stolas-model-footer {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  gap: 0.5rem;
-  padding: 0.35rem 0.9rem 0.65rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.25rem;
+  border-top: 1px solid var(--border);
+  padding: 0.5rem 0.625rem;
 }
 .stolas-model-tile .stolas-model-details {
-  margin-inline-start: auto;
   color: var(--primary);
 }
 .stolas-model-tile[data-artwork] .stolas-model-details {
@@ -367,11 +364,23 @@ For commercial licensing, please contact support@quantumnous.com
 }
 .stolas-model-tile .stolas-model-metrics {
   min-width: 0;
-  flex: 1;
+  grid-column: 1 / -1;
 }
-@media (max-width: 767px) {
+@media (min-width: 900px) {
   .stolas-model-gallery {
-    gap: 1rem;
+    /* Reserve room for two card bodies, the row gap and some breathing room. */
+    --model-cover-max-height: max(
+      6rem,
+      calc((100dvh - var(--stolas-public-header-offset, 5rem) - 20rem) / 2)
+    );
+  }
+  .stolas-model-tile .stolas-model-cover {
+    min-height: min(8rem, var(--model-cover-max-height));
+  }
+  .stolas-model-tile[data-artwork] .stolas-model-cover {
+    width: 100%;
+    min-height: 0;
+    max-height: var(--model-cover-max-height);
   }
 }
 @media (max-width: 899px) {

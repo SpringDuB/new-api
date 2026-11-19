@@ -234,7 +234,7 @@ export function PublicHeader(props: PublicHeaderProps) {
     <>
       <header className='bg-background/95 border-border fixed inset-x-0 top-0 z-50 border-b backdrop-blur-sm'>
         <div className={cn('mx-auto max-w-7xl px-4 md:px-10')}>
-          <nav className={cn('flex h-20 items-center justify-between gap-2')}>
+          <nav className='flex h-(--stolas-public-header-offset) items-center justify-between gap-2'>
             {/* Logo */}
             <div className='@container/system-brand flex min-w-0 flex-1 items-center gap-1 lg:min-w-36'>
               <Link
@@ -421,7 +421,7 @@ export function PublicHeader(props: PublicHeaderProps) {
             : 'pointer-events-none opacity-0'
         )}
       >
-        <div className='flex h-full flex-col justify-between px-8 pt-20 pb-10'>
+        <div className='flex h-full flex-col justify-between px-8 pt-(--stolas-public-header-offset) pb-10'>
           <nav className='flex flex-col gap-1'>
             {links.map((link, i) => {
               const isActive = pathname === link.href

@@ -47,7 +47,7 @@ export function PublicLayout(props: PublicLayoutProps) {
       />
 
       {props.showMainContainer !== false ? (
-        <main className='container px-4 py-6 pt-20 md:px-4'>
+        <main className='container px-4 py-6 pt-(--stolas-public-header-offset) md:px-4'>
           {props.children}
         </main>
       ) : (

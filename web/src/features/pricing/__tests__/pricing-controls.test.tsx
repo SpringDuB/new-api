@@ -64,16 +64,12 @@ function sidebarProps(): PricingSidebarProps {
 }
 
 describe('pricing controls', () => {
-  it('pins only category and search controls while sort and display scroll with the results', () => {
+  it('lets the category controls scroll away with the results', () => {
     render(<PricingToolbar {...toolbarProps()} />)
     const toolbar = screen
       .getByRole('navigation', { name: 'Model categories' })
       .closest('.stolas-catalog-toolbar')
-    expect(toolbar).toHaveClass(
-      'sticky',
-      'top-[var(--stolas-public-header-offset,5rem)]',
-      'z-30'
-    )
+    expect(toolbar).not.toHaveClass('sticky')
     expect(toolbar).not.toContainElement(
       screen.getByRole('combobox', { name: 'Sort' })
     )

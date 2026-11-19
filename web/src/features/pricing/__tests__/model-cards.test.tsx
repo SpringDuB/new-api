@@ -178,9 +178,12 @@ describe('model cards', () => {
     expect(within(entry).getByText('Available today')).toBeVisible()
     expect(
       within(entry).getByText('A video model with an actual duration price.')
-    ).toBeVisible()
+    ).toHaveClass('line-clamp-3')
     expect(within(entry).getByText('default +1')).toBeVisible()
-    expect(within(entry).getByText('openai-video')).toBeVisible()
+    expect(within(entry).queryByText('openai-video')).not.toBeInTheDocument()
+    expect(
+      within(entry).queryByRole('group', { name: 'Tags' })
+    ).not.toBeInTheDocument()
     const price = within(entry).getByRole('group', { name: 'Pricing' })
     expect(price).toHaveTextContent('$0.4 / s')
     expect(price).not.toHaveTextContent(/1K|1M/)
@@ -278,9 +281,15 @@ describe('model cards', () => {
     const onClick = vi.fn()
     const name = 'provider/model-with-a-long-name-and-a-version-suffix-20260906'
     render(
-      <ModelCard model={pricingModel({ model_name: name })} onClick={onClick} />
+      <ModelCard
+        model={pricingModel({ model_name: name })}
+        onClick={onClick}
+        presentation='directory'
+      />
     )
-    expect(screen.getByRole('heading', { name })).toHaveAttribute('title', name)
+    const heading = screen.getByRole('heading', { name })
+    expect(heading).toHaveClass('truncate')
+    expect(heading).toHaveAttribute('title', name)
     await user.click(screen.getByRole('button', { name: 'Copy model name' }))
     expect(await navigator.clipboard.readText()).toBe(name)
     expect(onClick).not.toHaveBeenCalled()
@@ -685,30 +694,41 @@ describe('model cards', () => {
     expect(screen.queryByText('Input')).not.toBeInTheDocument()
   })
 
-  it('shows a spaced task token range with its unit when an example price is present', () => {
-    render(
-      <ModelCard
-        model={pricingModel({
-          billing_mode: 'tiered_expr',
-          billing_expr:
-            'u("mode") == "pro" ? tier("pro", u("tokens") * 70 / 1000000) : tier("std", u("tokens") * 42 / 1000000)',
-          billing_usage_schema: {
-            tokens: { type: 'number', unit: 'token' },
-            mode: { enum: ['std', 'pro'] },
-          },
-          billing_usage_examples: [
-            { label: '480p · 5s', facts: { tokens: 48000, mode: 'std' } },
-          ],
-        })}
-        onClick={vi.fn()}
-        tokenUnit='K'
-      />
-    )
-    expect(screen.getByText('$42 – $70').parentElement).toHaveTextContent(
-      '$42 – $70 / 1M token'
-    )
-    expect(screen.getByText(/480p · 5s ≈/)).toBeVisible()
-  })
+  it.each(['card', 'directory'] as const)(
+    'shows a task token range with its unit and only shows an example price outside the directory (%s)',
+    (presentation) => {
+      render(
+        <ModelCard
+          model={pricingModel({
+            billing_mode: 'tiered_expr',
+            billing_expr:
+              'u("mode") == "pro" ? tier("pro", u("tokens") * 70 / 1000000) : tier("std", u("tokens") * 42 / 1000000)',
+            billing_usage_schema: {
+              tokens: { type: 'number', unit: 'token' },
+              mode: { enum: ['std', 'pro'] },
+            },
+            billing_usage_examples: [
+              { label: '480p · 5s', facts: { tokens: 48000, mode: 'std' } },
+            ],
+          })}
+          onClick={vi.fn()}
+          tokenUnit='K'
+          presentation={presentation}
+        />
+      )
+      expect(screen.getByText('$42 – $70').parentElement).toHaveTextContent(
+        '$42 – $70 / 1M token'
+      )
+      if (presentation === 'directory') {
+        expect(screen.queryByText(/480p · 5s ≈/)).not.toBeInTheDocument()
+        expect(screen.getByRole('group', { name: 'Pricing' })).toHaveClass(
+          'truncate'
+        )
+      } else {
+        expect(screen.getByText(/480p · 5s ≈/)).toBeVisible()
+      }
+    }
+  )
 
   it('keeps an unrecognized expression visible with the special billing message', () => {
     const expression =

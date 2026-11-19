@@ -50,14 +50,24 @@ const categoryArt: Record<ModelCategory, string> = {
   chat: 'rain-market',
   other: 'desert-gate',
 }
-const coverArt = [
-  'storm-crew',
-  'mountain-dusk',
-  'winter-visit',
-  'lava-valley',
-  'sea-vortex',
-  'frozen-citadel',
-]
+const familyCoverArt: Partial<Record<ModelCategory, readonly string[]>> = {
+  video: [
+    'storm-crew',
+    'mountain-dusk',
+    'winter-visit',
+    'lava-valley',
+    'sea-vortex',
+    'frozen-citadel',
+  ].map((name) => `${artRoot}/${name}.webp`),
+  image: [
+    'wisteria-courtyard',
+    'paris-sketch',
+    'temple-lotus',
+    'blue-brushwork',
+    'autumn-lake',
+    'garden-window',
+  ].map((name) => `/stolas/art/catalog-covers/${name}.webp`),
+}
 const previewSize = 6
 
 function getFamilyIcon(models: PricingModel[], family: string) {
@@ -229,7 +239,10 @@ export function ModelLibraryNavigation({
                       >
                         <img
                           className='stolas-library-cover'
-                          src={`${artRoot}/${coverArt[index]}.webp`}
+                          src={
+                            familyCoverArt[category]?.[index] ??
+                            `${artRoot}/${categoryArt[category]}.webp`
+                          }
                           alt=''
                           width={640}
                           height={360}

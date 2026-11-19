@@ -23,7 +23,7 @@ import {
   createRouter,
   RouterProvider,
 } from '@tanstack/react-router'
-import { act, cleanup, render, screen } from '@testing-library/react'
+import { act, cleanup, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -180,9 +180,18 @@ describe('Stolas workspace navigation', () => {
     expect(screen.getAllByRole('link', { name: /Seedance 2.5/ })).toHaveLength(
       1
     )
-    expect(screen.getByRole('link', { name: /^Images/ })).toHaveAttribute(
-      'href',
-      '/pricing?category=image'
+    const imagesCategory = screen.getByRole('link', { name: /^Images/ })
+    expect(imagesCategory).toHaveAttribute('href', '/pricing?category=image')
+    const videoCover = family.querySelector('.stolas-library-cover')
+    expect(videoCover).toHaveAttribute('src')
+    await act(async () => imagesCategory.focus())
+    const imagePreview = await screen.findByRole('region', { name: 'Images' })
+    const imageCover = within(imagePreview)
+      .getByRole('link', { name: /Seedream/ })
+      .querySelector('.stolas-library-cover')
+    expect(imageCover).toHaveAttribute('src')
+    expect(imageCover?.getAttribute('src')).not.toBe(
+      videoCover?.getAttribute('src')
     )
     expect(screen.getByRole('link', { name: 'All models' })).toHaveAttribute(
       'href',
