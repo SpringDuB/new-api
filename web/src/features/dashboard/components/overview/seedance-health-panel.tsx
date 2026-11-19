@@ -45,9 +45,12 @@ import { useAuthStore } from '@/stores/auth-store'
 import '@/styles/stolas-health.css'
 
 import { SeedanceChannelStatus } from './seedance-channel-status'
+import {
+  SEEDANCE_PAGE_SIZE,
+  SeedanceHealthPagination,
+} from './seedance-health-pagination'
 
 const HOURS = 24
-const INITIAL_MODEL_COUNT = 6
 
 interface SeedanceHealthPanelProps {
   models: string[]
@@ -157,7 +160,8 @@ export function SeedanceHealthPanel(props: SeedanceHealthPanelProps) {
   const user = useAuthStore((state) => state.auth.user)
   const isAdmin = (user?.role ?? 0) >= ROLE.ADMIN
   const [selectedTab, setSelectedTab] = useState('models')
-  const [showAll, setShowAll] = useState(false)
+  const [modelPage, setModelPage] = useState(1)
+  const [channelPage, setChannelPage] = useState(1)
   const activeTab = isAdmin ? selectedTab : 'models'
   const modelNames = useMemo(
     () =>
@@ -196,9 +200,16 @@ export function SeedanceHealthPanel(props: SeedanceHealthPanelProps) {
       ),
     [modelNames, metricsByName]
   )
-  const visibleNames = showAll
-    ? orderedNames
-    : orderedNames.slice(0, INITIAL_MODEL_COUNT)
+  const modelPageCount = Math.max(
+    1,
+    Math.ceil(orderedNames.length / SEEDANCE_PAGE_SIZE)
+  )
+  const visiblePage = Math.min(modelPage, modelPageCount)
+  const visibleStart = (visiblePage - 1) * SEEDANCE_PAGE_SIZE
+  const visibleNames = orderedNames.slice(
+    visibleStart,
+    visibleStart + SEEDANCE_PAGE_SIZE
+  )
   const loading =
     !!props.loading ||
     (!props.error && modelNames.length > 0 && metricsQuery.isPending)
@@ -301,6 +312,12 @@ export function SeedanceHealthPanel(props: SeedanceHealthPanelProps) {
           )}
           {!loading && !failed && modelNames.length > 0 && (
             <>
+              <SeedanceHealthPagination
+                label={t('Model performance')}
+                page={visiblePage}
+                pageCount={modelPageCount}
+                onPageChange={setModelPage}
+              />
               <div>
                 {visibleNames.map((name) => (
                   <SeedanceModelActivity
@@ -311,20 +328,6 @@ export function SeedanceHealthPanel(props: SeedanceHealthPanelProps) {
                   />
                 ))}
               </div>
-              {orderedNames.length > INITIAL_MODEL_COUNT && (
-                <Button
-                  variant='ghost'
-                  className='stolas-health-more'
-                  onClick={() => setShowAll(!showAll)}
-                  aria-expanded={showAll}
-                >
-                  {showAll
-                    ? t('Show fewer models')
-                    : t('Show all {{count}} models', {
-                        count: orderedNames.length,
-                      })}
-                </Button>
-              )}
               <p className='stolas-health-note'>
                 {t('Platform-wide observations for your available models.')}{' '}
                 {t(
@@ -336,7 +339,10 @@ export function SeedanceHealthPanel(props: SeedanceHealthPanelProps) {
         </TabsContent>
         {isAdmin && (
           <TabsContent value='channels'>
-            <SeedanceChannelStatus />
+            <SeedanceChannelStatus
+              page={channelPage}
+              onPageChange={setChannelPage}
+            />
           </TabsContent>
         )}
       </Tabs>

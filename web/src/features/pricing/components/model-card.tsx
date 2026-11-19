@@ -38,6 +38,10 @@ import {
   isUnconfiguredTaskUsageModel,
 } from '../lib/dynamic-price'
 import { parseTags } from '../lib/filters'
+import {
+  getModelCategory,
+  getModelCategoryLabels,
+} from '../lib/model-categories'
 import { isTokenBasedModel } from '../lib/model-helpers'
 import { MODEL_SQUARE_COLORS } from '../lib/model-square-display'
 import { formatPrice, formatRequestPrice } from '../lib/price'
@@ -49,6 +53,7 @@ import { ModelPromotionBadge } from './model-promotion-badge'
 
 export interface ModelCardProps {
   model: PricingModel
+  cover?: string
   onClick: (modelName: string) => void
   priceRate?: number
   usdExchangeRate?: number
@@ -73,11 +78,13 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
   const modelIconKey =
     props.model.icon?.trim() || props.model.vendor_icon?.trim()
   const modelIcon = modelIconKey ? getLobeIcon(modelIconKey, 28) : null
+  const vendorIconKey = props.model.vendor_icon?.trim()
   const initial = props.model.model_name?.charAt(0).toUpperCase() || '?'
   const isUnconfiguredTaskUsage = isUnconfiguredTaskUsageModel(props.model)
   const billingTime = useBillingTime(props.model.billing_expr)
   const currency = useSystemConfigStore((state) => state.config.currency)
   const isDirectory = props.presentation === 'directory'
+  const artwork = isDirectory ? props.cover : undefined
   const hasPerfMetrics =
     props.perf != null &&
     ([props.perf.avg_latency_ms, props.perf.avg_tps].some(
@@ -304,6 +311,7 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
       role={isDirectory ? 'article' : undefined}
       aria-label={isDirectory ? props.model.model_name : undefined}
       data-highlight={props.model.square_display?.highlight || undefined}
+      data-artwork={artwork ? true : undefined}
       className={cn(
         'hover:ring-foreground/20 h-full min-w-0 gap-3 transition-colors',
         isDirectory && 'stolas-model-tile',
@@ -313,13 +321,24 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
     >
       {isDirectory && (
         <div data-slot='model-cover' className='stolas-model-cover'>
-          <div aria-hidden='true' className='stolas-model-cover-icon'>
-            {modelIconKey ? (
-              getLobeIcon(modelIconKey, 64)
-            ) : (
-              <span>{initial}</span>
-            )}
-          </div>
+          {artwork ? (
+            <img
+              className='stolas-model-cover-image'
+              src={artwork}
+              alt=''
+              width={640}
+              height={360}
+              loading='lazy'
+              decoding='async'
+            />
+          ) : (
+            <div aria-hidden='true' className='stolas-model-cover-icon'>
+              {(vendorIconKey && getLobeIcon(vendorIconKey, 64)) ||
+                (modelIconKey && getLobeIcon(modelIconKey, 64)) || (
+                  <span>{initial}</span>
+                )}
+            </div>
+          )}
           {props.model.square_display?.badge && (
             <div className='stolas-model-cover-promotion'>
               <ModelPromotionBadge decoration={props.model.square_display} />
@@ -348,16 +367,17 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
           isDirectory && 'stolas-model-identity'
         )}
       >
-        {!isDirectory && (
+        {(!isDirectory || artwork) && (
           <div
             aria-hidden
             className='bg-muted/50 flex size-10 shrink-0 items-center justify-center rounded-lg'
           >
-            {modelIcon || (
-              <span className='text-muted-foreground text-sm font-bold'>
-                {initial}
-              </span>
-            )}
+            {(artwork && vendorIconKey && getLobeIcon(vendorIconKey, 24)) ||
+              modelIcon || (
+                <span className='text-muted-foreground text-sm font-bold'>
+                  {initial}
+                </span>
+              )}
           </div>
         )}
         <div className='min-w-0 flex-1'>
@@ -367,13 +387,26 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
           >
             {props.model.model_name}
           </h3>
-          {props.model.vendor_name && (
-            <p
-              className='text-muted-foreground mt-1 truncate text-xs'
-              title={props.model.vendor_name}
-            >
-              {props.model.vendor_name}
-            </p>
+          {artwork ? (
+            <div className='stolas-model-meta'>
+              <span className='stolas-model-category'>
+                {getModelCategoryLabels(t)[getModelCategory(props.model)]}
+              </span>
+              {props.model.vendor_name && (
+                <span className='truncate' title={props.model.vendor_name}>
+                  {props.model.vendor_name}
+                </span>
+              )}
+            </div>
+          ) : (
+            props.model.vendor_name && (
+              <p
+                className='text-muted-foreground mt-1 truncate text-xs'
+                title={props.model.vendor_name}
+              >
+                {props.model.vendor_name}
+              </p>
+            )
           )}
         </div>
         <CopyButton

@@ -178,10 +178,45 @@ describe('Seedance health', () => {
     expect(within(unused).getByText('No recent requests')).toBeVisible()
     expect(within(unused).queryByText('100.00%')).not.toBeInTheDocument()
     expect(screen.queryByText('gpt-test')).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: 'Next page' })
+    ).not.toBeInTheDocument()
     expect(api.get).not.toHaveBeenCalledWith(
       '/api/channel/search',
       expect.anything()
     )
+  })
+
+  it('pages the ranked models six at a time and disables each boundary', async () => {
+    const user = userEvent.setup()
+    await renderHealth([
+      'seedance-2-mini',
+      'seedance-2-pro',
+      'seedance-alpha',
+      'seedance-beta',
+      'seedance-delta',
+      'seedance-gamma',
+      'seedance-zeta',
+    ])
+    await screen.findByText('Page 1 of 2')
+    const previous = screen.getByRole('button', { name: 'Previous page' })
+    const next = screen.getByRole('button', { name: 'Next page' })
+    expect(previous).toBeDisabled()
+    expect(screen.getAllByRole('heading', { level: 3 })).toHaveLength(6)
+    expect(screen.queryByText('seedance-zeta')).not.toBeInTheDocument()
+
+    await user.click(next)
+    expect(screen.getByText('Page 2 of 2')).toBeVisible()
+    expect(screen.getByRole('heading', { level: 3 })).toHaveTextContent(
+      'seedance-zeta'
+    )
+    expect(next).toBeDisabled()
+
+    await user.click(previous)
+    expect(
+      screen.getByRole('heading', { name: 'seedance-2-mini' })
+    ).toBeVisible()
+    expect(screen.queryByText('seedance-zeta')).not.toBeInTheDocument()
   })
 
   it('leaves inactive hours unmeasured instead of making a continuous green history', async () => {
@@ -234,6 +269,52 @@ describe('Seedance health', () => {
     expect(
       screen.getByRole('tab', { name: 'Model performance' })
     ).toHaveAttribute('aria-selected', 'true')
+  })
+
+  it('loads six channels per request and shows the final channel on the second page', async () => {
+    useAuthStore
+      .getState()
+      .auth.setUser({ id: 4, username: 'operator', role: ROLE.ADMIN })
+    const channelNames = [
+      'Studio',
+      'Cinema',
+      'Editorial',
+      'Draft',
+      'Video',
+      'Motion',
+      'Backup',
+    ]
+    vi.mocked(api.get).mockImplementation(async (_url, config) => {
+      const params = config?.params as { p?: number } | undefined
+      const start = params?.p === 2 ? 6 : 0
+      return {
+        data: {
+          success: true,
+          data: {
+            total: channelNames.length,
+            items: channelNames.slice(start, start + 6).map((name, index) => ({
+              id: start + index + 1,
+              name,
+              models: 'seedance-2-mini',
+              status: 1,
+            })),
+          },
+        },
+      }
+    })
+    const user = userEvent.setup()
+    await renderHealth([])
+    await user.click(screen.getByRole('tab', { name: 'Channel status' }))
+    await screen.findByText('Page 1 of 2')
+    expect(screen.getAllByRole('heading', { level: 3 })).toHaveLength(6)
+    await user.click(screen.getByRole('button', { name: 'Next page' }))
+
+    expect(await screen.findByRole('region', { name: 'Backup' })).toBeVisible()
+    expect(screen.getByText('Page 2 of 2')).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Next page' })).toBeDisabled()
+    expect(api.get).toHaveBeenLastCalledWith('/api/channel/search', {
+      params: { model: 'seedance', p: 2, page_size: 6 },
+    })
   })
 
   it('shows an empty inventory without fetching performance data when no Seedance models are available', async () => {

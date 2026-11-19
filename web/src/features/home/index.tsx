@@ -27,6 +27,7 @@ import { isLikelyHtml } from '@/lib/content-format'
 import { useAuthStore } from '@/stores/auth-store'
 
 import { Hero } from './components'
+import { InspirationGallery } from './components/sections/inspiration-gallery'
 import { HomeRankings } from './components/sections/rankings'
 import { useHomePageContent } from './hooks'
 
@@ -125,6 +126,7 @@ export function Home() {
     <PublicLayout showMainContainer={false}>
       <Hero isAuthenticated={isAuthenticated} />
       <HomeRankings />
+      <InspirationGallery />
       <Footer />
     </PublicLayout>
   )

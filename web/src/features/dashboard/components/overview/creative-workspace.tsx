@@ -28,7 +28,7 @@ export function CreativeWorkspace() {
   const { t } = useTranslation()
   return (
     <section aria-label={t('Quick actions')} className='stolas-launch-actions'>
-      <div className='stolas-launch-action'>
+      <div className='stolas-launch-action stolas-launch-canvas'>
         <h2 className='flex items-center gap-2 text-sm font-semibold'>
           <HugeiconsIcon
             icon={Film01Icon}

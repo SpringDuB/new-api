@@ -106,30 +106,71 @@ For commercial licensing, please contact support@quantumnous.com
   box-shadow: 12px 14px 0 color-mix(in srgb, var(--border) 45%, transparent);
 }
 
-.stolas-art-caption,
-.stolas-art-footer {
-  display: flex;
-  justify-content: space-between;
+.stolas-entry-art {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 3 / 1;
+  margin-top: auto;
+  object-fit: cover;
+  object-position: center 57%;
+  border: 1px solid var(--border);
+  background: var(--secondary);
+}
+.stolas-inspiration {
+  max-width: 80rem;
+  margin-inline: auto;
+  padding: 2.5rem 1.5rem 4rem;
+}
+.stolas-inspiration-grid {
+  display: grid;
   gap: 1rem;
-  padding: 0.65rem 0.3rem;
-  font-size: 0.62rem;
-  letter-spacing: 0.08em;
+  margin-top: 1.5rem;
 }
-
-.stolas-art-caption {
-  padding-top: 0.2rem;
-  color: var(--muted-foreground);
+.stolas-inspiration-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.375rem;
+  padding: 0.375rem;
+  border: 1px solid var(--border);
+  background: var(--card);
 }
-.stolas-art-footer {
-  padding-bottom: 0.1rem;
+.stolas-inspiration-pair img {
+  display: block;
+  width: 100%;
+  height: auto;
+  background: var(--secondary);
 }
-.stolas-art-footer > :last-child {
-  color: var(--primary);
-  font-size: 1rem;
+@media (min-width: 640px) {
+  .stolas-inspiration {
+    padding-inline: 2.5rem;
+  }
+}
+@media (min-width: 1024px) {
+  .stolas-inspiration-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 .stolas-auth-art {
-  background: var(--stolas-dark-paper);
+  background-color: #172e39;
   color: var(--stolas-light-ink);
+}
+@media (min-width: 1024px) {
+  .stolas-auth-art {
+    background-image:
+      linear-gradient(
+        180deg,
+        #172e39dc 0%,
+        #172e3900 25%,
+        #172e3900 48%,
+        #172e39 90%
+      ),
+      url('../assets/stolas-art/blue-canal.webp');
+    background-position:
+      center,
+      45% center;
+    background-size: cover;
+  }
 }
 .stolas-shell {
   --app-header-height: 4rem;
@@ -362,6 +403,18 @@ For commercial licensing, please contact support@quantumnous.com
   border-radius: 0.75rem;
   background: var(--card);
 }
+.stolas-launch-canvas {
+  background-image:
+    linear-gradient(
+      90deg,
+      var(--card) 0%,
+      color-mix(in srgb, var(--card) 72%, transparent) 100%
+    ),
+    url('../assets/stolas-art/ochre-paint.webp');
+  background-size: 9rem 100%;
+  background-position: right;
+  background-repeat: no-repeat;
+}
 .stolas-account-initial {
   display: grid;
   place-items: center;
@@ -441,6 +494,246 @@ For commercial licensing, please contact support@quantumnous.com
   background: color-mix(in srgb, var(--primary) 8%, var(--card));
   color: var(--primary);
 }
+
+/* Model library navigation */
+.stolas-library-trigger {
+  flex-shrink: 0;
+}
+
+.stolas-library-trigger[data-popup-open] .stolas-library-chevron {
+  transform: rotate(180deg);
+}
+
+.stolas-library-chevron {
+  transition: transform 150ms ease;
+}
+
+.stolas-library-menu[data-slot='popover-content'] {
+  width: min(69rem, calc(100vw - 2rem), var(--available-width, 100vw));
+  max-height: min(35rem, var(--available-height, 80dvh));
+  overflow-y: auto;
+  padding: 0.875rem;
+  border: 1px solid var(--border);
+  border-radius: 1rem;
+  background: var(--popover);
+  box-shadow: 0 20px 64px -24px
+    color-mix(in srgb, var(--foreground) 32%, transparent);
+}
+
+.stolas-library-layout {
+  display: grid;
+  grid-template-columns: minmax(11rem, 0.31fr) minmax(0, 1fr);
+  gap: 0.875rem;
+}
+
+.stolas-library-categories {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.stolas-library-all {
+  display: flex;
+  min-height: 2.25rem;
+  align-items: center;
+  margin-top: auto;
+  justify-content: space-between;
+  gap: 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  color: var(--foreground);
+  font-weight: 600;
+}
+
+.stolas-library-all:hover {
+  background: var(--muted);
+}
+
+.stolas-library-category {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  min-height: 3.75rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 0.625rem;
+  padding: 0.625rem 0.75rem;
+  background: var(--background);
+  color: var(--foreground);
+}
+
+.stolas-library-category[data-preview='true'] {
+  border-color: color-mix(in srgb, var(--primary) 50%, var(--border));
+  background: color-mix(in srgb, var(--primary) 7%, var(--background));
+}
+
+.stolas-library-category > img {
+  position: absolute;
+  z-index: -1;
+  inset-block: 0;
+  inset-inline-end: 0;
+  width: 68%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0.58;
+  mask-image: linear-gradient(to right, transparent, black 90%);
+}
+
+.stolas-library-category-copy {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 0.5rem;
+  overflow-wrap: anywhere;
+}
+
+.stolas-library-category-copy span {
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.stolas-library-category > svg {
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--background) 75%, transparent);
+}
+
+.stolas-library-preview {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  padding: 0.75rem;
+  background: color-mix(in srgb, var(--muted) 45%, var(--popover));
+}
+
+.stolas-library-preview-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin: 0 0 0.625rem;
+}
+
+.stolas-library-preview-header h2 {
+  font-size: 1rem;
+  font-weight: 650;
+}
+
+.stolas-library-preview-header a {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+}
+
+.stolas-library-preview-header a:hover {
+  color: var(--foreground);
+}
+
+.stolas-library-state {
+  display: grid;
+  min-height: 8rem;
+  place-content: center;
+  color: var(--muted-foreground);
+}
+
+.stolas-library-cards {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.625rem;
+}
+
+.stolas-library-card {
+  display: flex;
+  min-width: 0;
+  height: 100%;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--background);
+  transition: border-color 150ms ease;
+}
+
+.stolas-library-card:hover {
+  border-color: color-mix(in srgb, var(--primary) 55%, var(--border));
+}
+
+.stolas-library-card:focus-visible,
+.stolas-library-all:focus-visible,
+.stolas-library-category:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.stolas-library-cover {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 2.6;
+  object-fit: cover;
+  background: var(--muted);
+}
+
+.stolas-library-card-copy {
+  min-width: 0;
+  padding: 0.5rem 0.625rem 0.625rem;
+}
+
+.stolas-library-card-title {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+.stolas-library-card-icon {
+  display: grid;
+  width: 1.25rem;
+  flex-shrink: 0;
+  place-items: center;
+  color: var(--muted-foreground);
+}
+
+.stolas-library-card-title strong {
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stolas-library-card-copy p {
+  display: -webkit-box;
+  margin-top: 0.25rem;
+  overflow: hidden;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+@media (max-width: 1100px) {
+  .stolas-library-cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stolas-library-menu,
+  .stolas-library-chevron {
+    animation: none !important;
+    transition: none;
+  }
+}
+
 .stolas-workspace-menu [data-slot='dropdown-menu-item'][aria-current='page'] {
   background: var(--accent);
 }

@@ -129,6 +129,15 @@ export function Hero(props: HeroProps) {
                 'Bring scripts, images and video together on an infinite canvas. Develop a scene, explore a visual direction and keep your story connected.'
               )}
             </p>
+            <img
+              src='/stolas/art/garden-cottage.webp'
+              width={880}
+              height={495}
+              loading='lazy'
+              decoding='async'
+              alt=''
+              className='stolas-entry-art'
+            />
             <CanvasEntry variant='outline' />
           </article>
           <article className='flex flex-col items-start gap-5 border-t pt-8 md:border-t-0 md:pt-0 md:pl-12'>
@@ -146,6 +155,15 @@ export function Hero(props: HeroProps) {
                 'Connect your application to the models you need. Manage API keys, inspect usage and track spending in the Console.'
               )}
             </p>
+            <img
+              src='/stolas/art/blue-canal-wide.webp'
+              width={960}
+              height={320}
+              loading='lazy'
+              decoding='async'
+              alt=''
+              className='stolas-entry-art'
+            />
             <Button
               variant='outline'
               size='lg'

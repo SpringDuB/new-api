@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
-import { useState } from 'react'
+import { useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { EmptyState } from '@/components/empty-state'
@@ -32,19 +32,26 @@ import {
 } from '@/features/channels/constants'
 import { formatLatency } from '@/features/performance-metrics/lib/format'
 import { toIntlLocale } from '@/i18n/languages'
-import { formatNumber } from '@/lib/format'
 import { ROLE } from '@/lib/roles'
 import { requireServerSuccess } from '@/lib/server-error-message'
 import { useAuthStore } from '@/stores/auth-store'
 
-const PAGE_SIZE = 12
+import {
+  SEEDANCE_PAGE_SIZE,
+  SeedanceHealthPagination,
+} from './seedance-health-pagination'
 
-export function SeedanceChannelStatus() {
+export function SeedanceChannelStatus({
+  page,
+  onPageChange,
+}: {
+  page: number
+  onPageChange: (page: number) => void
+}) {
   const { t, i18n } = useTranslation()
   const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
   const user = useAuthStore((state) => state.auth.user)
   const isAdmin = (user?.role ?? 0) >= ROLE.ADMIN
-  const [page, setPage] = useState(1)
   const query = useQuery({
     queryKey: ['stolas', 'seedance-channels', user?.id, user?.role, page],
     queryFn: async () =>
@@ -52,15 +59,30 @@ export function SeedanceChannelStatus() {
         await searchChannels({
           model: 'seedance',
           p: page,
-          page_size: PAGE_SIZE,
+          page_size: SEEDANCE_PAGE_SIZE,
         })
       ),
     enabled: isAdmin,
+    placeholderData: (previous, previousQuery) => {
+      const previousKey = previousQuery?.queryKey
+      if (previousKey?.[2] === user?.id && previousKey?.[3] === user?.role) {
+        return previous
+      }
+    },
     staleTime: 60_000,
     refetchInterval: 60_000,
   })
+  const channels = query.data?.data?.items ?? []
+  const total = query.data?.data?.total ?? 0
+  const pageCount = Math.max(1, Math.ceil(total / SEEDANCE_PAGE_SIZE))
+  const pageOutOfRange =
+    !!query.data && !query.isPlaceholderData && page > pageCount
+  useEffect(() => {
+    if (isAdmin && pageOutOfRange) onPageChange(pageCount)
+  }, [isAdmin, pageOutOfRange, pageCount, onPageChange])
+
   if (!isAdmin) return null
-  if (query.isPending) {
+  if (query.isPending || pageOutOfRange) {
     return (
       <div
         role='status'
@@ -74,17 +96,32 @@ export function SeedanceChannelStatus() {
   }
   if (query.isError) {
     return (
-      <ErrorState
-        title={t('Unable to load channel status')}
-        onRetry={() => void query.refetch()}
-      />
+      <>
+        <ErrorState
+          title={t('Unable to load channel status')}
+          onRetry={() => void query.refetch()}
+        />
+        {page > 1 && (
+          <Button
+            variant='outline'
+            size='sm'
+            onClick={() => onPageChange(page - 1)}
+          >
+            {t('Previous page')}
+          </Button>
+        )}
+      </>
     )
   }
-  const channels = query.data.data?.items ?? []
-  const total = query.data.data?.total ?? 0
 
   return (
     <div>
+      <SeedanceHealthPagination
+        label={t('Channel status')}
+        page={page}
+        pageCount={pageCount}
+        onPageChange={onPageChange}
+      />
       <p className='stolas-health-note'>
         {t(
           'Channel state and saved test results are shown separately from model completion metrics.'
@@ -93,57 +130,66 @@ export function SeedanceChannelStatus() {
       {channels.length === 0 && (
         <EmptyState title={t('No Seedance channels configured')} />
       )}
-      {channels.map((channel) => {
-        const hasSeedanceTest =
-          channel.test_time > 0 && /seedance/i.test(channel.test_model ?? '')
-        const statusKey =
-          CHANNEL_STATUS_LABELS[
-            channel.status as keyof typeof CHANNEL_STATUS_LABELS
-          ] ?? 'Unknown'
-        return (
-          <section
-            key={channel.id}
-            className='stolas-health-channel'
-            aria-label={channel.name}
-          >
-            <div className='stolas-health-model-name'>
-              <h3>{channel.name}</h3>
-              <p>
-                #{channel.id} ·{' '}
-                {
-                  channel.models
-                    .split(',')
-                    .filter((model) => /seedance/i.test(model)).length
-                }{' '}
-                {t('models')}
-              </p>
-            </div>
-            <div
-              className='stolas-health-channel-state'
-              data-enabled={channel.status === CHANNEL_STATUS.ENABLED}
+      <div
+        aria-busy={query.isPlaceholderData}
+        className={query.isPlaceholderData ? 'opacity-60' : undefined}
+      >
+        {channels.map((channel) => {
+          const hasSeedanceTest =
+            channel.test_time > 0 && /seedance/i.test(channel.test_model ?? '')
+          const statusKey =
+            CHANNEL_STATUS_LABELS[
+              channel.status as keyof typeof CHANNEL_STATUS_LABELS
+            ] ?? 'Unknown'
+          return (
+            <section
+              key={channel.id}
+              className='stolas-health-channel'
+              aria-label={channel.name}
             >
-              <span aria-hidden='true' />
-              {t(statusKey)}
-            </div>
-            <dl className='stolas-health-model-metrics'>
-              <div>
-                <dt>{t('Last Seedance test')}</dt>
-                <dd>
-                  {hasSeedanceTest
-                    ? new Date(channel.test_time * 1000).toLocaleString(locale)
-                    : t('No Seedance test')}
-                </dd>
+              <div className='stolas-health-model-name'>
+                <h3>{channel.name}</h3>
+                <p>
+                  #{channel.id} ·{' '}
+                  {
+                    channel.models
+                      .split(',')
+                      .filter((model) => /seedance/i.test(model)).length
+                  }{' '}
+                  {t('models')}
+                </p>
               </div>
-              <div>
-                <dt>{t('Test latency')}</dt>
-                <dd>
-                  {hasSeedanceTest ? formatLatency(channel.response_time) : '—'}
-                </dd>
+              <div
+                className='stolas-health-channel-state'
+                data-enabled={channel.status === CHANNEL_STATUS.ENABLED}
+              >
+                <span aria-hidden='true' />
+                {t(statusKey)}
               </div>
-            </dl>
-          </section>
-        )
-      })}
+              <dl className='stolas-health-model-metrics'>
+                <div>
+                  <dt>{t('Last Seedance test')}</dt>
+                  <dd>
+                    {hasSeedanceTest
+                      ? new Date(channel.test_time * 1000).toLocaleString(
+                          locale
+                        )
+                      : t('No Seedance test')}
+                  </dd>
+                </div>
+                <div>
+                  <dt>{t('Test latency')}</dt>
+                  <dd>
+                    {hasSeedanceTest
+                      ? formatLatency(channel.response_time)
+                      : '—'}
+                  </dd>
+                </div>
+              </dl>
+            </section>
+          )
+        })}
+      </div>
       <footer className='stolas-health-channel-footer'>
         <Button
           variant='ghost'
@@ -154,27 +200,6 @@ export function SeedanceChannelStatus() {
           {t('Manage channels')}
         </Button>
         <span>{t('{{count}} channels', { count: total })}</span>
-        {total > PAGE_SIZE && (
-          <div className='flex items-center gap-2'>
-            <Button
-              variant='outline'
-              size='sm'
-              disabled={page === 1}
-              onClick={() => setPage(page - 1)}
-            >
-              {t('Previous')}
-            </Button>
-            <span>{formatNumber(page, locale)}</span>
-            <Button
-              variant='outline'
-              size='sm'
-              disabled={page * PAGE_SIZE >= total}
-              onClick={() => setPage(page + 1)}
-            >
-              {t('Next')}
-            </Button>
-          </div>
-        )}
       </footer>
     </div>
   )

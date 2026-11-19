@@ -135,9 +135,10 @@ For commercial licensing, please contact support@quantumnous.com
   font-size: 0.7rem;
   line-height: 1.7;
 }
-.stolas-health-more {
-  width: 100%;
-  margin-top: 0.5rem;
+.stolas-health .stolas-health-pagination {
+  justify-content: flex-end;
+  padding-block: 0.75rem;
+  border-bottom: 1px solid var(--border);
 }
 .stolas-health-loading {
   display: grid;

@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useSearch } from '@tanstack/react-router'
+import { useNavigate, useSearch } from '@tanstack/react-router'
 import { useMemo, useCallback, useState } from 'react'
 
 import { useDebounce } from '@/hooks/use-debounce'
@@ -41,7 +41,6 @@ import type { PricingModel, TokenUnit } from '../types'
 
 type FilterState = {
   category?: ModelCategoryFilter
-  family?: string
   search?: string
   sort?: string
   vendor?: string
@@ -63,9 +62,9 @@ function normalizeViewMode(value: unknown): ViewMode {
 
 export function useFilters(models: PricingModel[]) {
   const search = useSearch({ from: '/pricing/' })
+  const navigate = useNavigate({ from: '/pricing/' })
   const [filterState, setFilterState] = useState<FilterState>(() => ({
     category: search.category,
-    family: search.family,
     search: search.search,
     sort: search.sort,
     group: search.group,
@@ -73,6 +72,18 @@ export function useFilters(models: PricingModel[]) {
     view: search.view,
     rechargePrice: search.rechargePrice,
   }))
+
+  if (filterState.category !== search.category) {
+    setFilterState({
+      ...filterState,
+      category: search.category,
+      vendor: undefined,
+      group: search.group,
+      quotaType: undefined,
+      endpointType: undefined,
+      tag: undefined,
+    })
+  }
 
   const searchInput = filterState.search || ''
   const debouncedSearchInput = useDebounce(searchInput, 200)
@@ -82,8 +93,8 @@ export function useFilters(models: PricingModel[]) {
   const quotaTypeFilter = filterState.quotaType || QUOTA_TYPES.ALL
   const endpointTypeFilter = filterState.endpointType || ENDPOINT_TYPES.ALL
   const tagFilter = filterState.tag || FILTER_ALL
-  const categoryFilter = filterState.category || FILTER_ALL
-  const familyFilter = filterState.family || ALL_MODEL_FAMILIES
+  const categoryFilter = search.category || FILTER_ALL
+  const familyFilter = search.family || ALL_MODEL_FAMILIES
   const tokenUnit: TokenUnit =
     filterState.tokenUnit === 'K' ? 'K' : DEFAULT_TOKEN_UNIT
   const viewMode = normalizeViewMode(filterState.view)
@@ -135,24 +146,41 @@ export function useFilters(models: PricingModel[]) {
     [updateFilters]
   )
   const setCategoryFilter = useCallback(
-    (category: ModelCategoryFilter) =>
+    (category: ModelCategoryFilter) => {
       updateFilters({
-        category: category === FILTER_ALL ? undefined : category,
-        family: undefined,
         vendor: undefined,
         group: undefined,
         quotaType: undefined,
         endpointType: undefined,
         tag: undefined,
-      }),
-    [updateFilters]
+      })
+      void navigate({
+        search: (previous) => ({
+          ...previous,
+          category: category === FILTER_ALL ? undefined : category,
+          family: undefined,
+          group: undefined,
+          vendor: undefined,
+          quotaType: undefined,
+          endpointType: undefined,
+          tag: undefined,
+        }),
+        replace: true,
+      })
+    },
+    [navigate, updateFilters]
   )
   const setFamilyFilter = useCallback(
-    (family: string) =>
-      updateFilters({
-        family: family === ALL_MODEL_FAMILIES ? undefined : family,
-      }),
-    [updateFilters]
+    (family: string) => {
+      void navigate({
+        search: (previous) => ({
+          ...previous,
+          family: family === ALL_MODEL_FAMILIES ? undefined : family,
+        }),
+        replace: true,
+      })
+    },
+    [navigate]
   )
   const setTokenUnit = useCallback(
     (v: TokenUnit) =>
@@ -270,9 +298,9 @@ export function useFilters(models: PricingModel[]) {
       quotaType: undefined,
       endpointType: undefined,
       tag: undefined,
-      family: undefined,
     })
-  }, [updateFilters])
+    setFamilyFilter(ALL_MODEL_FAMILIES)
+  }, [setFamilyFilter, updateFilters])
 
   const clearSearch = useCallback(() => {
     updateFilters({ search: undefined })

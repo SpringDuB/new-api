@@ -32,10 +32,12 @@ import {
 import { useSidebar } from '@/components/ui/sidebar'
 import { useMediaQuery } from '@/hooks/use-media-query'
 import { useSidebarView } from '@/hooks/use-sidebar-view'
+import { useTopNavLinks } from '@/hooks/use-top-nav-links'
 
 import { checkIsActive } from '../lib/url-utils'
 import type { NavGroup as NavigationGroup, NavItem, NavLink } from '../types'
 import { AppHeader } from './app-header'
+import { ModelLibraryNavigation } from './model-library-navigation'
 import { NavGroup } from './nav-group'
 import { StolasNavigationIcon } from './stolas-navigation-icon'
 
@@ -45,6 +47,9 @@ export function WorkspaceNavigation() {
   const compactNavigation = useMediaQuery('(max-width: 1279px)')
   const href = useLocation({ select: (location) => location.href })
   const { rootNavGroups, navGroups, view } = useSidebarView()
+  const modelLibrary = useTopNavLinks().find(
+    (link) => link.href === '/pricing' && !link.disabled
+  )
   const general = rootNavGroups.find((group) => group.id === 'general')
   const overview = general?.items.find(
     (item) => item.url === '/dashboard/overview'
@@ -77,7 +82,7 @@ export function WorkspaceNavigation() {
       .find((item) => checkIsActive(href, item))
     const mobileItems: NavItem[] = [
       ...(overview ? [overview] : []),
-      { title: t('Model library'), url: '/pricing' },
+      ...(modelLibrary ? [{ title: modelLibrary.title, url: '/pricing' }] : []),
       ...(canvas ? [canvas] : []),
       ...menus.map((group) => ({
         title: group.title,
@@ -128,15 +133,17 @@ export function WorkspaceNavigation() {
               {t('Console')}
             </Button>
           )}
-          <Button
-            role='link'
-            variant='ghost'
-            className='stolas-workspace-link'
-            render={<Link to='/pricing' />}
-          >
-            <StolasNavigationIcon destination='/pricing' />
-            {t('Model library')}
-          </Button>
+          {modelLibrary && (
+            <ModelLibraryNavigation
+              title={modelLibrary.title}
+              active={
+                href === '/pricing' ||
+                href.startsWith('/pricing/') ||
+                href.startsWith('/pricing?')
+              }
+              className='stolas-workspace-link stolas-library-trigger'
+            />
+          )}
           {canvas && (
             <Button
               role='link'
@@ -157,7 +164,7 @@ export function WorkspaceNavigation() {
           )}
           <span className='stolas-workspace-divider' aria-hidden='true' />
           {menus.map((group) => (
-            <WorkspaceMenu key={group.id} group={group} />
+            <WorkspaceMenu key={group.id} group={group} hover />
           ))}
           {view && (
             <WorkspaceMenu
@@ -179,12 +186,21 @@ export function WorkspaceNavigation() {
   )
 }
 
-function WorkspaceMenu(props: { group: NavigationGroup }) {
+function WorkspaceMenu({
+  group,
+  hover = false,
+}: {
+  group: NavigationGroup
+  hover?: boolean
+}) {
   const href = useLocation({ select: (location) => location.href })
-  const active = props.group.items.some((item) => checkIsActive(href, item))
+  const active = group.items.some((item) => checkIsActive(href, item))
   return (
-    <DropdownMenu>
+    <DropdownMenu modal={!hover}>
       <DropdownMenuTrigger
+        openOnHover={hover}
+        delay={90}
+        closeDelay={150}
         render={
           <Button
             variant='ghost'
@@ -193,15 +209,15 @@ function WorkspaceMenu(props: { group: NavigationGroup }) {
           />
         }
       >
-        <StolasNavigationIcon destination={props.group.id ?? 'settings'} />
-        <span className='min-w-0 truncate'>{props.group.title}</span>
+        <StolasNavigationIcon destination={group.id ?? 'settings'} />
+        <span className='min-w-0 truncate'>{group.title}</span>
         <ChevronDown aria-hidden='true' className='size-3' />
       </DropdownMenuTrigger>
       <DropdownMenuContent
         align='start'
         className='stolas-workspace-menu max-h-[min(36rem,75dvh)] min-w-56 overflow-y-auto'
       >
-        {props.group.items.map((item: NavItem) => (
+        {group.items.map((item: NavItem) => (
           <DropdownMenuGroup key={item.title}>
             {item.items && <DropdownMenuLabel>{item.title}</DropdownMenuLabel>}
             {(item.items ?? (item.url ? [item] : [])).map((link) => (

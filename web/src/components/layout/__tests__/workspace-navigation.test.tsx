@@ -114,10 +114,9 @@ async function renderWorkspace(
 describe('Stolas workspace navigation', () => {
   it('keeps destinations in one top navigation and marks the current API page in its menu', async () => {
     await renderWorkspace('/keys')
-    expect(screen.getByRole('link', { name: 'Model library' })).toHaveAttribute(
-      'href',
-      '/pricing'
-    )
+    expect(
+      screen.getByRole('button', { name: 'Model library' })
+    ).toHaveAttribute('aria-expanded', 'false')
     expect(
       screen.queryByRole('button', { name: 'Toggle Sidebar' })
     ).not.toBeInTheDocument()
@@ -138,6 +137,59 @@ describe('Stolas workspace navigation', () => {
       screen.queryByRole('button', { name: /Admin/ })
     ).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Wallet/ })).toBeVisible()
+  })
+  it.each([
+    ['API access', 'API Keys'],
+    ['Personal', 'Wallet'],
+    ['Admin', 'Channels'],
+  ])('opens %s without clicking on desktop', async (menu, destination) => {
+    await renderWorkspace('/dashboard/overview', { role: ROLE.SUPER_ADMIN })
+    const trigger = screen.getByRole('button', { name: menu })
+    await userEvent.setup().hover(trigger)
+    expect(
+      await screen.findByRole('menuitem', { name: destination })
+    ).toBeVisible()
+    expect(trigger).toHaveAttribute('aria-expanded', 'true')
+  })
+  it('groups variants by series and links to the matching catalog filter', async () => {
+    await renderWorkspace('/dashboard/overview')
+    client.setQueryData(['pricing'], {
+      vendors: [],
+      data: [
+        { id: 1, model_name: 'seedance-2-5', output_modalities: ['video'] },
+        { id: 2, model_name: 'seedream-5-0', output_modalities: ['image'] },
+        {
+          id: 3,
+          model_name: '59-seedance-2-5-flash',
+          output_modalities: ['video'],
+        },
+      ],
+    })
+    const menu = screen.getByRole('button', { name: 'Model library' })
+    menu.focus()
+    await userEvent.setup().keyboard('{Enter}')
+    const family = await screen.findByRole('link', {
+      name: /Seedance 2.5.*2 models/,
+    })
+    const href = family.getAttribute('href')
+    if (!href) throw new Error('The model series link has no destination')
+    const familyUrl = new URL(href, 'https://stolas.test')
+    expect(familyUrl.pathname).toBe('/pricing')
+    expect(familyUrl.searchParams.get('category')).toBe('video')
+    expect(familyUrl.searchParams.get('family')).toBe('series:Seedance 2.5')
+    expect(screen.getAllByRole('link', { name: /Seedance 2.5/ })).toHaveLength(
+      1
+    )
+    expect(screen.getByRole('link', { name: /^Images/ })).toHaveAttribute(
+      'href',
+      '/pricing?category=image'
+    )
+    expect(screen.getByRole('link', { name: 'All models' })).toHaveAttribute(
+      'href',
+      '/pricing'
+    )
+    await userEvent.setup().keyboard('{Escape}')
+    expect(menu).toHaveAttribute('aria-expanded', 'false')
   })
   it('honors module visibility within the API menu', async () => {
     await renderWorkspace('/keys', {

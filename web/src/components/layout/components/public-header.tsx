@@ -44,6 +44,7 @@ import { useAuthStore } from '@/stores/auth-store'
 import { defaultTopNavLinks } from '../config/top-nav.config'
 import type { TopNavLink } from '../types'
 import { HeaderLogo } from './header-logo'
+import { ModelLibraryNavigation } from './model-library-navigation'
 import { StolasNavigationIcon } from './stolas-navigation-icon'
 
 const AUTH_PROMPT_SECONDS = 5
@@ -268,6 +269,24 @@ export function PublicHeader(props: PublicHeaderProps) {
             <div className='hidden min-w-0 items-center gap-0.5 lg:flex'>
               {links.map((link) => {
                 const isActive = pathname === link.href
+                if (
+                  link.href === '/pricing' &&
+                  !link.external &&
+                  !link.disabled &&
+                  !link.requiresAuth
+                ) {
+                  return (
+                    <ModelLibraryNavigation
+                      key={link.href}
+                      title={t(link.title)}
+                      active={
+                        pathname === '/pricing' ||
+                        pathname.startsWith('/pricing/')
+                      }
+                      className='stolas-public-nav-link stolas-library-trigger'
+                    />
+                  )
+                }
                 if (link.external) {
                   return (
                     <a

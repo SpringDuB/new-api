@@ -77,6 +77,16 @@ vi.mock('../hooks/use-pricing-data', () => {
       completion_ratio: 1,
       enable_groups: ['default'],
     },
+    {
+      id: 4,
+      model_name: 'studio-chat',
+      square_category: 'chat',
+      vendor_icon: 'Wan',
+      quota_type: 0,
+      model_ratio: 1,
+      completion_ratio: 1,
+      enable_groups: ['default'],
+    },
   ]
   return {
     usePricingData: () => ({
@@ -164,11 +174,30 @@ describe('model library layout', () => {
     ).not.toBeInTheDocument()
     const directory = screen.getByRole('list', { name: 'Models' })
     expect(directory).toHaveClass('stolas-model-gallery')
-    expect(within(directory).getAllByRole('listitem')).toHaveLength(3)
+    expect(within(directory).getAllByRole('listitem')).toHaveLength(4)
     const model = within(directory).getByRole('article', {
       name: 'seedance-2-5-studio',
     })
-    expect(model.querySelector('[data-slot="model-cover"]')).toBeInTheDocument()
+    const videoArtwork = model.querySelector('[data-slot="model-cover"] img')
+    const imageArtwork = within(directory)
+      .getByRole('article', { name: 'image-2' })
+      .querySelector('[data-slot="model-cover"] img')
+    expect(videoArtwork?.getAttribute('src')).toMatch(
+      /^\/stolas\/art\/.+\.webp$/
+    )
+    expect(imageArtwork?.getAttribute('src')).toMatch(
+      /^\/stolas\/art\/.+\.webp$/
+    )
+    expect(videoArtwork?.getAttribute('src')).not.toBe(
+      imageArtwork?.getAttribute('src')
+    )
+    const textModel = within(directory).getByRole('article', {
+      name: 'studio-chat',
+    })
+    expect(textModel.querySelector('.stolas-model-cover-image')).toBeNull()
+    expect(
+      textModel.querySelector('.stolas-model-cover-icon img')
+    ).toHaveAttribute('src', expect.stringContaining('wan.png'))
     expect(
       within(model).getByText('Create video from a prompt or reference image.')
     ).toBeVisible()

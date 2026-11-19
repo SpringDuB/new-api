@@ -33,6 +33,7 @@ import type { ModelPerfBadgeData } from './model-perf-badge'
 
 export interface ModelCardGridProps {
   models: PricingModel[]
+  covers?: ReadonlyMap<string, string>
   onModelClick: (modelName: string) => void
   priceRate?: number
   usdExchangeRate?: number
@@ -114,6 +115,7 @@ export const ModelCardGrid = memo(function ModelCardGrid(
             <ModelCard
               presentation={props.presentation}
               model={model}
+              cover={props.covers?.get(model.model_name)}
               tokenUnit={tokenUnit}
               priceRate={props.priceRate}
               usdExchangeRate={props.usdExchangeRate}

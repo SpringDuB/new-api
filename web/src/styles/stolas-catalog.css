@@ -27,11 +27,33 @@ For commercial licensing, please contact support@quantumnous.com
 }
 
 .stolas-catalog-header {
+  position: relative;
+  isolation: isolate;
+  margin-bottom: 2.5rem;
+}
+.stolas-catalog-header::before {
+  position: absolute;
+  z-index: -1;
+  inset: -0.75rem 0 -0.75rem 43%;
+  background: url('../assets/stolas-art/spring-paint.webp') center 56% / cover
+    no-repeat;
+  opacity: 0.78;
+  mask-image:
+    linear-gradient(90deg, transparent, #000 36%, #000 86%, transparent),
+    linear-gradient(180deg, transparent, #000 23%, #000 76%, transparent);
+  mask-composite: intersect;
+  pointer-events: none;
+  content: '';
+}
+.dark .stolas-catalog-header::before {
+  background-image: url('../assets/stolas-art/blue-paint.webp');
+  opacity: 0.7;
+}
+.stolas-catalog-heading {
   display: flex;
-  align-items: end;
-  justify-content: space-between;
-  gap: 1.5rem;
-  padding-bottom: 2.5rem;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem 1.25rem;
 }
 .stolas-catalog-title {
   font-size: clamp(2.75rem, 5vw, 4.5rem);
@@ -43,9 +65,6 @@ For commercial licensing, please contact support@quantumnous.com
   font-size: 0.9rem;
   line-height: 1.7;
   text-wrap: pretty;
-}
-.stolas-catalog-search {
-  flex-shrink: 0;
 }
 .stolas-catalog-discovery {
   display: flex;
@@ -222,8 +241,8 @@ For commercial licensing, please contact support@quantumnous.com
 
 .stolas-model-gallery {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 19rem), 1fr));
-  gap: 1.5rem;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 17.25rem), 1fr));
+  gap: 1.25rem;
   align-items: stretch;
 }
 .stolas-model-tile[data-slot='card'] {
@@ -239,13 +258,26 @@ For commercial licensing, please contact support@quantumnous.com
   position: relative;
   display: grid;
   place-items: center;
-  min-height: 8rem;
+  min-height: 6.5rem;
   background: radial-gradient(
     ellipse at 50% 40%,
     color-mix(in srgb, var(--accent) 65%, var(--card)),
     var(--background) 75%
   );
   border-bottom: 1px solid var(--border);
+}
+.stolas-model-tile[data-artwork] .stolas-model-cover {
+  min-height: 0;
+  aspect-ratio: 2.25;
+  overflow: hidden;
+  background: var(--muted);
+}
+.stolas-model-cover-image {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 .stolas-model-cover-icon {
   display: grid;
@@ -264,22 +296,46 @@ For commercial licensing, please contact support@quantumnous.com
   bottom: 0.85rem;
   right: 1rem;
 }
+.stolas-model-tile[data-artwork] .stolas-model-cover-group {
+  background: color-mix(in srgb, var(--card) 92%, transparent);
+  color: var(--card-foreground);
+}
 .stolas-model-tile .stolas-model-identity {
   align-items: start;
   gap: 0.5rem;
-  padding: 1.25rem 1.4rem 0.75rem;
+  padding: 0.75rem 0.9rem 0.5rem;
 }
 .stolas-model-tile .stolas-model-identity h3 {
+  color: var(--card-foreground);
   font-family: inherit;
-  font-size: 1rem;
-  line-height: 1.5;
+  font-size: 1.125rem;
+  font-weight: 700;
+  line-height: 1.3;
+}
+.stolas-model-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-top: 0.28rem;
+  color: var(--muted-foreground);
+  font-size: 0.72rem;
+}
+.stolas-model-category {
+  display: inline-flex;
+  flex-shrink: 0;
+  border-radius: 0.3rem;
+  padding: 0.06rem 0.35rem;
+  background: color-mix(in srgb, var(--accent) 75%, var(--card));
+  color: var(--accent-foreground);
+  font-size: 0.7rem;
+  font-weight: 600;
 }
 .stolas-model-tile .stolas-model-content {
-  gap: 1rem;
-  padding: 0 1.4rem;
+  gap: 0.65rem;
+  padding: 0 0.9rem;
 }
 .stolas-model-description > p {
-  min-height: 2.5rem;
+  line-height: 1.42;
 }
 .stolas-model-tile .stolas-model-access {
   display: flex;
@@ -290,18 +346,24 @@ For commercial licensing, please contact support@quantumnous.com
 .stolas-model-tile .stolas-model-pricing {
   order: 2;
   border-top: 1px solid var(--border);
-  padding-top: 1rem;
+  padding-top: 0.6rem;
 }
 .stolas-model-tile .stolas-model-footer {
   display: flex;
   flex-wrap: wrap;
   justify-content: space-between;
   gap: 0.5rem;
-  padding: 0.4rem 1.4rem 0.8rem;
+  padding: 0.35rem 0.9rem 0.65rem;
 }
 .stolas-model-tile .stolas-model-details {
   margin-inline-start: auto;
   color: var(--primary);
+}
+.stolas-model-tile[data-artwork] .stolas-model-details {
+  background: color-mix(in srgb, var(--primary) 10%, var(--card));
+}
+.stolas-model-tile[data-artwork] .stolas-model-details:hover {
+  background: color-mix(in srgb, var(--primary) 18%, var(--card));
 }
 .stolas-model-tile .stolas-model-metrics {
   min-width: 0;
@@ -324,12 +386,7 @@ For commercial licensing, please contact support@quantumnous.com
     grid-template-columns: repeat(auto-fit, minmax(min(100%, 8.5rem), 1fr));
   }
   .stolas-catalog-header {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 1.5rem;
-    padding-bottom: 1.5rem;
-  }
-  .stolas-catalog-search {
-    max-width: 32rem;
+    margin-bottom: 1.5rem;
   }
 }
 
@@ -358,7 +415,11 @@ For commercial licensing, please contact support@quantumnous.com
 
 @media (max-width: 639px) {
   .stolas-catalog-header {
-    align-items: start;
+    padding-bottom: 2.75rem;
+  }
+  .stolas-catalog-header::before {
+    inset: auto 0 0 14%;
+    height: 3.25rem;
   }
   .stolas-catalog-discovery {
     display: grid;

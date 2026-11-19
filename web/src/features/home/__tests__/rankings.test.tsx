@@ -344,19 +344,33 @@ describe('home rankings access and data', () => {
 })
 
 describe('default home rankings placement', () => {
-  it('places rankings after the hero and before the footer on the default home', async () => {
+  it('places the inspiration gallery after rankings and keeps the courtyard in the hero', async () => {
     await renderHome(Home)
     const rankings = await screen.findByRole('region', { name: 'Rankings' })
     const hero = screen.getByRole('main')
+    const gallery = screen.getByRole('region', { name: 'Inspiration gallery' })
     const footer = screen.getByRole('contentinfo')
 
     expect(
       hero.compareDocumentPosition(rankings) & Node.DOCUMENT_POSITION_FOLLOWING
     ).not.toBe(0)
     expect(
-      rankings.compareDocumentPosition(footer) &
+      rankings.compareDocumentPosition(gallery) &
         Node.DOCUMENT_POSITION_FOLLOWING
     ).not.toBe(0)
+    expect(
+      gallery.compareDocumentPosition(footer) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).not.toBe(0)
+    expect(
+      within(hero).getByRole('img', {
+        name: 'Sunlit courtyard with a blue door',
+      })
+    ).toHaveAttribute('fetchpriority', 'high')
+    const galleryImages = within(gallery).getAllByRole('img')
+    expect(galleryImages).toHaveLength(6)
+    for (const image of galleryImages) {
+      expect(image).toHaveAttribute('loading', 'lazy')
+    }
   })
 
   it.each([
@@ -374,6 +388,9 @@ describe('default home rankings placement', () => {
       )
       expect(
         screen.queryByRole('region', { name: 'Rankings' })
+      ).not.toBeInTheDocument()
+      expect(
+        screen.queryByRole('region', { name: 'Inspiration gallery' })
       ).not.toBeInTheDocument()
       expect(api.get).not.toHaveBeenCalledWith(
         '/api/rankings',

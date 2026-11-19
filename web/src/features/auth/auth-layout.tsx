@@ -72,8 +72,7 @@ export function AuthLayout({ children }: AuthLayoutProps) {
         <LanguageSwitcher />
         <ThemeSwitch />
       </div>
-      <aside className='stolas-auth-art hidden flex-col justify-center gap-8 px-12 py-36 lg:flex xl:px-20'>
-        <p className='text-sm tracking-[.2em]'>STOLAS / STUDIO + API</p>
+      <aside className='stolas-auth-art hidden flex-col justify-end gap-4 px-12 pt-28 pb-14 lg:flex xl:px-20'>
         <p className='stolas-editorial max-w-lg text-5xl leading-tight'>
           {t('A place for your next possibility.')}
         </p>
@@ -82,15 +81,6 @@ export function AuthLayout({ children }: AuthLayoutProps) {
             'One account for the stories you create and the products you build.'
           )}
         </p>
-        <div
-          aria-hidden='true'
-          className='mt-6 flex aspect-[2/1] max-w-md items-center justify-center border border-current/20'
-        >
-          <StolasLogo variant='mark' inverse className='h-36 w-36 opacity-80' />
-        </div>
-        <span className='text-xs tracking-wide opacity-60'>
-          {t('Imagine freely. Make something yours.')}
-        </span>
       </aside>
       <div className='flex items-center px-4 pt-28 pb-10 sm:px-10 lg:py-28'>
         <div className='mx-auto flex w-full max-w-md flex-col justify-center gap-2'>

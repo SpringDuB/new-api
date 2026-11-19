@@ -16,6 +16,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { Settings02Icon } from '@hugeicons/core-free-icons'
+import { HugeiconsIcon } from '@hugeicons/react'
 import { lazy, Suspense, useCallback, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -41,6 +43,7 @@ import {
 import { EXCLUDED_GROUPS, VIEW_MODES } from './constants'
 import { useFilters } from './hooks/use-filters'
 import { usePricingData } from './hooks/use-pricing-data'
+import { assignCatalogCovers } from './lib/catalog-covers'
 
 const ModelSquareManager = lazy(
   () => import('./components/model-square-manager')
@@ -68,6 +71,7 @@ export function Pricing() {
     usdExchangeRate,
     refetch,
   } = usePricingData(true, { refetchOnMount: 'always' })
+  const covers = useMemo(() => assignCatalogCovers(models), [models])
 
   const {
     categoryFilter,
@@ -143,6 +147,7 @@ export function Pricing() {
           key={`${categoryFilter}:${familyFilter}`}
           presentation='directory'
           models={filteredModels}
+          covers={covers}
           onModelClick={handleModelClick}
           priceRate={priceRate}
           usdExchangeRate={usdExchangeRate}
@@ -182,25 +187,26 @@ export function Pricing() {
       <PageTransition className='stolas-catalog'>
         <header className='stolas-catalog-header'>
           <div className='stolas-catalog-introduction'>
-            <h1 className='stolas-editorial stolas-catalog-title'>
-              {t('Model library')}
-            </h1>
+            <div className='stolas-catalog-heading'>
+              <h1 className='stolas-editorial stolas-catalog-title'>
+                {t('Model library')}
+              </h1>
+              {canManage && (
+                <Button variant='outline' onClick={() => setManagerOpen(true)}>
+                  <HugeiconsIcon
+                    icon={Settings02Icon}
+                    data-icon='inline-start'
+                    aria-hidden='true'
+                  />
+                  {t('Manage display')}
+                </Button>
+              )}
+            </div>
             <p className='text-muted-foreground stolas-catalog-purpose'>
               {t(
                 'Compare capabilities and pricing, then choose a model for your next project.'
               )}
             </p>
-          </div>
-          <div className='stolas-catalog-search'>
-            {canManage && (
-              <Button
-                variant='outline'
-                size='sm'
-                onClick={() => setManagerOpen(true)}
-              >
-                {t('Manage display')}
-              </Button>
-            )}
           </div>
         </header>
 
