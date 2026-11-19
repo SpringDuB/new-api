@@ -3,6 +3,7 @@ package controller
 import (
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
@@ -75,9 +76,32 @@ func CanvasIdentity(c *gin.Context) {
 	common.ApiSuccess(c, identity)
 }
 
+func CanvasCreditMigration(c *gin.Context) {
+	setAuthNoStore(c)
+	bearer, ok := strings.CutPrefix(c.GetHeader("Authorization"), "Bearer ")
+	if !ok || !common.IsStolasCanvasClient(c.GetHeader("X-Stolas-Client-Secret")) || !common.IsStolasCanvasClient(bearer) {
+		writeCanvasError(c, service.ErrAuthTokenInvalid)
+		return
+	}
+	var request model.CanvasCreditMigration
+	if err := c.ShouldBindJSON(&request); err != nil {
+		writeCanvasError(c, model.ErrCanvasCreditMigrationInvalid)
+		return
+	}
+	if err := model.ApplyCanvasCreditMigration(request); err != nil {
+		writeCanvasError(c, err)
+		return
+	}
+	common.ApiSuccess(c, nil)
+}
+
 func writeCanvasError(c *gin.Context, err error) {
 	status, message := http.StatusInternalServerError, "Operation failed"
 	switch {
+	case errors.Is(err, model.ErrCanvasCreditMigrationConflict), errors.Is(err, model.ErrTopUpQuotaLimitExceeded):
+		status, message = http.StatusConflict, "Credit transfer could not be applied"
+	case errors.Is(err, model.ErrCanvasCreditMigrationInvalid):
+		status, message = http.StatusBadRequest, "Invalid credit transfer"
 	case errors.Is(err, service.ErrCanvasDisabled):
 		status, message = http.StatusServiceUnavailable, "Service unavailable"
 	case errors.Is(err, service.ErrAuthTokenInvalid), errors.Is(err, model.ErrUserSessionInactive), errors.Is(err, gorm.ErrRecordNotFound):

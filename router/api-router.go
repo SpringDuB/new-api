@@ -29,6 +29,7 @@ func SetApiRouter(router *gin.Engine) {
 		apiRouter.POST("/canvas/authorize", middleware.DisableCache(), middleware.UserAuth(), middleware.UserCriticalRateLimit("canvas-authorization"), anonymousRequestBodyLimit, controller.CanvasAuthorize)
 		apiRouter.POST("/canvas/exchange", middleware.DisableCache(), anonymousRequestBodyLimit, controller.CanvasExchange)
 		apiRouter.GET("/canvas/identity", middleware.DisableCache(), middleware.TokenAuthReadOnly(), middleware.CanvasIdentityRateLimit(), controller.CanvasIdentity)
+		apiRouter.POST("/canvas/credit-migration", middleware.DisableCache(), anonymousRequestBodyLimit, controller.CanvasCreditMigration)
 		apiRouter.GET("/uptime/status", controller.GetUptimeKumaStatus)
 		apiRouter.GET("/models", middleware.UserAuth(), controller.DashboardListModels)
 		apiRouter.GET("/status/test", middleware.AdminAuth(), controller.TestStatus)
