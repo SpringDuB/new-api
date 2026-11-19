@@ -1,5 +1,12 @@
 {
   "translation": {
+    "Access restrictions": "Ограничения доступа",
+    "Activity": "Активность",
+    "Identity and routing": "Название и маршрутизация",
+    "Spending and expiry": "Лимит и срок действия",
+    "Give each application its own key, spending limit and access rules.": "Задайте для каждого приложения отдельный ключ, лимит расходов и правила доступа.",
+    "Get a redemption code": "Получить код пополнения",
+    "Get a code from the linked page, then redeem it below to add to your balance.": "Получите код на связанной странице, затем активируйте его ниже для пополнения баланса.",
     "360": "360",
     "1000": "1000",
     "10000": "10000",

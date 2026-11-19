@@ -438,22 +438,6 @@ function QuickActionItem(props: { action: QuickAction }) {
   )
 }
 
-function CompactQuickAction(props: { action: QuickAction }) {
-  const Icon = props.action.icon
-
-  return (
-    <Button
-      variant='outline'
-      size='sm'
-      className='bg-background/70 h-8 min-w-24 gap-1.5 px-2.5'
-      render={<Link to={props.action.to} />}
-    >
-      <Icon data-icon='inline-start' />
-      <span>{props.action.title}</span>
-    </Button>
-  )
-}
-
 export function OverviewDashboard() {
   const { t } = useTranslation()
   const setupGuideId = useId()
@@ -634,6 +618,7 @@ export function OverviewDashboard() {
       </SectionPageLayout.Actions>
       <SectionPageLayout.Content>
         <div className='flex flex-col gap-4'>
+          <SummaryCards />
           <CreativeWorkspace />
           <div id={setupGuideId} hidden={!setupGuideExpanded}>
             {setupGuideExpanded && (
@@ -751,12 +736,6 @@ export function OverviewDashboard() {
                     </div>
 
                     <div className='flex flex-wrap items-center gap-2'>
-                      {visibleQuickActions.map((action) => (
-                        <CompactQuickAction
-                          key={action.title}
-                          action={action}
-                        />
-                      ))}
                       <Button
                         variant='outline'
                         size='sm'
@@ -774,8 +753,6 @@ export function OverviewDashboard() {
               </CardStaggerItem>
             </CardStaggerContainer>
           )}
-
-          <SummaryCards />
 
           <SeedanceHealthPanel
             models={modelsQuery.data ?? []}

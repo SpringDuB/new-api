@@ -107,7 +107,7 @@ async function renderOverview() {
 }
 
 describe('overview setup guide', () => {
-  it('shows both Stolas workspaces and usage while keeping the completed setup guide collapsed', async () => {
+  it('prioritizes the remaining credit and usage before quick actions and preserves the collapsed setup guide', async () => {
     await renderOverview()
 
     const toggle = await screen.findByRole('button', { name: 'Setup guide' })
@@ -116,12 +116,13 @@ describe('overview setup guide', () => {
       screen.getAllByRole('heading').map((heading) => heading.textContent)
     ).toEqual([
       'Console',
-      'Welcome back, dashboard-user',
+      'Usage at a glance',
       'Infinite Canvas',
       'API access',
-      'Usage at a glance',
       'Seedance model health',
     ])
+    const usage = screen.getByRole('region', { name: 'Usage at a glance' })
+    expect(usage.querySelector('dt')).toHaveTextContent('Credit remaining')
     expect(
       screen.getByRole('link', { name: 'Open Infinite Canvas' })
     ).toHaveAttribute('href', 'https://canvas.stolas.cc/api/auth/stolas/start')
@@ -205,7 +206,7 @@ describe('overview setup guide', () => {
     expect(
       screen.getByText('Setup guide is collapsed. Expand it anytime.')
     ).toBeVisible()
-    expect(screen.getByRole('button', { name: 'API Keys' })).toBeVisible()
+    expect(screen.getByRole('link', { name: 'API Keys' })).toBeVisible()
     expect(
       screen.queryByRole('button', { name: 'Setup guide' })
     ).not.toBeInTheDocument()

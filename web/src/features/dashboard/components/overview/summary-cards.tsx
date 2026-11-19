@@ -79,14 +79,9 @@ export function SummaryCards() {
       className='stolas-usage-strip'
     >
       <div className='flex flex-wrap items-center justify-between gap-3'>
-        <div className='flex flex-col gap-1'>
-          <h3 id='stolas-usage-title' className='text-base font-semibold'>
-            {t('Usage at a glance')}
-          </h3>
-          <p className='text-muted-foreground text-xs'>
-            {t('Monitor balance, usage, and request volume')}
-          </p>
-        </div>
+        <h2 id='stolas-usage-title' className='text-base font-semibold'>
+          {t('Usage at a glance')}
+        </h2>
         <Button
           variant='ghost'
           size='sm'
@@ -97,6 +92,27 @@ export function SummaryCards() {
         </Button>
       </div>
       <dl className='stolas-usage-metrics'>
+        <div className='stolas-usage-metric stolas-usage-balance'>
+          <dt className='text-muted-foreground text-xs'>
+            {t('Credit remaining')}
+          </dt>
+          <dd className='stolas-editorial mt-1 text-3xl break-all tabular-nums'>
+            {loading ? (
+              <Skeleton className='h-9 w-24' />
+            ) : (
+              formatQuota(Number(user?.quota ?? 0))
+            )}
+          </dd>
+          <Button
+            variant='link'
+            size='sm'
+            role='link'
+            className='h-auto p-0 text-xs'
+            render={<Link to='/wallet' />}
+          >
+            {t('Wallet')} ↗
+          </Button>
+        </div>
         {items.map((item) => {
           const pending =
             loading || (item.key === 'todayUsage' && usageQuery.isPending)
@@ -111,36 +127,17 @@ export function SummaryCards() {
               aria-busy={pending}
             >
               <dt className='text-muted-foreground text-xs'>{item.title}</dt>
-              <dd className='mt-3 font-mono text-2xl font-medium break-all tabular-nums'>
+              <dd className='mt-2 font-mono text-2xl font-medium break-all tabular-nums'>
                 {valueContent}
               </dd>
-              <p className='text-muted-foreground mt-2 text-[11px]'>
-                {failed ? t('Unable to load usage') : item.description}
-              </p>
+              {failed && (
+                <p className='text-muted-foreground mt-2 text-xs'>
+                  {t('Unable to load usage')}
+                </p>
+              )}
             </div>
           )
         })}
-        <div className='stolas-usage-metric'>
-          <dt className='text-muted-foreground text-xs'>
-            {t('Credit remaining')}
-          </dt>
-          <dd className='stolas-editorial mt-3 text-3xl break-all tabular-nums'>
-            {loading ? (
-              <Skeleton className='h-9 w-24' />
-            ) : (
-              formatQuota(Number(user?.quota ?? 0))
-            )}
-          </dd>
-          <Button
-            variant='link'
-            size='sm'
-            role='link'
-            className='mt-1 h-auto p-0 text-xs'
-            render={<Link to='/wallet' />}
-          >
-            {t('Wallet')} ↗
-          </Button>
-        </div>
       </dl>
     </section>
   )

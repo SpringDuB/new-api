@@ -140,6 +140,32 @@ async function renderHealth(
 }
 
 describe('Seedance health', () => {
+  it('ranks models by observed requests and then success rate, keeping unused models last', async () => {
+    vi.mocked(api.get).mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          models: [
+            { model_name: 'seedance-z', request_count: 20, success_rate: 70 },
+            { model_name: 'seedance-a', request_count: 10, success_rate: 50 },
+            { model_name: 'seedance-b', request_count: 10, success_rate: 95 },
+          ],
+        },
+      },
+    })
+    await renderHealth([
+      'seedance-unused',
+      'seedance-a',
+      'seedance-b',
+      'seedance-z',
+    ])
+    await screen.findByRole('region', { name: 'seedance-z' })
+    expect(
+      screen
+        .getAllByRole('heading', { level: 3 })
+        .map((heading) => heading.textContent)
+    ).toEqual(['seedance-z', 'seedance-b', 'seedance-a', 'seedance-unused'])
+  })
   it('shows only accessible Seedance models and separates a single observed request from unused models', async () => {
     await renderHealth()
     const observed = await screen.findByRole('region', {

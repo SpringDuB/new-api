@@ -1,5 +1,12 @@
 {
   "translation": {
+    "Access restrictions": "アクセス制限",
+    "Activity": "利用履歴",
+    "Identity and routing": "名前とルーティング",
+    "Spending and expiry": "利用上限と有効期限",
+    "Give each application its own key, spending limit and access rules.": "アプリごとに専用のキー、利用上限、アクセスルールを設定します。",
+    "Get a redemption code": "引き換えコードを取得",
+    "Get a code from the linked page, then redeem it below to add to your balance.": "リンク先でコードを取得し、下の欄で引き換えて残高に追加してください。",
     "360": "360",
     "1000": "1000",
     "10000": "10000",

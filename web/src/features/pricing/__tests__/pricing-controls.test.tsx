@@ -20,7 +20,10 @@ import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
-import { PricingSidebar } from '../components/pricing-sidebar'
+import {
+  PricingSidebar,
+  type PricingSidebarProps,
+} from '../components/pricing-sidebar'
 import {
   PricingToolbar,
   type PricingToolbarProps,
@@ -34,49 +37,94 @@ function toolbarProps(): PricingToolbarProps {
     categoryFilter: 'all',
     categoryCounts: { all: 2, video: 1, image: 1, chat: 0, other: 0 },
     onCategoryChange: vi.fn(),
-    familyFilter: 'all',
-    onFamilyChange: vi.fn(),
     filteredCount: 2,
     sortBy: 'name',
     tokenUnit: 'M',
     showRechargePrice: false,
     viewMode: 'card',
-    groupFilter: 'all',
     onSortChange: vi.fn(),
     onTokenUnitChange: vi.fn(),
     onRechargePriceChange: vi.fn(),
     onViewModeChange: vi.fn(),
-    onGroupChange: vi.fn(),
-    groups: ['default', 'premium'],
-    models: [],
     hasActiveFilters: false,
-    activeFilterCount: 0,
     onClearFilters: vi.fn(),
   }
 }
 
+function sidebarProps(): PricingSidebarProps {
+  return {
+    familyFilter: 'all',
+    onFamilyChange: vi.fn(),
+    groupFilter: 'all',
+    onGroupChange: vi.fn(),
+    groups: ['default', 'premium'],
+    models: [],
+    showGroups: true,
+  }
+}
+
 describe('pricing controls', () => {
-  it('shows every model type immediately and reveals additional choices inline with the keyboard', async () => {
-    const props = toolbarProps()
-    const user = userEvent.setup()
-    render(<PricingToolbar {...props} />)
-    await user.click(screen.getByRole('button', { name: /^Videos/ }))
-    expect(props.onCategoryChange).toHaveBeenCalledWith('video')
-    expect(screen.getByRole('button', { name: /^Conversations/ })).toBeVisible()
-    expect(
-      screen.queryByRole('group', { name: 'Groups' })
-    ).not.toBeInTheDocument()
-    const more = screen.getByRole('button', { name: 'More filters' })
-    expect(more).toHaveAttribute('aria-expanded', 'false')
-    more.focus()
-    await user.keyboard('{Enter}')
-    expect(more).toHaveAttribute('aria-expanded', 'true')
-    await user.click(
-      within(screen.getByRole('group', { name: 'Groups' })).getByRole(
-        'button',
-        { name: 'premium' }
-      )
+  it('pins only category and search controls while sort and display scroll with the results', () => {
+    render(<PricingToolbar {...toolbarProps()} />)
+    const toolbar = screen
+      .getByRole('navigation', { name: 'Model categories' })
+      .closest('.stolas-catalog-toolbar')
+    expect(toolbar).toHaveClass(
+      'sticky',
+      'top-[var(--stolas-public-header-offset,5rem)]',
+      'z-30'
     )
+    expect(toolbar).not.toContainElement(
+      screen.getByRole('combobox', { name: 'Sort' })
+    )
+    expect(toolbar).not.toContainElement(
+      screen.getByRole('button', { name: 'Display' })
+    )
+    expect(
+      screen.queryByRole('button', { name: 'More filters' })
+    ).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+  it('selects an icon-bearing model for each series even when the first model has no icon', () => {
+    const base = {
+      id: 1,
+      quota_type: 1,
+      model_ratio: 1,
+      completion_ratio: 1,
+      enable_groups: ['default'],
+    }
+    render(
+      <PricingSidebar
+        {...sidebarProps()}
+        models={[
+          { ...base, model_name: 'seedance-2.5-invalid', icon: 'UnlistedIcon' },
+          { ...base, model_name: 'seedance-2.5-empty' },
+          { ...base, model_name: 'seedance-2.5-icon', icon: 'Wan' },
+          {
+            ...base,
+            model_name: 'seedance-2.0-vendor',
+            icon: ' ',
+            vendor_icon: 'Wan',
+          },
+        ]}
+      />
+    )
+    for (const series of ['Seedance 2.5', 'Seedance 2.0']) {
+      const choice = screen.getByRole('button', { name: new RegExp(series) })
+      expect(
+        choice.querySelector('[data-slot="series-icon"] img')
+      ).not.toBeNull()
+    }
+  })
+  it('selects an always-visible group with the keyboard without opening a popup', async () => {
+    const props = sidebarProps()
+    const user = userEvent.setup()
+    render(<PricingSidebar {...props} />)
+    const group = within(
+      screen.getByRole('group', { name: 'Groups' })
+    ).getByRole('button', { name: 'premium' })
+    group.focus()
+    await user.keyboard('{Enter}')
     expect(props.onGroupChange).toHaveBeenCalledWith('premium')
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     for (const name of [
@@ -94,7 +142,7 @@ describe('pricing controls', () => {
   it('keeps an unavailable selected series and group readable so they can be cleared', () => {
     render(
       <PricingSidebar
-        {...toolbarProps()}
+        {...sidebarProps()}
         familyFilter='series:Seedance 2.5'
         groupFilter='retired-group'
         showGroups

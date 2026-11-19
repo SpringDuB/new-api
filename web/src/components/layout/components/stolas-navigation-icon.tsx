@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import {
-  AiNetworkIcon,
+  LibrariesIcon,
   Audit01Icon,
   BookOpen01Icon,
   ChartLineData01Icon,
@@ -49,7 +49,7 @@ const DESTINATION_ICONS = [
   ['/dashboard/overview', DashboardSquare01Icon],
   ['/dashboard/models', ChartLineData01Icon],
   ['/dashboard', DashboardSquare01Icon],
-  ['/pricing', AiNetworkIcon],
+  ['/pricing', LibrariesIcon],
   ['/keys', Key01Icon],
   ['/playground', TestTube01Icon],
   ['/usage-logs/task', Task01Icon],

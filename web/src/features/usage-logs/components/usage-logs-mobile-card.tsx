@@ -172,20 +172,16 @@ function TaskLogsCard<TData>({
 
   return (
     <div className='stolas-activity-task'>
-      <div className='stolas-activity-task-time'>
-        <SummaryField
-          label={t('Submit Time')}
-          cell={cells.get('submit_time')}
-        />
-      </div>
-      <div className='stolas-activity-identity'>
-        {cells.has('model') ? (
-          <SummaryField label={t('Model')} cell={cells.get('model')} />
-        ) : null}
-        <CompactCell cell={taskIdCell} className='stolas-activity-task-id' />
+      <div className='stolas-activity-task-model'>
+        <SummaryField label={t('Model')} cell={cells.get('model')} />
       </div>
       <div className='stolas-activity-outcome'>
-        <CompactCell cell={statusCell} />
+        {statusCell && (
+          <CompactCell
+            cell={statusCell}
+            className='stolas-activity-task-status'
+          />
+        )}
         {isAdminView && (
           <div className='stolas-activity-cost'>
             <span className='stolas-activity-label'>{t('Cost')}</span>
@@ -194,16 +190,27 @@ function TaskLogsCard<TData>({
             </span>
           </div>
         )}
-        <div className='flex flex-wrap items-start gap-x-5 gap-y-2'>
-          <SummaryField
-            label={t('Duration')}
-            cell={cells.get('duration')}
-            primaryOnly
-          />
-          <SummaryField label={t('Progress')} cell={cells.get('progress')} />
-        </div>
       </div>
-      <div className='stolas-activity-metadata'>
+      <div className='stolas-activity-task-actions'>
+        {cells.has('artifacts') && (
+          <CompactCell cell={cells.get('artifacts')} />
+        )}
+        {cells.has('fail_reason') && (
+          <CompactCell cell={cells.get('fail_reason')} />
+        )}
+      </div>
+      <div className='stolas-activity-task-meta'>
+        <SummaryField
+          label={t('Submit Time')}
+          cell={cells.get('submit_time')}
+          primaryOnly
+        />
+        <SummaryField
+          label={t('Duration')}
+          cell={cells.get('duration')}
+          primaryOnly
+        />
+        <SummaryField label={t('Progress')} cell={cells.get('progress')} />
         {cells.has('request_mode') ? (
           <SummaryField
             label={t('Request type')}
@@ -217,14 +224,18 @@ function TaskLogsCard<TData>({
             key={field.id}
             label={t(field.label)}
             cell={cells.get(field.id)}
-            primaryOnly={field.primaryOnly}
+            primaryOnly
           />
         ))}
       </div>
-      <div className='stolas-activity-task-actions'>
-        <CompactCell cell={cells.get('artifacts')} />
-        <CompactCell cell={cells.get('fail_reason')} />
-      </div>
+      {taskIdCell && (
+        <SummaryField
+          label={t('Task ID')}
+          cell={taskIdCell}
+          className='stolas-activity-task-id'
+          primaryOnly
+        />
+      )}
     </div>
   )
 }

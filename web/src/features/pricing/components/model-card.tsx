@@ -21,6 +21,7 @@ import { memo, useMemo, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { CopyButton } from '@/components/copy-button'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardFooter, CardHeader } from '@/components/ui/card'
 import { getLobeIcon } from '@/lib/lobe-icon'
@@ -69,7 +70,8 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
   const tags = parseTags(props.model.tags)
   const groups = props.model.enable_groups || []
   const endpoints = props.model.supported_endpoint_types || []
-  const modelIconKey = props.model.icon || props.model.vendor_icon
+  const modelIconKey =
+    props.model.icon?.trim() || props.model.vendor_icon?.trim()
   const modelIcon = modelIconKey ? getLobeIcon(modelIconKey, 28) : null
   const initial = props.model.model_name?.charAt(0).toUpperCase() || '?'
   const isUnconfiguredTaskUsage = isUnconfiguredTaskUsageModel(props.model)
@@ -304,11 +306,37 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
       data-highlight={props.model.square_display?.highlight || undefined}
       className={cn(
         'hover:ring-foreground/20 h-full min-w-0 gap-3 transition-colors',
-        isDirectory && 'stolas-model-entry',
+        isDirectory && 'stolas-model-tile',
         props.model.square_display?.highlight &&
           MODEL_SQUARE_COLORS[props.model.square_display.color ?? 'red'].ring
       )}
     >
+      {isDirectory && (
+        <div data-slot='model-cover' className='stolas-model-cover'>
+          <div aria-hidden='true' className='stolas-model-cover-icon'>
+            {modelIconKey ? (
+              getLobeIcon(modelIconKey, 64)
+            ) : (
+              <span>{initial}</span>
+            )}
+          </div>
+          {props.model.square_display?.badge && (
+            <div className='stolas-model-cover-promotion'>
+              <ModelPromotionBadge decoration={props.model.square_display} />
+            </div>
+          )}
+          {groups.length > 0 && (
+            <Badge
+              variant='secondary'
+              className='stolas-model-cover-group'
+              title={groups.join(', ')}
+            >
+              {groups[0]}
+              {groups.length > 1 && ` +${groups.length - 1}`}
+            </Badge>
+          )}
+        </div>
+      )}
       {!isDirectory && props.model.square_display?.badge && (
         <div className='px-4 pb-1'>
           <ModelPromotionBadge decoration={props.model.square_display} />
@@ -320,16 +348,18 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
           isDirectory && 'stolas-model-identity'
         )}
       >
-        <div
-          aria-hidden
-          className='bg-muted/50 flex size-10 shrink-0 items-center justify-center rounded-lg'
-        >
-          {modelIcon || (
-            <span className='text-muted-foreground text-sm font-bold'>
-              {initial}
-            </span>
-          )}
-        </div>
+        {!isDirectory && (
+          <div
+            aria-hidden
+            className='bg-muted/50 flex size-10 shrink-0 items-center justify-center rounded-lg'
+          >
+            {modelIcon || (
+              <span className='text-muted-foreground text-sm font-bold'>
+                {initial}
+              </span>
+            )}
+          </div>
+        )}
         <div className='min-w-0 flex-1'>
           <h3
             className='line-clamp-2 font-mono text-[15px] leading-snug font-semibold [overflow-wrap:anywhere]'
@@ -344,11 +374,6 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
             >
               {props.model.vendor_name}
             </p>
-          )}
-          {isDirectory && props.model.square_display?.badge && (
-            <div className='mt-2'>
-              <ModelPromotionBadge decoration={props.model.square_display} />
-            </div>
           )}
         </div>
         <CopyButton
@@ -399,7 +424,9 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
             isDirectory && 'stolas-model-pricing'
           )}
         >
-          <ModelBillingModeBadge model={props.model} appearance='caption' />
+          {!isDirectory && (
+            <ModelBillingModeBadge model={props.model} appearance='caption' />
+          )}
           {dynamicSummary?.providerCount && (
             <span className='text-muted-foreground text-xs break-words'>
               {t('{{count}} providers', {
@@ -424,15 +451,16 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
             </p>
           )}
         </div>
-        {(groups.length > 0 || endpoints.length > 0) && (
+        {((!isDirectory && groups.length > 0) || endpoints.length > 0) && (
           <dl
             className={cn(
               'grid min-w-0 grid-cols-2 gap-3 text-xs',
               isDirectory && 'stolas-model-access',
-              (groups.length === 0 || endpoints.length === 0) && 'grid-cols-1'
+              (isDirectory || groups.length === 0 || endpoints.length === 0) &&
+                'grid-cols-1'
             )}
           >
-            {groups.length > 0 && (
+            {!isDirectory && groups.length > 0 && (
               <div className='flex min-w-0 items-baseline gap-1.5'>
                 <dt className='text-muted-foreground shrink-0'>
                   {t('Groups')}

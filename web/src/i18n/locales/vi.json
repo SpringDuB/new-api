@@ -1,5 +1,12 @@
 {
   "translation": {
+    "Access restrictions": "Giới hạn truy cập",
+    "Activity": "Hoạt động",
+    "Identity and routing": "Tên và định tuyến",
+    "Spending and expiry": "Hạn mức và thời hạn",
+    "Give each application its own key, spending limit and access rules.": "Thiết lập khóa, hạn mức chi tiêu và quy tắc truy cập riêng cho từng ứng dụng.",
+    "Get a redemption code": "Lấy mã đổi thưởng",
+    "Get a code from the linked page, then redeem it below to add to your balance.": "Lấy mã từ trang được liên kết, rồi đổi mã bên dưới để cộng vào số dư.",
     "360": "360",
     "1000": "1000",
     "10000": "10000",

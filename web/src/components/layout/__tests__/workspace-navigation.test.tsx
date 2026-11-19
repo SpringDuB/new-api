@@ -172,7 +172,7 @@ describe('Stolas workspace navigation', () => {
     ).toHaveAttribute('target', '_blank')
     expect(
       screen.getByRole('navigation', { name: 'Workspace pages' })
-    ).toHaveClass('overflow-x-auto')
+    ).not.toHaveClass('overflow-x-auto')
   })
   it('uses a compact current-page menu on mobile and retains every destination', async () => {
     vi.stubGlobal('innerWidth', 390)
@@ -187,6 +187,21 @@ describe('Stolas workspace navigation', () => {
     expect(
       screen.getByRole('menuitem', { name: 'Infinite Canvas' })
     ).toHaveAttribute('target', '_blank')
+  })
+  it('uses the compact menu on narrower desktops with all destinations reachable', async () => {
+    const originalMatchMedia = window.matchMedia
+    vi.spyOn(window, 'matchMedia').mockImplementation((query) => ({
+      ...originalMatchMedia(query),
+      matches: query === '(max-width: 1279px)',
+    }))
+    await renderWorkspace('/keys')
+    await userEvent
+      .setup()
+      .click(screen.getByRole('button', { name: 'API Keys' }))
+    expect(
+      await screen.findByRole('menuitem', { name: 'Model library' })
+    ).toBeVisible()
+    expect(screen.getByRole('menuitem', { name: 'Wallet' })).toBeVisible()
   })
 
   it('hides the canvas entry when integration is disabled', async () => {

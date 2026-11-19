@@ -1,5 +1,12 @@
 {
   "translation": {
+    "Access restrictions": "Restrictions d’accès",
+    "Activity": "Activité",
+    "Identity and routing": "Identité et routage",
+    "Spending and expiry": "Budget et expiration",
+    "Give each application its own key, spending limit and access rules.": "Attribuez à chaque application sa propre clé, son budget et ses règles d’accès.",
+    "Get a redemption code": "Obtenir un code d’échange",
+    "Get a code from the linked page, then redeem it below to add to your balance.": "Obtenez un code sur la page liée, puis utilisez-le ci-dessous pour créditer votre solde.",
     "360": "360",
     "1000": "1000",
     "10000": "10000",

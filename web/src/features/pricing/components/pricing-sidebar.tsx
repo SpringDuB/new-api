@@ -22,11 +22,16 @@ import { useTranslation } from 'react-i18next'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { toIntlLocale } from '@/i18n/languages'
 import { formatNumber } from '@/lib/format'
+import { getLobeIcon, getLobeIconNames } from '@/lib/lobe-icon'
 import { cn } from '@/lib/utils'
 
 import { FILTER_ALL } from '../constants'
-import { getModelFamilies } from '../lib/model-families'
+import { getModelFamilies, getModelFamilyKey } from '../lib/model-families'
 import type { PricingModel } from '../types'
+
+const AVAILABLE_ICON_BASES = new Set(
+  getLobeIconNames().map((name) => name.split('.')[0])
+)
 
 export interface PricingSidebarProps {
   familyFilter: string
@@ -46,6 +51,15 @@ export const PricingSidebar = memo(function PricingSidebar(
   const { t, i18n } = useTranslation()
   const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
   const models = props.familyModels ?? props.models
+  const familyIcons = new Map<string, string>()
+  for (const model of models) {
+    const family = getModelFamilyKey(model)
+    const icon = [model.icon?.trim(), model.vendor_icon?.trim()].find(
+      (candidate) =>
+        candidate && AVAILABLE_ICON_BASES.has(candidate.split('.')[0])
+    )
+    if (icon && !familyIcons.has(family)) familyIcons.set(family, icon)
+  }
   const families = [
     { value: FILTER_ALL, label: t('All'), count: models.length },
     ...getModelFamilies(models).map((family) => ({
@@ -76,20 +90,32 @@ export const PricingSidebar = memo(function PricingSidebar(
           spacing={2}
           className='stolas-catalog-choices'
         >
-          {families.map((family) => (
-            <ToggleGroupItem
-              key={family.value}
-              value={family.value}
-              className='stolas-catalog-choice'
-            >
-              <span className='break-words whitespace-normal'>
-                {family.label}
-              </span>
-              <span className='text-muted-foreground text-xs tabular-nums'>
-                {formatNumber(family.count, locale)}
-              </span>
-            </ToggleGroupItem>
-          ))}
+          {families.map((family) => {
+            const icon = familyIcons.get(family.value)
+            return (
+              <ToggleGroupItem
+                key={family.value}
+                value={family.value}
+                className='stolas-catalog-choice'
+              >
+                {icon && (
+                  <span
+                    data-slot='series-icon'
+                    aria-hidden='true'
+                    className='shrink-0'
+                  >
+                    {getLobeIcon(icon, 18)}
+                  </span>
+                )}
+                <span className='min-w-0 flex-1 text-start break-words whitespace-normal'>
+                  {family.label}
+                </span>
+                <span className='text-muted-foreground shrink-0 text-xs tabular-nums'>
+                  {formatNumber(family.count, locale)}
+                </span>
+              </ToggleGroupItem>
+            )
+          })}
         </ToggleGroup>
       </div>
       {props.showGroups && (
@@ -102,7 +128,7 @@ export const PricingSidebar = memo(function PricingSidebar(
               if (values[0]) props.onGroupChange(values[0])
             }}
             spacing={2}
-            className='stolas-catalog-choices'
+            className='stolas-catalog-choices stolas-catalog-group-choices'
           >
             {groups.map((group) => (
               <ToggleGroupItem

@@ -1,5 +1,12 @@
 {
   "translation": {
+    "Access restrictions": "Access restrictions",
+    "Activity": "Activity",
+    "Identity and routing": "Identity and routing",
+    "Spending and expiry": "Spending and expiry",
+    "Give each application its own key, spending limit and access rules.": "Give each application its own key, spending limit and access rules.",
+    "Get a redemption code": "Get a redemption code",
+    "Get a code from the linked page, then redeem it below to add to your balance.": "Get a code from the linked page, then redeem it below to add to your balance.",
     "360": "360",
     "1000": "1000",
     "10000": "10000",

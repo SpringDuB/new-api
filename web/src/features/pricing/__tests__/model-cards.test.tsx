@@ -138,7 +138,7 @@ describe('model cards', () => {
     ).toHaveTextContent('0.00%')
   })
 
-  it('uses a flat paginated directory while preserving promotions, access metadata, and task price units', async () => {
+  it('uses a paginated tile gallery while preserving promotions, group metadata, and task price units', async () => {
     vi.spyOn(api, 'get').mockResolvedValue({
       data: { success: true, data: { models: [] } },
     })
@@ -170,7 +170,7 @@ describe('model cards', () => {
       </QueryClientProvider>
     )
     const directory = screen.getByRole('list', { name: 'Models' })
-    expect(directory).toHaveClass('stolas-model-directory')
+    expect(directory).toHaveClass('stolas-model-gallery')
     const entry = within(directory).getByRole('article', {
       name: 'example-model',
     })
@@ -179,7 +179,7 @@ describe('model cards', () => {
     expect(
       within(entry).getByText('A video model with an actual duration price.')
     ).toBeVisible()
-    expect(within(entry).getByText('default')).toBeVisible()
+    expect(within(entry).getByText('default +1')).toBeVisible()
     expect(within(entry).getByText('openai-video')).toBeVisible()
     const price = within(entry).getByRole('group', { name: 'Pricing' })
     expect(price).toHaveTextContent('$0.4 / s')

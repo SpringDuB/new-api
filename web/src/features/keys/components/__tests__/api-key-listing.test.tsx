@@ -349,8 +349,24 @@ async function renderKeysPage(status = 1, overrides: Partial<ApiKey> = {}) {
   return { post, put }
 }
 
+it('defaults to a credential directory with selection and keeps the detailed table available', async () => {
+  await renderKeysPage()
+  expect(screen.queryByRole('table')).not.toBeInTheDocument()
+  const entry = screen.getByRole('article', { name: key.name })
+  expect(within(entry).getByText('default')).toBeVisible()
+  expect(within(entry).getByRole('button', { name: 'Disable' })).toBeVisible()
+  const selection = within(entry).getByRole('checkbox', {
+    name: `Select ${key.name}`,
+  })
+  await userEvent.click(selection)
+  expect(selection).toBeChecked()
+  await userEvent.click(screen.getByRole('button', { name: 'Table view' }))
+  expect(screen.getByRole('columnheader', { name: 'API Key' })).toBeVisible()
+})
+
 it('combines creation and last use while keeping expiry, models and IP restrictions separate', async () => {
   await renderKeysPage()
+  await userEvent.click(screen.getByRole('button', { name: 'Table view' }))
   for (const name of ['Name', 'API Key', 'Group', 'Models', 'IP Restriction']) {
     expect(screen.getByRole('columnheader', { name })).toBeInTheDocument()
   }
@@ -379,6 +395,7 @@ it('restores dates hidden by the old default and preserves unrelated column pref
     })
   )
   await renderKeysPage()
+  await userEvent.click(screen.getByRole('button', { name: 'Table view' }))
   expect(screen.getByRole('columnheader', { name: 'Time' })).toBeInTheDocument()
   expect(
     screen.getByRole('columnheader', { name: 'Expires' })

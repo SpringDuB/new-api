@@ -51,6 +51,8 @@ describe('published model capabilities', () => {
     expect(screen.getByText('生成时长，支持 4–15 秒，默认 4 秒')).toBeVisible()
     expect(screen.getByText('Output resolution')).toBeVisible()
     expect(screen.getByText('Reference images')).toBeVisible()
+    expect(screen.getByText('images', { selector: 'code' })).toBeVisible()
+    expect(screen.getByText('duration', { selector: 'code' })).toBeVisible()
     expect(screen.getByText('参考图片，最多 9 张')).toBeVisible()
     expect(
       getDocumentedParameters(documented).find(
@@ -59,6 +61,25 @@ describe('published model capabilities', () => {
     ).toBe(true)
     expect(screen.queryByText('video_input')).not.toBeInTheDocument()
     expect(screen.queryByText('Context')).not.toBeInTheDocument()
+  })
+  it('parses new model fields on selection without a per-model definition', () => {
+    const { rerender } = render(<ModelCapabilities model={model} />)
+    rerender(
+      <ModelCapabilities
+        model={{
+          ...model,
+          model_name: 'future-model',
+          description: 'reference_assets: Required array of public HTTPS URLs',
+        }}
+      />
+    )
+    expect(
+      screen.getByText('reference_assets', { selector: 'code' })
+    ).toBeVisible()
+    expect(
+      screen.getByText('Required array of public HTTPS URLs')
+    ).toBeVisible()
+    expect(screen.getByText('required')).toBeVisible()
   })
   it('does not invent capabilities when metadata is absent', () => {
     render(<ModelCapabilities model={model} />)

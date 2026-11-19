@@ -98,8 +98,7 @@ For commercial licensing, please contact support@quantumnous.com
   overflow-wrap: anywhere;
 }
 
-.stolas-activity-common,
-.stolas-activity-task {
+.stolas-activity-common {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: start;
@@ -133,7 +132,9 @@ For commercial licensing, please contact support@quantumnous.com
   flex-wrap: wrap;
 }
 
-.stolas-activity-record [data-slot='status-badge'] {
+.stolas-activity-common [data-slot='status-badge'],
+.stolas-activity-task-model [data-slot='status-badge'],
+.stolas-activity-task-id [data-slot='status-badge'] {
   height: auto;
   border: 0;
   border-radius: 0;
@@ -157,10 +158,7 @@ For commercial licensing, please contact support@quantumnous.com
 .stolas-activity-chronology,
 .stolas-activity-metadata,
 .stolas-activity-usage,
-.stolas-activity-details,
-.stolas-activity-task-time,
-.stolas-activity-outcome,
-.stolas-activity-task-actions {
+.stolas-activity-details {
   grid-column: 1 / -1;
   min-width: 0;
 }
@@ -172,36 +170,76 @@ For commercial licensing, please contact support@quantumnous.com
   row-gap: 0.4rem;
 }
 
-.stolas-activity-details,
-.stolas-activity-task-actions {
+.stolas-activity-details {
   border-top: 1px solid var(--border);
   padding-top: 0.65rem;
 }
 
-.stolas-activity-task-id {
-  margin-top: 0.4rem;
+.stolas-activity-task {
+  display: grid;
+  grid-template-columns: minmax(0, min(38%, 24rem)) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.8rem 1.5rem;
 }
-
-.stolas-activity-task-id [data-slot='status-badge'] {
-  font-size: 0.75rem;
-  font-weight: 400;
+.stolas-activity-task-model {
+  min-width: 0;
+}
+.stolas-activity-task-model [data-slot='status-badge'] {
+  min-height: 1.75rem;
+  color: var(--foreground);
+  font-size: 1rem;
+  font-weight: 650;
+}
+.stolas-activity-task-meta {
+  display: flex;
+  grid-column: 1 / -1;
+  flex-wrap: wrap;
+  align-items: start;
+  gap: 0.6rem 1.35rem;
+  min-width: 0;
+  padding-top: 0.65rem;
+  border-top: 1px solid var(--border);
   color: var(--muted-foreground);
 }
-
-.stolas-activity-task-id > .flex {
+.stolas-activity-task-id {
+  display: flex;
+  grid-column: 1 / -1;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.65rem;
+}
+.stolas-activity-task-id .stolas-activity-label {
+  margin: 0;
+}
+.stolas-activity-task-id .flex {
   max-width: 100%;
+}
+.stolas-activity-task-id [data-slot='status-badge'] {
+  font-size: 0.72rem;
+  font-weight: 400;
+  color: var(--muted-foreground);
 }
 
 .stolas-activity-outcome,
 .stolas-activity-task-actions {
   display: flex;
   flex-wrap: wrap;
-  align-items: start;
-  gap: 0.75rem 1.5rem;
+  align-items: center;
+  gap: 0.45rem 0.85rem;
 }
-
-.stolas-activity-outcome > .stolas-activity-cost {
-  margin-inline-start: auto;
+.stolas-activity-outcome .stolas-activity-cost {
+  display: flex;
+  align-items: baseline;
+  gap: 0.35rem;
+}
+.stolas-activity-outcome .stolas-activity-label {
+  margin-bottom: 0;
+}
+.stolas-activity-task-status [data-slot='status-badge'] {
+  max-width: 100%;
+  padding-inline: 0.55rem;
+  border-radius: 0.35rem;
+  background: color-mix(in srgb, currentColor 10%, transparent);
 }
 
 .stolas-activity-task-actions button {
@@ -209,8 +247,7 @@ For commercial licensing, please contact support@quantumnous.com
 }
 
 @media (min-width: 641px) {
-  .stolas-activity-common,
-  .stolas-activity-task {
+  .stolas-activity-common {
     grid-template-columns: 11rem minmax(0, 1fr) minmax(8rem, auto);
     column-gap: clamp(1.25rem, 3vw, 3rem);
   }
@@ -225,8 +262,7 @@ For commercial licensing, please contact support@quantumnous.com
     grid-row: 1;
   }
 
-  .stolas-activity-chronology,
-  .stolas-activity-task-time {
+  .stolas-activity-chronology {
     grid-column: 1;
     grid-row: 1 / span 4;
     align-content: start;
@@ -245,25 +281,12 @@ For commercial licensing, please contact support@quantumnous.com
 
   .stolas-activity-metadata,
   .stolas-activity-usage,
-  .stolas-activity-details,
-  .stolas-activity-task-actions {
+  .stolas-activity-details {
     grid-column: 2 / -1;
   }
 
   .stolas-activity-metadata {
     grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
-  }
-
-  .stolas-activity-outcome {
-    grid-column: 3;
-    grid-row: 1 / span 3;
-    flex-direction: column;
-    align-items: end;
-    text-align: end;
-  }
-
-  .stolas-activity-task .stolas-activity-metadata {
-    grid-column: 2;
   }
 }
 
@@ -272,8 +295,9 @@ For commercial licensing, please contact support@quantumnous.com
     padding-block: 1rem;
   }
 
-  .stolas-activity-task > .stolas-activity-identity {
-    grid-column: 1 / -1;
+  .stolas-activity-task {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.55rem;
   }
 
   .stolas-activity-filter-actions {

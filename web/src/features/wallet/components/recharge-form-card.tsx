@@ -516,6 +516,32 @@ export function RechargeFormCard({
       {/* Redemption Code Section */}
       {redemptionEnabled ? (
         <div className='space-y-2.5 border-t pt-4 sm:space-y-3 sm:pt-6'>
+          {topupLink && (
+            <div className='stolas-redemption-source'>
+              <div>
+                <p className='font-medium'>{t('Need a redemption code?')}</p>
+                <p className='text-muted-foreground mt-1 text-sm'>
+                  {t(
+                    'Get a code from the linked page, then redeem it below to add to your balance.'
+                  )}
+                </p>
+              </div>
+              <Button
+                role='link'
+                nativeButton={false}
+                render={
+                  <a
+                    href={topupLink}
+                    target='_blank'
+                    rel='noopener noreferrer'
+                  />
+                }
+              >
+                {t('Get a redemption code')}
+                <ExternalLink aria-hidden='true' />
+              </Button>
+            </div>
+          )}
           <div className='flex items-center gap-2'>
             <IconBadge tone='warning' size='xs'>
               <Gift />
@@ -545,20 +571,6 @@ export function RechargeFormCard({
               {t('Redeem')}
             </Button>
           </div>
-          {topupLink && (
-            <p className='text-muted-foreground text-xs'>
-              {t('Need a redemption code?')}{' '}
-              <a
-                href={topupLink}
-                target='_blank'
-                rel='noopener noreferrer'
-                className='inline-flex items-center gap-1 underline-offset-4 hover:underline'
-              >
-                {t('Get one here')}
-                <ExternalLink className='h-3 w-3' />
-              </a>
-            </p>
-          )}
         </div>
       ) : (
         <Alert className='border-t'>

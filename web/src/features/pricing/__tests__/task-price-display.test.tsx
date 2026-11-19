@@ -18,7 +18,6 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, render, screen, cleanup, within } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
 import i18next from 'i18next'
 import { afterEach, expect, it, vi } from 'vitest'
 
@@ -100,7 +99,31 @@ const model: PricingModel = {
 }
 const clients: QueryClient[] = []
 
-it('shows nested task conditions and prices in detail and group tables without ambiguous log matches', () => {
+it('shows the model price without a group pricing section', () => {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  clients.push(client)
+  render(
+    <QueryClientProvider client={client}>
+      <ModelDetailsContent
+        model={model}
+        groupRatio={{ default: 2 }}
+        usableGroup={{ default: { desc: '', ratio: 2 } }}
+        endpointMap={{}}
+        autoGroups={[]}
+        priceRate={1}
+        usdExchangeRate={1}
+        tokenUnit='M'
+      />
+    </QueryClientProvider>
+  )
+  expect(screen.getByText('$0.22')).toBeVisible()
+  expect(screen.queryByText('Pricing by Group')).not.toBeInTheDocument()
+  expect(screen.queryByText('$0.44')).not.toBeInTheDocument()
+})
+
+it('shows nested task conditions and base prices without ambiguous log matches', () => {
   vi.spyOn(api, 'get').mockResolvedValue({ data: { data: { groups: [] } } })
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -148,7 +171,7 @@ it('shows nested task conditions and prices in detail and group tables without a
     screen.getAllByText(/resolution: 768P · Outside these times:/).length
   ).toBeGreaterThan(0)
   expect(screen.getByText('$0.072 – $0.15')).toBeVisible()
-  expect(screen.getAllByText('$0.24').length).toBeGreaterThan(0)
+  expect(screen.queryByText('$0.24')).not.toBeInTheDocument()
   expect(screen.queryByText('Matched')).not.toBeInTheDocument()
 })
 
@@ -189,7 +212,7 @@ const imageModel: PricingModel = {
 }
 
 it.each([false, true])(
-  'shows localized image labels and units in base and group pricing when configured=%s',
+  'shows localized image labels and units in base pricing when configured=%s',
   async (configured) => {
     vi.spyOn(api, 'get').mockResolvedValue({ data: { data: { groups: [] } } })
     const client = new QueryClient({
@@ -214,12 +237,12 @@ it.each([false, true])(
       </QueryClientProvider>
     )
     await act(() => i18next.changeLanguage('zhCN'))
-    expect(screen.getAllByText('图片生成单价')).toHaveLength(2)
-    expect(screen.getAllByText(configured ? '/ 张' : '张')).toHaveLength(2)
+    expect(screen.getAllByText('图片生成单价')).toHaveLength(1)
+    expect(screen.getAllByText(configured ? '/ 张' : '张')).toHaveLength(1)
     expect(screen.queryByText('image_count')).not.toBeInTheDocument()
     if (configured) {
       expect(screen.getByText('$0.2')).toBeVisible()
-      expect(screen.getByText('$0.4')).toBeVisible()
+      expect(screen.queryByText('$0.4')).not.toBeInTheDocument()
     }
   }
 )
@@ -309,7 +332,7 @@ it('refreshes memoized provider prices when the group or display currency change
   }
 })
 
-it('shows one standard task price and a localized group price without duplicate tiers', async () => {
+it('shows one localized standard task price without group tables or duplicate tiers', async () => {
   vi.spyOn(api, 'get').mockResolvedValue({ data: { data: { groups: [] } } })
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -331,18 +354,18 @@ it('shows one standard task price and a localized group price without duplicate 
   )
   expect(
     screen.getAllByText('Song generation unit price', { exact: false })
-  ).toHaveLength(2)
+  ).toHaveLength(1)
   expect(screen.queryByText('Tiered price table')).not.toBeInTheDocument()
   expect(screen.queryByText('Dynamic Pricing')).not.toBeInTheDocument()
   expect(screen.queryByText('music')).not.toBeInTheDocument()
   expect(screen.getByText('$0.22')).toBeVisible()
-  expect(screen.getByText('$0.44')).toBeVisible()
+  expect(screen.queryByText('$0.44')).not.toBeInTheDocument()
   await act(() => i18next.changeLanguage('zhCN'))
-  expect(screen.getAllByText('生成歌曲单价', { exact: false })).toHaveLength(2)
+  expect(screen.getAllByText('生成歌曲单价', { exact: false })).toHaveLength(1)
   await act(() => i18next.changeLanguage('fr'))
   expect(
     screen.getAllByText('Song generation unit price', { exact: false })
-  ).toHaveLength(2)
+  ).toHaveLength(1)
 })
 
 it('labels even a single task price on model cards', async () => {
@@ -457,23 +480,20 @@ it.each([
     expression:
       'u("resolution") == "1080p" ? tier("1080p", u("seconds") * 0.732) : u("resolution") == "480p" ? tier("480p", u("seconds") * 0.216) : tier("720p", u("seconds") * 0.384)',
     basePrices: ['¥0.216/s', '¥0.384/s', '¥0.732/s'],
-    groupPrices: ['¥0.432', '¥0.768', '¥1.464'],
   },
   {
     modelName: 'ap-seedance-2-5-yz',
     expression:
       'u("resolution") == "1080p" ? tier("1080p", u("seconds") * 2.1) : u("resolution") == "480p" ? tier("480p", u("seconds") * 0.384) : tier("720p", u("seconds") * 0.54)',
     basePrices: ['¥0.384/s', '¥0.54/s', '¥2.1/s'],
-    groupPrices: ['¥0.768', '¥1.08', '¥4.2'],
   },
   {
     modelName: 'free-video-tiers',
     expression:
       'u("resolution") == "1080p" ? tier("1080p", u("seconds") * 0) : u("resolution") == "480p" ? tier("480p", u("seconds") * 0) : tier("720p", u("seconds") * 0)',
     basePrices: ['¥0/s', '¥0/s', '¥0/s'],
-    groupPrices: ['¥0', '¥0', '¥0'],
   },
-])('lists every base and group resolution price for $modelName', (testCase) => {
+])('lists every base resolution price for $modelName', (testCase) => {
   useSystemConfigStore.getState().setConfig({
     currency: {
       ...DEFAULT_CURRENCY_CONFIG,
@@ -523,19 +543,12 @@ it.each([
   const basePrices = within(
     screen.getByRole('region', { name: 'Base Price' })
   ).getByRole('table')
-  const table = within(
-    screen.getByRole('tabpanel', { name: 'LecAPI' })
-  ).getByRole('table')
   for (const [index, resolution] of ['480p', '720p', '1080p'].entries()) {
     const name = new RegExp(`Output resolution: ${resolution}`)
     const baseRow = within(basePrices).getByRole('row', { name })
     expect(within(baseRow).getByText(testCase.basePrices[index])).toBeVisible()
-    const groupRow = within(table).getByRole('row', { name })
-    expect(
-      within(groupRow).getByText(testCase.groupPrices[index])
-    ).toBeVisible()
   }
-  expect(within(table).getByText('Output resolution: 720p')).toBeVisible()
+  expect(within(basePrices).getByText('Output resolution: 720p')).toBeVisible()
 })
 
 it('uses plugin option labels and infers a unique fallback without expanding unrelated fields', async () => {
@@ -615,120 +628,6 @@ it('uses the same recharge conversion and token unit in task condition prices', 
   )
   expect(screen.getAllByText('$5/1M token')).toHaveLength(2)
   expect(screen.getAllByText('$3/1M token')).toHaveLength(2)
-})
-
-it('switches provider group prices, localized conditions and examples, and shows unconfigured providers', async () => {
-  vi.spyOn(api, 'get').mockResolvedValue({ data: { data: { groups: [] } } })
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false } },
-  })
-  clients.push(client)
-  const shared: PricingModel = {
-    ...model,
-    quota_type: 1,
-    model_price: 0.25,
-    billing_plugin_variants: [
-      {
-        plugin_key: 'alpha',
-        plugin_name: 'Alpha',
-        billing_expr: 'tier("alpha", u("seconds") * 0.4)',
-        billing_usage_schema: {
-          seconds: {
-            type: 'number',
-            unit: 'second',
-            description: 'Video unit price',
-          },
-        },
-        billing_usage_examples: [
-          { label: 'Alpha sample', facts: { seconds: 5 } },
-        ],
-      },
-      {
-        plugin_key: 'beta',
-        plugin_name: 'Beta',
-        billing_expr:
-          'u("mode") == "pro" ? tier("pro", u("credits") * 3) : tier("base", u("credits") * 1.5)',
-        billing_usage_schema: {
-          credits: {
-            type: 'number',
-            unit: 'credit',
-            description: 'Credit unit price',
-          },
-          mode: {
-            enum: ['base', 'pro'],
-            enumLabels: {
-              base: { en: 'Standard mode', zh: '标准模式' },
-              pro: { en: 'Professional mode', zh: '专业模式' },
-            },
-          },
-        },
-        billing_usage_examples: [
-          { label: 'Beta sample', facts: { credits: 2, mode: 'base' } },
-        ],
-      },
-      {
-        plugin_key: 'gamma',
-        plugin_name: 'Gamma',
-        billing_expr: '',
-        billing_usage_schema: { images: { type: 'number', unit: 'count' } },
-      },
-      {
-        plugin_key: 'delta',
-        plugin_name: 'Delta',
-        billing_mode: 'ratio',
-        billing_expr: '',
-        billing_usage_schema: { images: { type: 'number', unit: 'count' } },
-      },
-    ],
-  }
-  render(
-    <QueryClientProvider client={client}>
-      <ModelDetailsContent
-        model={shared}
-        groupRatio={{ default: 2 }}
-        usableGroup={{ default: { desc: '', ratio: 2 } }}
-        endpointMap={{}}
-        autoGroups={[]}
-        priceRate={1}
-        usdExchangeRate={1}
-        tokenUnit='M'
-      />
-    </QueryClientProvider>
-  )
-  const user = userEvent.setup()
-  const alpha = screen.getByRole('tab', { name: 'Alpha' })
-  expect(alpha).toHaveAttribute('aria-selected', 'true')
-  let panel = screen.getByRole('tabpanel', { name: 'Alpha' })
-  expect(within(panel).getByText('Alpha sample')).toBeVisible()
-  expect(within(panel).getByText('$0.8')).toBeVisible()
-  await user.click(alpha)
-  await user.keyboard('{ArrowRight}')
-  expect(screen.getByRole('tab', { name: 'Beta' })).toHaveFocus()
-  await user.keyboard('{Enter}')
-  expect(screen.getByRole('tab', { name: 'Beta' })).toHaveAttribute(
-    'aria-selected',
-    'true'
-  )
-  panel = screen.getByRole('tabpanel', { name: 'Beta' })
-  expect(within(panel).getByText('Beta sample')).toBeVisible()
-  expect(within(panel).queryByText('Alpha sample')).not.toBeInTheDocument()
-  expect(within(panel).getByText('Professional mode')).toBeVisible()
-  expect(within(panel).getByText('$3')).toBeVisible()
-  expect(within(panel).getByText('$6')).toBeVisible()
-  await act(() => i18next.changeLanguage('zhCN'))
-  expect(within(panel).getByText('专业模式')).toBeVisible()
-  await act(() => i18next.changeLanguage('en'))
-  await user.click(screen.getByRole('tab', { name: 'Gamma' }))
-  panel = screen.getByRole('tabpanel', { name: 'Gamma' })
-  expect(
-    within(panel).getByText(
-      'This model is billed by usage, but the administrator has not configured its pricing yet.'
-    )
-  ).toBeVisible()
-  expect(within(panel).queryByRole('table')).not.toBeInTheDocument()
-  await user.click(screen.getByRole('tab', { name: 'Delta' }))
-  panel = screen.getByRole('tabpanel', { name: 'Delta' })
-  expect(within(panel).getByText('$0.5')).toBeVisible()
 })
 
 it('shows provider count, price range and missing-price status in both list and card views', () => {

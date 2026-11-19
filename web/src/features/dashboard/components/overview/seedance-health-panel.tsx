@@ -36,6 +36,7 @@ import {
 import type { PerfModelSummary } from '@/features/performance-metrics/types'
 import { toIntlLocale } from '@/i18n/languages'
 import { formatNumber } from '@/lib/format'
+import { getLobeIcon } from '@/lib/lobe-icon'
 import { ROLE } from '@/lib/roles'
 import { requireServerSuccess } from '@/lib/server-error-message'
 import { cn } from '@/lib/utils'
@@ -87,7 +88,14 @@ function SeedanceModelActivity(props: {
   return (
     <section className='stolas-health-model' aria-labelledby={titleId}>
       <div className='stolas-health-model-name'>
-        <h3 id={titleId}>{props.name}</h3>
+        <div className='flex items-center gap-2'>
+          <span className='shrink-0' aria-hidden='true'>
+            {getLobeIcon('Doubao.Color', 19)}
+          </span>
+          <h3 id={titleId} className='min-w-0'>
+            {props.name}
+          </h3>
+        </div>
         <p>{hasMetrics ? t('Recorded activity') : t('No recent requests')}</p>
       </div>
       <div className='stolas-health-history'>
@@ -181,7 +189,10 @@ export function SeedanceHealthPanel(props: SeedanceHealthPanelProps) {
       [...modelNames].sort(
         (a, b) =>
           (metricsByName.get(b)?.request_count ?? 0) -
-            (metricsByName.get(a)?.request_count ?? 0) || a.localeCompare(b)
+            (metricsByName.get(a)?.request_count ?? 0) ||
+          (metricsByName.get(b)?.success_rate ?? 0) -
+            (metricsByName.get(a)?.success_rate ?? 0) ||
+          a.localeCompare(b)
       ),
     [modelNames, metricsByName]
   )
@@ -209,7 +220,6 @@ export function SeedanceHealthPanel(props: SeedanceHealthPanelProps) {
     <section className='stolas-health' aria-labelledby='stolas-health-title'>
       <header className='stolas-health-heading'>
         <div>
-          <p className='stolas-eyebrow'>{t('Model availability')}</p>
           <h2 className='stolas-editorial' id='stolas-health-title'>
             {t('Seedance model health')}
           </h2>

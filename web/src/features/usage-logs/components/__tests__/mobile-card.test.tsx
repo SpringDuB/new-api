@@ -153,7 +153,7 @@ it('drawing mobile cards expose synchronous model requests, results and details'
 })
 
 it.each([false, true])(
-  'shows the saved video model in task logs (desktop: %s)',
+  'shows the saved video model with its provider icon in task logs (desktop: %s)',
   (desktop) => {
     render(
       <QueryClientProvider client={new QueryClient()}>
@@ -168,6 +168,7 @@ it.each([false, true])(
     )
     expect(screen.getByText('Model')).toBeVisible()
     expect(screen.getByText('mf-gemini-omni-1-2-flash')).toBeVisible()
+    expect(screen.getByLabelText('Gemini')).toBeVisible()
     expect(screen.queryByText('Request type')).not.toBeInTheDocument()
   }
 )

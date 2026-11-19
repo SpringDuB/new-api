@@ -30,6 +30,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { useSidebar } from '@/components/ui/sidebar'
+import { useMediaQuery } from '@/hooks/use-media-query'
 import { useSidebarView } from '@/hooks/use-sidebar-view'
 
 import { checkIsActive } from '../lib/url-utils'
@@ -41,6 +42,7 @@ import { StolasNavigationIcon } from './stolas-navigation-icon'
 export function WorkspaceNavigation() {
   const { t } = useTranslation()
   const { isMobile } = useSidebar()
+  const compactNavigation = useMediaQuery('(max-width: 1279px)')
   const href = useLocation({ select: (location) => location.href })
   const { rootNavGroups, navGroups, view } = useSidebarView()
   const general = rootNavGroups.find((group) => group.id === 'general')
@@ -68,7 +70,7 @@ export function WorkspaceNavigation() {
     })
     .filter((group) => group.items.length > 0)
 
-  if (isMobile) {
+  if (isMobile || compactNavigation) {
     const current = navGroups
       .flatMap((group) => group.items)
       .flatMap((item) => item.items ?? [item])
@@ -113,10 +115,7 @@ export function WorkspaceNavigation() {
     <AppHeader
       showSearch={false}
       leftContent={
-        <nav
-          aria-label={t('Workspace pages')}
-          className='stolas-workspace-nav overflow-x-auto'
-        >
+        <nav aria-label={t('Workspace pages')} className='stolas-workspace-nav'>
           {overview && (
             <Button
               role='link'

@@ -1,5 +1,12 @@
 {
   "translation": {
+    "Access restrictions": "访问限制",
+    "Activity": "使用记录",
+    "Identity and routing": "名称与路由",
+    "Spending and expiry": "额度与有效期",
+    "Give each application its own key, spending limit and access rules.": "为不同应用设置独立的密钥、使用额度和访问规则。",
+    "Get a redemption code": "获取兑换码",
+    "Get a code from the linked page, then redeem it below to add to your balance.": "前往兑换页面获取兑换码，再在下方兑换到 Stolas 账户余额。",
     "360": "360",
     "1000": "1000",
     "10000": "10000",

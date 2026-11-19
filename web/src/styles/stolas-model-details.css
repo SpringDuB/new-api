@@ -147,6 +147,21 @@ For commercial licensing, please contact support@quantumnous.com
   font-size: 0.75rem;
   color: var(--muted-foreground);
 }
+.stolas-model-field {
+  display: inline-block;
+  margin-inline-start: 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 0.3rem;
+  background: var(--background);
+  padding: 0.1rem 0.35rem;
+  color: var(--primary);
+  font-size: 0.72rem;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.stolas-model-requirements .stolas-model-field {
+  margin-inline-start: 0;
+}
 .stolas-model-capability-grid dd {
   margin-top: 0.65rem;
   font-size: 0.85rem;

@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { AlertTriangle, Route } from 'lucide-react'
+import { AlertTriangle, Box, Route } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { CopyButton } from '@/components/copy-button'
@@ -41,6 +41,7 @@ interface ModelBadgeProps {
   responseModel?: LogOtherData['response_model']
   className?: string
   wrapText?: boolean
+  showFallbackIcon?: boolean
   onInspect?: () => void
 }
 
@@ -75,6 +76,12 @@ function ModelBadgeContent(props: ModelBadgeProps & { copyable: boolean }) {
           >
             {getLobeIcon(provider.icon, 18)}
           </span>
+        )}
+        {!provider?.icon && props.showFallbackIcon && (
+          <Box
+            className='text-muted-foreground size-[18px] shrink-0'
+            aria-hidden='true'
+          />
         )}
         <span
           className={

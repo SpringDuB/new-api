@@ -155,7 +155,8 @@ For commercial licensing, please contact support@quantumnous.com
   align-items: center;
   gap: 0.2rem;
   padding-block: 0.4rem;
-  scrollbar-width: thin;
+  min-width: 0;
+  flex-wrap: wrap;
 }
 .stolas-workspace-nav > * {
   flex-shrink: 0;
@@ -163,6 +164,7 @@ For commercial licensing, please contact support@quantumnous.com
 .stolas-workspace-nav > [data-slot='sidebar-group'] {
   width: auto;
   min-width: 0;
+  flex: none;
 }
 .stolas-workspace-link {
   height: 2.4rem;
@@ -209,6 +211,125 @@ For commercial licensing, please contact support@quantumnous.com
   background: var(--card);
   padding: 2rem;
 }
+.stolas-redemption-source {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+  border: 1px solid color-mix(in srgb, var(--primary) 30%, var(--border));
+  border-inline-start: 3px solid var(--primary);
+  border-radius: 0.65rem;
+  background: var(--accent);
+  padding: 1.25rem;
+}
+.stolas-redemption-source [data-slot='button'] {
+  flex-shrink: 0;
+}
+.stolas-key-directory {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border);
+}
+.stolas-key-directory [data-slot='data-table-card'] {
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+  padding: 1.75rem 0;
+}
+.stolas-key-identity {
+  display: flex;
+  justify-content: space-between;
+  align-items: start;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+.stolas-key-details {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr) minmax(0, 1fr);
+  gap: clamp(1.5rem, 3vw, 3rem);
+  padding-inline-start: 1.75rem;
+}
+.stolas-key-details > section {
+  min-width: 0;
+}
+.stolas-key-details > section + section {
+  border-inline-start: 1px solid var(--border);
+  padding-inline-start: clamp(1.5rem, 3vw, 3rem);
+}
+.stolas-key-budget {
+  max-width: 24rem;
+}
+.stolas-key-dialog[data-slot='dialog-content'] {
+  max-height: calc(100dvh - 2rem);
+  background: var(--card);
+}
+.stolas-key-dialog-heading {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 1.5rem;
+}
+.stolas-key-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2rem;
+}
+.stolas-key-form-section {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+.stolas-key-section-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  text-align: start;
+}
+.stolas-key-section-heading > span {
+  color: var(--primary);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+}
+.stolas-key-section-heading h3 {
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+.stolas-key-section-heading p {
+  margin-top: 0.35rem;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+  font-weight: 400;
+}
+.stolas-key-form-advanced {
+  grid-column: 1 / -1;
+  border-top: 1px solid var(--border);
+  padding-top: 1.25rem;
+}
+.stolas-key-dialog-footer {
+  border-top: 1px solid var(--border);
+  background: var(--background);
+}
+@media (max-width: 767px) {
+  .stolas-key-details {
+    grid-template-columns: minmax(0, 1fr);
+    padding-inline-start: 0;
+    gap: 1.25rem;
+  }
+  .stolas-key-details > section + section {
+    border-inline-start: 0;
+    border-top: 1px solid var(--border);
+    padding-inline-start: 0;
+    padding-top: 1rem;
+  }
+  .stolas-key-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .stolas-redemption-source {
+    align-items: start;
+    flex-direction: column;
+  }
+}
 @media (max-width: 767px) {
   .stolas-masthead-inner {
     grid-template-columns: auto minmax(0, 1fr) auto;
@@ -224,26 +345,22 @@ For commercial licensing, please contact support@quantumnous.com
     grid-template-columns: minmax(0, 1fr);
   }
 }
-.stolas-workspace h2 {
-  font-family: var(--font-serif);
-  letter-spacing: -0.025em;
+.stolas-launch-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
 }
-.stolas-launch-panel {
-  position: relative;
-  min-height: 20rem;
+.stolas-launch-action {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem 1rem;
+  min-width: 0;
+  padding: 0.65rem 1rem;
   border: 1px solid var(--border);
+  border-radius: 0.75rem;
   background: var(--card);
-  padding: clamp(1.5rem, 3vw, 2.5rem);
-}
-.stolas-launch-studio {
-  background: color-mix(in srgb, var(--accent) 65%, var(--card));
-}
-.stolas-launch-number {
-  align-self: flex-end;
-  color: var(--muted-foreground);
-  font-family: var(--font-mono);
-  font-size: 0.65rem;
-  letter-spacing: 0.1em;
 }
 .stolas-account-initial {
   display: grid;
@@ -257,33 +374,38 @@ For commercial licensing, please contact support@quantumnous.com
   font-family: var(--font-serif);
 }
 .stolas-usage-strip {
-  border-block: 1px solid var(--border);
-  padding-block: 1.5rem;
+  padding: 0.9rem 1rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 0.85rem;
+  background: var(--card);
 }
 .stolas-usage-metrics {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  margin-top: 1.5rem;
+  grid-template-columns: minmax(0, 1.4fr) repeat(3, minmax(0, 1fr));
+  align-items: stretch;
+  margin-top: 0.65rem;
 }
 .stolas-usage-metric {
-  border-inline-end: 1px solid var(--border);
-  padding-inline: 1.5rem;
+  min-width: 0;
+  padding: 0.85rem clamp(0.65rem, 1.5vw, 1.5rem);
 }
-.stolas-usage-metric:first-child {
-  padding-inline-start: 0;
+.stolas-usage-metric + .stolas-usage-metric:not(:nth-child(2)) {
+  border-inline-start: 1px solid var(--border);
 }
-.stolas-usage-metric:last-child {
-  border: 0;
+.stolas-usage-balance {
+  border-radius: 0.6rem;
+  background: var(--accent);
+  color: var(--accent-foreground);
 }
 @media (max-width: 767px) {
+  .stolas-launch-actions {
+    grid-template-columns: minmax(0, 1fr);
+  }
   .stolas-usage-metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 1.5rem 0;
+    gap: 0.4rem 0;
   }
-  .stolas-usage-metric:nth-child(odd) {
-    padding-inline-start: 0;
-  }
-  .stolas-usage-metric:nth-child(even) {
+  .stolas-usage-metric + .stolas-usage-metric:not(:nth-child(2)) {
     border: 0;
   }
 }

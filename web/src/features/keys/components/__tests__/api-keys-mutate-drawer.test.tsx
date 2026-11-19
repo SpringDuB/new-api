@@ -206,6 +206,23 @@ afterEach(() => {
 })
 
 describe('API keys mutate drawer Auto group integration', () => {
+  test('groups the form in a dialog and keeps access restrictions expandable', async () => {
+    const createdPayloadsForLayout: Array<Record<string, unknown>> = []
+    installApiFixtures(createdPayloadsForLayout)
+    await renderCreateDrawer()
+    expect(screen.getByRole('dialog', { name: 'Create API Key' })).toBeVisible()
+    expect(
+      screen.getByRole('heading', { name: 'Identity and routing' })
+    ).toBeVisible()
+    expect(
+      screen.getByRole('heading', { name: 'Spending and expiry' })
+    ).toBeVisible()
+    const advanced = screen.getByRole('button', { name: /Advanced Settings/ })
+    expect(advanced).toHaveAttribute('aria-expanded', 'false')
+    fireEvent.click(advanced)
+    expect(screen.getByText('IP Whitelist (supports CIDR)')).toBeVisible()
+    expect(createdPayloadsForLayout).toEqual([])
+  })
   test('inherits the root Auto order and sends an empty override for every batch-created key', async () => {
     const createdPayloads: Array<Record<string, unknown>> = []
     installApiFixtures(createdPayloads)

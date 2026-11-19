@@ -147,7 +147,10 @@ export function ModelCapabilities(props: { model: PricingModel }) {
         <dl className='stolas-model-capability-grid'>
           {highlights.map((parameter) => (
             <div key={parameter.name}>
-              <dt>{t(PARAMETER_LABELS[parameter.name] ?? parameter.name)}</dt>
+              <dt>
+                {t(PARAMETER_LABELS[parameter.name] ?? parameter.name)}
+                <code className='stolas-model-field'>{parameter.name}</code>
+              </dt>
               <dd>{parameter.description}</dd>
             </div>
           ))}
@@ -162,7 +165,9 @@ export function ModelCapabilities(props: { model: PricingModel }) {
             {materials.map((parameter) => (
               <div key={parameter.name}>
                 <dt>
-                  {t(PARAMETER_LABELS[parameter.name] ?? parameter.name)}
+                  {PARAMETER_LABELS[parameter.name] &&
+                    t(PARAMETER_LABELS[parameter.name])}
+                  <code className='stolas-model-field'>{parameter.name}</code>
                   {parameter.required && (
                     <Badge variant='outline'>{t('required')}</Badge>
                   )}

@@ -30,6 +30,59 @@ import { RechargeFormCard } from '../components/recharge-form-card'
 
 const i18n = createInstance()
 
+it.each([true, false])(
+  'shows the external code purchase action only when redemption is enabled=%s',
+  async (enabled) => {
+    await i18n.changeLanguage('en')
+    render(
+      <I18nextProvider i18n={i18n}>
+        <RechargeFormCard
+          topupInfo={{
+            enable_redemption: enabled,
+            enable_online_topup: false,
+            enable_stripe_topup: false,
+            pay_methods: [],
+            min_topup: 1,
+            stripe_min_topup: 1,
+            amount_options: [],
+            discount: {},
+          }}
+          presetAmounts={[]}
+          selectedPreset={null}
+          topupAmount={1}
+          paymentAmount={1}
+          calculating={false}
+          paymentLoading={null}
+          redemptionCode=''
+          redeeming={false}
+          topupLink='https://codes.example.test'
+          onSelectPreset={vi.fn()}
+          onTopupAmountChange={vi.fn()}
+          onPaymentMethodSelect={vi.fn()}
+          onRedemptionCodeChange={vi.fn()}
+          onRedeem={vi.fn()}
+        />
+      </I18nextProvider>
+    )
+    const link = screen.queryByRole('link', { name: 'Get a redemption code' })
+    if (enabled) {
+      expect(link).toBeVisible()
+      expect(link).toHaveAttribute('href', 'https://codes.example.test')
+      expect(link).toHaveAttribute('target', '_blank')
+      expect(link).toHaveAttribute('rel', 'noopener noreferrer')
+      expect(link).toHaveAttribute('data-slot', 'button')
+      expect(
+        screen.getByRole('textbox', { name: 'Have a Code?' })
+      ).toBeVisible()
+    } else {
+      expect(link).not.toBeInTheDocument()
+      expect(
+        screen.queryByRole('textbox', { name: 'Have a Code?' })
+      ).not.toBeInTheDocument()
+    }
+  }
+)
+
 beforeEach(async () => {
   await i18n.use(initReactI18next).init({
     lng: 'zh',

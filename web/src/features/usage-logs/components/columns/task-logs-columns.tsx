@@ -33,6 +33,7 @@ import { cn } from '@/lib/utils'
 import { taskActionMapper, taskStatusMapper } from '../../lib/mappers'
 import type { TaskLog } from '../../types'
 import { TaskDetailsDialog } from '../dialogs/task-details-dialog'
+import { ModelBadge } from '../model-badge'
 import { PluginAuthorLink } from '../plugin-author-link'
 import { TaskArtifactsCell } from '../task-artifacts'
 import { useUsageLogsContext } from '../usage-logs-provider'
@@ -119,6 +120,14 @@ export function useTaskLogsColumns(
         id: 'model',
         header: t('Model'),
         accessorFn: (row) => row.properties?.origin_model_name || '-',
+        cell: ({ row }) => {
+          const name = row.original.properties?.origin_model_name
+          return name ? (
+            <ModelBadge modelName={name} wrapText showFallbackIcon />
+          ) : (
+            <span className='text-muted-foreground'>-</span>
+          )
+        },
         size: 180,
       },
     ]
@@ -271,7 +280,6 @@ export function useTaskLogsColumns(
               variant={taskStatusMapper.getVariant(status)}
               size='sm'
               copyable={false}
-              className='-ml-1.5'
             />
           )
         },

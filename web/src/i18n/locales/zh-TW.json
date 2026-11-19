@@ -1,5 +1,12 @@
 {
   "translation": {
+    "Access restrictions": "存取限制",
+    "Activity": "使用紀錄",
+    "Identity and routing": "名稱與路由",
+    "Spending and expiry": "額度與有效期",
+    "Give each application its own key, spending limit and access rules.": "為不同應用程式設定獨立的金鑰、使用額度與存取規則。",
+    "Get a redemption code": "取得兌換碼",
+    "Get a code from the linked page, then redeem it below to add to your balance.": "前往兌換頁面取得兌換碼，再於下方兌換至 Stolas 帳戶餘額。",
     "360": "360",
     "1000": "1000",
     "10000": "10000",

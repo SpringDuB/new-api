@@ -33,6 +33,7 @@ import { api } from '@/lib/api'
 import { useAuthStore } from '@/stores/auth-store'
 
 import { Pricing } from '..'
+import { LoadingSkeleton } from '../components/loading-skeleton'
 
 const refreshCatalog = vi.hoisted(() => vi.fn().mockResolvedValue({}))
 
@@ -130,7 +131,18 @@ function renderCatalog(path = '/pricing/') {
 }
 
 describe('model library layout', () => {
-  it('presents the actual catalog as a directory with category navigation and no permanent filter sidebar', async () => {
+  it('keeps the tile grid geometry while loading cards and retains rows for table loading', () => {
+    const { rerender } = render(<LoadingSkeleton viewMode='card' />)
+    const loading = screen.getByRole('status', { name: 'Loading...' })
+    expect(loading).toHaveAttribute('aria-busy', 'true')
+    expect(loading.querySelector('.stolas-model-gallery')).not.toBeNull()
+    expect(
+      loading.querySelector('.stolas-catalog-filter-rail')
+    ).toHaveAttribute('aria-hidden', 'true')
+    rerender(<LoadingSkeleton viewMode='table' />)
+    expect(loading.querySelector('.stolas-model-gallery')).toBeNull()
+  })
+  it('presents the tile grid beside a permanent filter sidebar with series and groups visible on arrival', async () => {
     renderCatalog()
     expect(
       await screen.findByRole('heading', { name: 'Model library', level: 1 })
@@ -139,15 +151,24 @@ describe('model library layout', () => {
     expect(
       screen.getByRole('navigation', { name: 'Model categories' })
     ).toBeVisible()
-    expect(screen.queryByRole('complementary')).not.toBeInTheDocument()
+    const filters = screen.getByRole('complementary', { name: 'Filter' })
+    expect(
+      within(filters).getByRole('group', { name: 'Model series' })
+    ).toBeVisible()
+    expect(within(filters).getByRole('group', { name: 'Groups' })).toBeVisible()
+    expect(
+      screen.queryByRole('button', { name: /More filters/ })
+    ).not.toBeInTheDocument()
     expect(
       screen.queryByRole('button', { name: 'Manage display' })
     ).not.toBeInTheDocument()
     const directory = screen.getByRole('list', { name: 'Models' })
+    expect(directory).toHaveClass('stolas-model-gallery')
     expect(within(directory).getAllByRole('listitem')).toHaveLength(3)
     const model = within(directory).getByRole('article', {
       name: 'seedance-2-5-studio',
     })
+    expect(model.querySelector('[data-slot="model-cover"]')).toBeInTheDocument()
     expect(
       within(model).getByText('Create video from a prompt or reference image.')
     ).toBeVisible()
@@ -162,14 +183,10 @@ describe('model library layout', () => {
     ).not.toBeInTheDocument()
   })
 
-  it('reveals all additional choices inline and keeps the group active after collapsing', async () => {
+  it('filters from the always-open sidebar and resets the group without clearing the model category', async () => {
     renderCatalog('/pricing/?category=video')
     const user = userEvent.setup()
-    const more = await screen.findByRole('button', { name: 'More filters' })
-    expect(
-      screen.queryByRole('group', { name: 'Groups' })
-    ).not.toBeInTheDocument()
-    await user.click(more)
+    const filters = await screen.findByRole('complementary', { name: 'Filter' })
     await user.click(
       within(screen.getByRole('group', { name: 'Groups' })).getByRole(
         'button',
@@ -181,18 +198,11 @@ describe('model library layout', () => {
         'article'
       )
     ).toHaveLength(1)
-    await user.click(screen.getByRole('button', { name: /Fewer filters/ }))
+    await user.keyboard('{Escape}')
+    expect(within(filters).getByRole('group', { name: 'Groups' })).toBeVisible()
     expect(
-      screen.queryByRole('group', { name: 'Groups' })
-    ).not.toBeInTheDocument()
-    expect(
-      screen.getByRole('button', { name: /More filters/ })
-    ).toHaveTextContent('premium')
-    expect(
-      within(screen.getByRole('list', { name: 'Models' })).getAllByRole(
-        'article'
-      )
-    ).toHaveLength(1)
+      within(filters).getByRole('button', { name: 'premium' })
+    ).toHaveAttribute('aria-pressed', 'true')
     await user.click(screen.getByRole('button', { name: 'Reset' }))
     expect(
       screen.getByRole('button', { name: /^Videos\s*2$/ })

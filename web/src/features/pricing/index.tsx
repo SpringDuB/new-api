@@ -34,6 +34,7 @@ import {
   SearchBar,
   PricingTable,
   PricingToolbar,
+  PricingSidebar,
   ModelCardGrid,
   ModelDetailsDrawer,
 } from './components'
@@ -90,7 +91,6 @@ export function Pricing() {
     setShowRechargePrice,
     filteredModels,
     hasActiveFilters,
-    activeFilterCount,
     clearFilters,
     clearSearch,
   } = useFilters(models || [])
@@ -204,42 +204,51 @@ export function Pricing() {
           </div>
         </header>
 
-        <main className='stolas-catalog-results'>
-          <PricingToolbar
-            categoryFilter={categoryFilter}
-            categoryCounts={categoryCounts}
-            onCategoryChange={setCategoryFilter}
-            search={
-              <SearchBar
-                value={searchInput}
-                onChange={setSearchInput}
-                onClear={clearSearch}
-                placeholder={t('Search models...')}
-              />
-            }
-            familyFilter={familyFilter}
-            onFamilyChange={setFamilyFilter}
-            familyModels={familyModels}
-            filteredCount={filteredModels.length}
-            totalCount={models?.length}
-            sortBy={sortBy}
-            onSortChange={setSortBy}
-            tokenUnit={tokenUnit}
-            onTokenUnitChange={setTokenUnit}
-            showRechargePrice={showRechargePrice}
-            onRechargePriceChange={setShowRechargePrice}
-            viewMode={viewMode}
-            onViewModeChange={setViewMode}
-            groupFilter={groupFilter}
-            onGroupChange={setGroupFilter}
-            groups={availableGroups}
-            models={sidebarModels}
-            hasActiveFilters={hasActiveFilters}
-            activeFilterCount={activeFilterCount}
-            onClearFilters={clearFilters}
-          />
+        <main className='stolas-catalog-layout'>
+          <aside
+            className='stolas-catalog-filter-rail'
+            aria-label={t('Filter')}
+          >
+            <h2 className='stolas-catalog-filter-title'>{t('Filter')}</h2>
+            <PricingSidebar
+              familyFilter={familyFilter}
+              onFamilyChange={setFamilyFilter}
+              familyModels={familyModels}
+              groupFilter={groupFilter}
+              onGroupChange={setGroupFilter}
+              groups={availableGroups}
+              models={sidebarModels}
+              showGroups
+            />
+          </aside>
+          <div className='stolas-catalog-results'>
+            <PricingToolbar
+              categoryFilter={categoryFilter}
+              categoryCounts={categoryCounts}
+              onCategoryChange={setCategoryFilter}
+              search={
+                <SearchBar
+                  value={searchInput}
+                  onChange={setSearchInput}
+                  onClear={clearSearch}
+                  placeholder={t('Search models...')}
+                />
+              }
+              filteredCount={filteredModels.length}
+              sortBy={sortBy}
+              onSortChange={setSortBy}
+              tokenUnit={tokenUnit}
+              onTokenUnitChange={setTokenUnit}
+              showRechargePrice={showRechargePrice}
+              onRechargePriceChange={setShowRechargePrice}
+              viewMode={viewMode}
+              onViewModeChange={setViewMode}
+              hasActiveFilters={hasActiveFilters}
+              onClearFilters={clearFilters}
+            />
 
-          {renderPricingContent()}
+            {renderPricingContent()}
+          </div>
         </main>
 
         {selectedModel && (

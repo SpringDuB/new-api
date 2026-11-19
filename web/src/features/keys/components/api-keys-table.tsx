@@ -18,8 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useQuery } from '@tanstack/react-query'
 import { getRouteApi } from '@tanstack/react-router'
-import { flexRender, type Table as TanstackTable } from '@tanstack/react-table'
-import { Database } from 'lucide-react'
+import { flexRender, type Row } from '@tanstack/react-table'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -29,20 +28,13 @@ import {
   DataTablePage,
   useDebouncedColumnFilter,
   useDataTable,
+  type DataTableViewMode,
 } from '@/components/data-table'
 import { StatusBadge } from '@/components/status-badge'
-import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from '@/components/ui/empty'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
-import { Skeleton } from '@/components/ui/skeleton'
 import { useTableUrlState } from '@/hooks/use-table-url-state'
 import { createServerError } from '@/lib/server-error-message'
-import { cn } from '@/lib/utils'
 
 import { getApiKeys, searchApiKeys } from '../api'
 import {
@@ -66,152 +58,82 @@ import { DataTableRowActions } from './data-table-row-actions'
 
 const route = getRouteApi('/_authenticated/keys/')
 const API_KEYS_COLUMN_VISIBILITY_STORAGE_KEY = 'api-keys:column-visibility'
-const API_KEYS_MOBILE_SKELETON_IDS = Array.from(
-  { length: 5 },
-  (_, index) => `api-key-mobile-skeleton-${index + 1}`
-)
-
 function isDisabledApiKeyRow(apiKey: ApiKey) {
   return apiKey.status !== API_KEY_STATUS.ENABLED
 }
 
-function ApiKeysMobileSkeleton() {
-  return (
-    <div className='min-w-0 space-y-3'>
-      {API_KEYS_MOBILE_SKELETON_IDS.map((id) => (
-        <div
-          key={id}
-          className='border-border/60 bg-card space-y-2 rounded-xl border p-3.5'
-        >
-          <div className='flex items-center justify-between'>
-            <Skeleton className='h-4 w-32' />
-            <Skeleton className='h-5 w-16 rounded-md' />
-          </div>
-          <div className='flex items-center justify-between gap-3'>
-            <Skeleton className='h-7 w-44' />
-            <Skeleton className='h-8 w-16' />
-          </div>
-          <Skeleton className='h-3 w-28' />
-        </div>
-      ))}
-    </div>
-  )
-}
-
-function ApiKeysMobileList({
-  table,
-  isLoading,
-  now,
-}: {
-  table: TanstackTable<ApiKey>
-  isLoading: boolean
-  now: number
-}) {
+function ApiKeyDirectoryEntry(props: { row: Row<ApiKey>; now: number }) {
   const { t } = useTranslation()
-  const rows = table.getRowModel().rows
-
-  if (isLoading) return <ApiKeysMobileSkeleton />
-
-  if (!rows.length) {
-    return (
-      <div className='rounded-lg border p-8'>
-        <Empty className='border-none p-0'>
-          <EmptyHeader>
-            <EmptyMedia variant='icon'>
-              <Database className='size-6' />
-            </EmptyMedia>
-            <EmptyTitle>{t('No API Keys Found')}</EmptyTitle>
-            <EmptyDescription>
-              {t(
-                'No API keys available. Create your first API key to get started.'
-              )}
-            </EmptyDescription>
-          </EmptyHeader>
-        </Empty>
-      </div>
-    )
-  }
+  const apiKey = props.row.original
+  const statusConfig = API_KEY_STATUSES[apiKey.status]
+  const cells = props.row.getAllCells()
+  const groupCell = cells.find((cell) => cell.column.id === 'group')
+  const expiryCell = cells.find((cell) => cell.column.id === 'expired_time')
 
   return (
-    <div className='min-w-0 space-y-3'>
-      {rows.map((row) => {
-        const apiKey = row.original
-        const statusConfig = API_KEY_STATUSES[apiKey.status]
-        const groupCell = row
-          .getAllCells()
-          .find((cell) => cell.column.id === 'group')
-        const expiryCell = row
-          .getAllCells()
-          .find((cell) => cell.column.id === 'expired_time')
-
-        return (
-          <div
-            key={row.id}
-            className={cn(
-              'border-border/60 bg-card min-w-0 space-y-2 rounded-xl border p-3.5 text-xs leading-4',
-              isDisabledApiKeyRow(apiKey) && DISABLED_ROW_MOBILE
-            )}
-          >
-            <div className='flex items-start justify-between gap-3'>
-              <div className='min-w-0'>
-                <div className='text-sm leading-5 font-semibold break-words'>
-                  {apiKey.name}
-                </div>
-              </div>
+    <article aria-label={apiKey.name} className='stolas-key-entry'>
+      <header className='stolas-key-identity'>
+        <div className='flex min-w-0 items-start gap-3'>
+          <Checkbox
+            checked={props.row.getIsSelected()}
+            onCheckedChange={(value) => props.row.toggleSelected(!!value)}
+            aria-label={t('Select {{name}}', { name: apiKey.name })}
+            className='mt-1'
+          />
+          <div className='min-w-0'>
+            <div className='mb-2 flex flex-wrap items-center gap-3'>
+              <h3 className='text-base font-semibold break-all'>
+                {apiKey.name}
+              </h3>
               {statusConfig && (
                 <StatusBadge
                   label={t(statusConfig.label)}
                   variant={statusConfig.variant}
                   copyable={false}
-                  className='shrink-0 px-0 text-xs font-normal'
                 />
               )}
             </div>
-
-            <div className='flex min-w-0 items-center justify-between gap-2'>
-              <div className='min-w-0 flex-1 [&_button:first-child]:max-w-full [&_button:first-child]:truncate [&_button:first-child]:px-0'>
-                <ApiKeyCell apiKey={apiKey} />
-              </div>
-              <DataTableRowActions row={row} />
-            </div>
-
-            <div className='min-w-0 space-y-3 py-1'>
-              <div className='min-w-0'>
-                {groupCell &&
-                  flexRender(
-                    groupCell.column.columnDef.cell,
-                    groupCell.getContext()
-                  )}
-              </div>
-              <ApiKeyQuotaCell apiKey={apiKey} now={now} variant='card' />
-            </div>
-
-            <div className='flex flex-wrap items-center gap-x-5 gap-y-1'>
-              <ModelLimitsCell apiKey={apiKey} detailsTrigger='click' />
-              <IpRestrictionsCell apiKey={apiKey} detailsTrigger='click' />
-            </div>
-
-            <div className='grid grid-cols-3 items-start gap-3 border-t pt-2'>
-              <div className='col-span-2 min-w-0'>
-                <ApiKeyActivityCell
-                  apiKey={apiKey}
-                  now={now}
-                  layout='columns'
-                />
-              </div>
-              <div className='min-w-0 space-y-1 [&_[data-slot=status-badge]]:text-xs [&_[data-slot=status-badge]]:font-normal'>
-                <div className='text-muted-foreground'>{t('Expires')}</div>
-                {expiryCell &&
-                  flexRender(
-                    expiryCell.column.columnDef.cell,
-                    expiryCell.getContext()
-                  )}
-              </div>
-            </div>
+            <ApiKeyCell apiKey={apiKey} />
           </div>
-        )
-      })}
-    </div>
+        </div>
+        <DataTableRowActions row={props.row} />
+      </header>
+      <div className='stolas-key-details'>
+        <section aria-label={t('Quota Settings')} className='stolas-key-budget'>
+          <p className='stolas-eyebrow mb-3'>{t('Quota Settings')}</p>
+          <ApiKeyQuotaCell apiKey={apiKey} now={props.now} variant='card' />
+        </section>
+        <section aria-label={t('Access restrictions')} className='space-y-3'>
+          <p className='stolas-eyebrow'>{t('Access restrictions')}</p>
+          <div>
+            {groupCell &&
+              flexRender(
+                groupCell.column.columnDef.cell,
+                groupCell.getContext()
+              )}
+          </div>
+          <div className='flex flex-wrap gap-x-5 gap-y-2'>
+            <ModelLimitsCell apiKey={apiKey} detailsTrigger='click' />
+            <IpRestrictionsCell apiKey={apiKey} detailsTrigger='click' />
+          </div>
+        </section>
+        <section aria-label={t('Activity')} className='space-y-3'>
+          <ApiKeyActivityCell
+            apiKey={apiKey}
+            now={props.now}
+            layout='columns'
+          />
+          <div className='flex items-center gap-3 text-xs'>
+            <span className='text-muted-foreground'>{t('Expires')}</span>
+            {expiryCell &&
+              flexRender(
+                expiryCell.column.columnDef.cell,
+                expiryCell.getContext()
+              )}
+          </div>
+        </section>
+      </div>
+    </article>
   )
 }
 
@@ -219,6 +141,7 @@ export function ApiKeysTable() {
   const { t } = useTranslation()
   const { refreshTrigger } = useApiKeys()
   const [now, setNow] = useState(() => Date.now())
+  const [viewMode, setViewMode] = useState<DataTableViewMode>('card')
   const columns = useApiKeysColumns(now)
 
   useEffect(() => {
@@ -350,7 +273,28 @@ export function ApiKeysTable() {
       )}
       skeletonKeyPrefix='api-keys-skeleton'
       applyHeaderSize
+      enableCardView
+      viewMode={viewMode}
+      onViewModeChange={setViewMode}
+      fixedHeight={false}
+      cardGridClassName='stolas-key-directory'
+      renderCard={(row) => <ApiKeyDirectoryEntry row={row} now={now} />}
+      showMobileBulkActions
       toolbarProps={{
+        hideViewOptions: viewMode === 'card',
+        leftActions: viewMode === 'card' && (
+          <div className='text-muted-foreground flex items-center gap-2 text-xs'>
+            <Checkbox
+              aria-label={t('Select all')}
+              checked={table.getIsAllPageRowsSelected()}
+              indeterminate={table.getIsSomePageRowsSelected()}
+              onCheckedChange={(value) =>
+                table.toggleAllPageRowsSelected(!!value)
+              }
+            />
+            {t('Select all')}
+          </div>
+        ),
         searchPlaceholder: t('Filter by name...'),
         searchDebounceMs: 500,
         additionalSearch: (
@@ -371,12 +315,10 @@ export function ApiKeysTable() {
           },
         ],
       }}
-      mobile={
-        <ApiKeysMobileList table={table} isLoading={isLoading} now={now} />
-      }
-      getRowClassName={(row) =>
-        isDisabledApiKeyRow(row.original) ? DISABLED_ROW_DESKTOP : undefined
-      }
+      getRowClassName={(row, context) => {
+        if (!isDisabledApiKeyRow(row.original)) return undefined
+        return context.isMobile ? DISABLED_ROW_MOBILE : DISABLED_ROW_DESKTOP
+      }}
       bulkActions={<DataTableBulkActions table={table} />}
     />
   )
