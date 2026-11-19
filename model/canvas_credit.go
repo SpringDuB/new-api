@@ -65,10 +65,11 @@ func ApplyCanvasCreditMigration(request CanvasCreditMigration) error {
 		if remainder.IsPositive() {
 			quota = quota.Add(decimal.NewFromInt(1))
 		}
-		if quota.GreaterThan(decimal.NewFromInt(int64(math.MaxInt))) {
+		creditedQuota, err := common.WalletQuotaFromDecimalStrict(quota)
+		if err != nil {
 			return ErrTopUpQuotaLimitExceeded
 		}
-		receipt.Quota = int(quota.IntPart())
+		receipt.Quota = creditedQuota
 		if err := creditTopUpQuota(tx, user.Id, receipt.Quota, nil); err != nil {
 			return err
 		}

@@ -99,8 +99,9 @@ const plugin = {
 }
 const previousConfig = useSystemConfigStore.getState().config
 let client: QueryClient
-const i18n = createInstance()
+let i18n: ReturnType<typeof createInstance>
 beforeEach(async () => {
+  i18n = createInstance()
   await i18n.init({
     lng: 'en',
     resources: { en },
@@ -407,7 +408,8 @@ test.each([
   }
 )
 
-test('task log prices use localized unit labels from pricing metadata', async () => {
+test('task log prices use localized unit labels from pricing metadata', () => {
+  i18n.addResourceBundle('zhCN', 'translation', zh.translation)
   client.setQueryData(['pricing'], {
     data: [
       {
@@ -430,7 +432,10 @@ test('task log prices use localized unit labels from pricing metadata', async ()
     matched_tier: 'images',
   })
   expect(preview).toHaveTextContent('images · images $0.25/image')
-  await act(() => i18n.changeLanguage('zh-CN'))
+  // With bundled resources, the language change and its event are synchronous.
+  act(() => {
+    void i18n.changeLanguage('zhCN')
+  })
   expect(
     screen.getByRole('button', { name: /images · images/ })
   ).toHaveTextContent('images · images $0.25/张')

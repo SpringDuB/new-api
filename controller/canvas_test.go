@@ -19,6 +19,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/oauth"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -114,6 +115,69 @@ func canvasAuthorizeCode(t *testing.T, bearer string) string {
 
 func canvasExchangeInput(code string) map[string]string {
 	return map[string]string{"code": code, "code_verifier": "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk", "redirect_uri": "https://canvas.stolas.cc/api/auth/stolas/callback"}
+}
+
+func TestCanvasCreditMigrationDatabaseMatrix(t *testing.T) {
+	for _, dialect := range []struct{ kind, env string }{{"sqlite", ""}, {"mysql", "TEST_MYSQL_DSN"}, {"postgres", "TEST_POSTGRES_DSN"}} {
+		t.Run(dialect.kind, func(t *testing.T) {
+			dsn := os.Getenv(dialect.env)
+			if dialect.env != "" && dsn == "" {
+				t.Skip(dialect.env + " is not configured")
+			}
+			db := canvasDatabase(t, dialect.kind, dsn)
+			owner := model.User{Username: "migration-owner", AffCode: "origin", Status: common.UserStatusEnabled, Quota: 20}
+			other := model.User{Username: "migration-other", AffCode: "other", Status: common.UserStatusEnabled}
+			require.NoError(t, db.Create(&owner).Error)
+			require.NoError(t, db.Create(&other).Error)
+			for range 2 {
+				require.NoError(t, db.AutoMigrate(&model.CanvasCreditMigration{}))
+			}
+			oldRate, oldUnit := operation_setting.USDExchangeRate, common.QuotaPerUnit
+			t.Cleanup(func() { operation_setting.USDExchangeRate, common.QuotaPerUnit = oldRate, oldUnit })
+			operation_setting.USDExchangeRate, common.QuotaPerUnit = 7.3, 500000
+			router := gin.New()
+			router.POST("/api/canvas/credit-migration", CanvasCreditMigration)
+			apply := func(input model.CanvasCreditMigration, wantStatus int) {
+				t.Helper()
+				body, err := common.Marshal(input)
+				require.NoError(t, err)
+				request := httptest.NewRequest(http.MethodPost, "/api/canvas/credit-migration", bytes.NewReader(body))
+				request.Header.Set("Content-Type", "application/json")
+				secret := os.Getenv("STOLAS_CANVAS_CLIENT_SECRET")
+				request.Header.Set("Authorization", "Bearer "+secret)
+				request.Header.Set("X-Stolas-Client-Secret", secret)
+				response := httptest.NewRecorder()
+				router.ServeHTTP(response, request)
+				require.Equal(t, wantStatus, response.Code, response.Body.String())
+			}
+			request := model.CanvasCreditMigration{ID: strings.Repeat("a", 64), UserID: owner.Id, CNYMicros: 7_300_000}
+			apply(request, http.StatusOK)
+			operation_setting.USDExchangeRate = 9
+			apply(request, http.StatusOK)
+			request.UserID = other.Id
+			apply(request, http.StatusConflict)
+			require.NoError(t, db.First(&owner, owner.Id).Error)
+			assert.Equal(t, 500020, owner.Quota)
+			require.NoError(t, db.First(&other, other.Id).Error)
+			assert.Zero(t, other.Quota)
+
+			// A rejected credit cannot leave a receipt that would swallow delivery after the balance changes.
+			request = model.CanvasCreditMigration{ID: strings.Repeat("b", 64), UserID: owner.Id, CNYMicros: 1}
+			require.NoError(t, db.Model(&owner).UpdateColumn("quota", common.MaxWalletQuota).Error)
+			apply(request, http.StatusConflict)
+			require.NoError(t, db.First(&owner, owner.Id).Error)
+			assert.Equal(t, common.MaxWalletQuota, owner.Quota)
+			var receipt model.CanvasCreditMigration
+			require.ErrorIs(t, db.First(&receipt, "id = ?", request.ID).Error, gorm.ErrRecordNotFound)
+			require.NoError(t, db.Model(&owner).UpdateColumn("quota", common.MaxWalletQuota-1).Error)
+			apply(request, http.StatusOK)
+			apply(request, http.StatusOK)
+			require.NoError(t, db.First(&owner, owner.Id).Error)
+			assert.Equal(t, common.MaxWalletQuota, owner.Quota)
+			require.NoError(t, db.First(&receipt, "id = ?", request.ID).Error)
+			assert.Equal(t, 1, receipt.Quota)
+		})
+	}
 }
 
 func TestCanvasIdentityReadsCurrentRoleAndRequiresBridgeAndDefaultAssociation(t *testing.T) {

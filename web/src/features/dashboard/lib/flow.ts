@@ -1327,19 +1327,13 @@ export function buildFlowSankeySpec(
           value: (datum: Record<string, unknown>) => {
             const source = sankeyDatumValue(datum, 'source')
             const target = sankeyDatumValue(datum, 'target')
-            let title: string
+            // The DOM tooltip writes titles as text content.
             if (source && target) {
               const sourceLabel = sankeyDatumValue(datum, 'sourceLabel')
               const targetLabel = sankeyDatumValue(datum, 'targetLabel')
-              title = `${sourceLabel ?? source} -> ${targetLabel ?? target}`
-            } else {
-              title = `${sankeyDatumValue(datum, 'name') ?? sankeyDatumValue(datum, 'rawLabel') ?? ''}`
+              return `${sourceLabel ?? source} -> ${targetLabel ?? target}`
             }
-            // VChart inserts title strings as HTML, while names are user input.
-            return title
-              .replaceAll('&', '&amp;')
-              .replaceAll('<', '&lt;')
-              .replaceAll('>', '&gt;')
+            return `${sankeyDatumValue(datum, 'name') ?? sankeyDatumValue(datum, 'rawLabel') ?? ''}`
           },
         },
         content: tooltipMetricLines(valueFormatter, labels),

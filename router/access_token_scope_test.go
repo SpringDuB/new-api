@@ -107,6 +107,24 @@ func TestCanvasIdentityRouteRequiresModelKeyAndBridgeSecret(t *testing.T) {
 	assert.NotContains(t, response.Body.String(), token.Key)
 }
 
+func TestCanvasCreditMigrationRouteRequiresBridgeSecretInBothHeaders(t *testing.T) {
+	engine, user, dashboardBearer := canvasRateLimitRouter(t, true)
+	const secret = "router-test-canvas-secret-at-least-32-characters"
+	input := model.CanvasCreditMigration{ID: strings.Repeat("a", 64), UserID: user.Id, CNYMicros: 1_000_000}
+	for _, credentials := range []struct{ name, bearer, header string }{
+		{"no credentials", "", ""},
+		{"missing custom header", secret, ""},
+		{"missing bearer", "", secret},
+		{"dashboard bearer", dashboardBearer, secret},
+		{"incorrect custom header", secret, "wrong-secret"},
+	} {
+		t.Run(credentials.name, func(t *testing.T) {
+			response := canvasRateRequest(t, engine, http.MethodPost, "/api/canvas/credit-migration", credentials.bearer, credentials.header, input)
+			assert.Equal(t, http.StatusUnauthorized, response.Code, response.Body.String())
+		})
+	}
+}
+
 func TestCanvasIdentityAndWalletHaveIndependentUserBudgets(t *testing.T) {
 	t.Setenv("TOKEN_USAGE_RATE_LIMIT", "1")
 	t.Setenv("STOLAS_IDENTITY_RATE_LIMIT", "2")
@@ -320,6 +338,7 @@ var accessTokenExemptRoutes = []string{
 	// The canvas backend authenticates with its configured application secret.
 	"POST /api/canvas/exchange",
 	"GET /api/canvas/identity",
+	"POST /api/canvas/credit-migration",
 
 	// Payment callbacks.
 	"POST /api/stripe/webhook",
