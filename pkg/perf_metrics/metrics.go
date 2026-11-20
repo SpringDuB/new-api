@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -77,6 +78,16 @@ func RecordTaskResult(task *model.Task, result *relaycommon.TaskInfo) {
 	if task == nil {
 		return
 	}
+	if execution := task.PrivateData.Execution; execution != nil && execution.TaskPlugin != nil && execution.TaskPlugin.Key == "lecapi" {
+		var state struct {
+			Route string `json:"lecapiSubmitRoute"`
+		}
+		if len(task.PrivateData.PluginState) > 0 && common.Unmarshal(task.PrivateData.PluginState, &state) == nil && state.Route != "" {
+			if err := model.RecordLecAPIRouteOutcome(task.ChannelId, state.Route, task.Status == model.TaskStatusSuccess); err != nil {
+				common.SysError(common.LogText("could not record LecAPI route outcome: %s", err.Error()))
+			}
+		}
+	}
 	modelName := task.Properties.OriginModelName
 	if bc := task.PrivateData.BillingContext; bc != nil && bc.OriginModelName != "" {
 		modelName = bc.OriginModelName
@@ -124,7 +135,7 @@ func RecordImmediateTaskResult(info *relaycommon.RelayInfo, result *relaycommon.
 
 func Record(sample Sample) {
 	setting := perf_metrics_setting.GetSetting()
-	if !setting.Enabled || sample.Model == "" {
+	if !setting.Enabled || sample.Model == "" || strings.HasPrefix(strings.ToLower(sample.Model), model.LecAPIRouteMetricPrefix) {
 		return
 	}
 	if sample.Group == "" {

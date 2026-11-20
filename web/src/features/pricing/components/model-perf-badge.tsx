@@ -22,6 +22,7 @@ import { useTranslation } from 'react-i18next'
 import {
   formatLatency,
   formatThroughput,
+  formatUptimePct,
   getSuccessRateDotClass,
 } from '@/features/performance-metrics/lib/format'
 import type { SuccessRatePoint } from '@/features/performance-metrics/types'
@@ -57,6 +58,11 @@ export const ModelPerfBadge = memo(function ModelPerfBadge(
     Number.isFinite(successRate) &&
     successRate >= 0 &&
     successRate <= 100
+  const performanceLabel = t('Performance metrics for the last 24 hours')
+  const successRateText = hasSuccessRate ? formatUptimePct(successRate) : '—'
+  const successRateHint = t(
+    'Success rate excludes business rejections and includes the current partial hour.'
+  )
   const statusSamples = useMemo(
     () =>
       (props.perf?.recent_success_series ?? [])
@@ -78,7 +84,8 @@ export const ModelPerfBadge = memo(function ModelPerfBadge(
 
   return (
     <div
-      aria-label={t('Performance metrics for the last 24 hours')}
+      role='group'
+      aria-label={performanceLabel}
       className={cn(
         'flex w-full min-w-0 items-center justify-between gap-3',
         props.className
@@ -87,15 +94,11 @@ export const ModelPerfBadge = memo(function ModelPerfBadge(
       <dl className='flex min-w-0 items-start gap-5 text-xs tabular-nums'>
         <div className='w-24 shrink-0'>
           <dt
-            title={t(
-              'Success rate excludes business rejections and includes the current partial hour.'
-            )}
+            title={successRateHint}
             className='text-muted-foreground flex items-center justify-between gap-1 text-[11px] leading-4'
           >
             <span>{t('Status')}</span>
-            <span className='font-mono'>
-              {hasSuccessRate ? `${successRate.toFixed(2)}%` : '—'}
-            </span>
+            <span className='font-mono'>{successRateText}</span>
           </dt>
           <dd
             role='img'

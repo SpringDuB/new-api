@@ -1271,6 +1271,9 @@ func normalizeV1Meta(meta *Meta) error {
 		if name == CapabilitySubmitSSEDelta && !slices.Contains(meta.SubmitResponseTypes, "sse") {
 			return fmt.Errorf("%s requires submitResponseTypes to include sse", name)
 		}
+		if name == CapabilityLecAPIVideoPool && (meta.Key != "lecapi" || !slices.Contains(meta.RequiredCapabilities, CapabilitySubmitNoRetry) || meta.PreservesJSONOrder()) {
+			return fmt.Errorf("%s requires the LecAPI JSON driver with %s", name, CapabilitySubmitNoRetry)
+		}
 		seenCapabilities[name] = true
 	}
 	seenUpstreams := make(map[string]bool, len(meta.Upstreams))

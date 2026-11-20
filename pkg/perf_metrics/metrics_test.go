@@ -236,6 +236,31 @@ func TestPerformanceAggregationAndFlush(t *testing.T) {
 			}
 			groups := []string{"a", "b"}
 
+			t.Run("LecAPI route outcomes are private and channel-scoped", func(t *testing.T) {
+				const route = "lec-mf-seedance-2-5-30ref"
+				require.NoError(t, model.RecordLecAPIRouteOutcome(3, route, false))
+				task := &model.Task{
+					ChannelId: 3, Status: model.TaskStatusSuccess, FinishTime: now.Unix(),
+					PrivateData: model.TaskPrivateData{
+						Execution:   &model.TaskExecutionSnapshot{TaskPlugin: &model.TaskPluginSnapshot{Key: "lecapi"}},
+						PluginState: []byte(`{"lecapiSubmitRoute":"lec-mf-seedance-2-5-30ref"}`),
+					},
+				}
+				RecordTaskResult(task, nil)
+				require.NoError(t, model.RecordLecAPIRouteOutcome(4, route, true))
+				stats, err := model.LecAPIRouteStats(3, []string{route})
+				require.NoError(t, err)
+				assert.Equal(t, []model.LecAPIRouteStat{{Route: route, ChannelID: 3, RequestCount: 2, SuccessCount: 1, SuccessRate: 50}}, stats)
+				privateName := model.LecAPIRouteMetricPrefix + route
+				public, err := QuerySummaryAll(24, nil, privateName)
+				require.NoError(t, err)
+				assert.NotContains(t, public.RecentSuccessSeries, privateName)
+				assert.NotContains(t, lo.Map(public.Models, func(m ModelSummary, _ int) string { return m.ModelName }), privateName)
+				series, err := Query(QueryParams{Model: privateName, Hours: 24})
+				require.NoError(t, err)
+				assert.Nil(t, series.Summary)
+			})
+
 			RecordRelayResult(context.Background(), &relaycommon.RelayInfo{OriginModelName: "test-model", UsingGroup: "b", StartTime: now}, types.InitOpenAIError("unknown", 400))
 			businessRejected, err := QuerySummaryAll(24, groups)
 			require.NoError(t, err)

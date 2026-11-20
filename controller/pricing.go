@@ -2,6 +2,8 @@ package controller
 
 import (
 	"maps"
+	"reflect"
+	"slices"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
@@ -35,6 +37,29 @@ func filterPricingByUsableGroups(pricing []model.Pricing, usableGroup map[string
 	return filtered
 }
 
+// Equivalent mapped aliases remain callable but need only one catalog card.
+func distinctPricingCatalogModels(pricing []model.Pricing) []model.Pricing {
+	byName := make(map[string]model.Pricing, len(pricing))
+	for _, item := range pricing {
+		byName[item.ModelName] = item
+	}
+	result := make([]model.Pricing, 0, len(pricing))
+	for _, item := range pricing {
+		if target, ok := byName[item.CatalogAliasOf]; ok && item.DisplayName != "" && target.CatalogAliasOf == "" {
+			alias := item
+			alias.ModelName, alias.CatalogAliasOf, alias.PricingVersion = target.ModelName, "", target.PricingVersion
+			if slices.Equal(slices.Sorted(slices.Values(alias.EnableGroup)), slices.Sorted(slices.Values(target.EnableGroup))) {
+				alias.EnableGroup = target.EnableGroup
+			}
+			if reflect.DeepEqual(alias, target) {
+				continue
+			}
+		}
+		result = append(result, item)
+	}
+	return result
+}
+
 func GetPricing(c *gin.Context) {
 	pricing := model.GetPricing()
 	userId, exists := c.Get("id")
@@ -56,7 +81,7 @@ func GetPricing(c *gin.Context) {
 	}
 
 	usableGroup = service.GetUserUsableGroups(group)
-	pricing = filterPricingByUsableGroups(pricing, usableGroup)
+	pricing = distinctPricingCatalogModels(filterPricingByUsableGroups(pricing, usableGroup))
 	modelNames := make([]string, len(pricing))
 	for i := range pricing {
 		modelNames[i] = pricing[i].ModelName

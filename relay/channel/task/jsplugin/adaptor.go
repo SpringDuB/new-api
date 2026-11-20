@@ -50,6 +50,8 @@ type requestDescriptor struct {
 	RewriteModel   string            `json:"rewriteModel"`
 	BodyType       string            `json:"bodyType"`
 	Parts          []requestPart     `json:"parts"`
+	// Used only by the LecAPI JSON video submission contract.
+	LecAPIRouteAlternatives []map[string]any `json:"lecapiRouteAlternatives"`
 
 	// ContentPath and MimeType are read from buildContentRequest only: the
 	// artifact's bytes are a base64 string at that path of the JSON reply.
@@ -151,7 +153,8 @@ type TaskAdaptor struct {
 	// the relayed events of a submission whose stream stopped before the
 	// upstream finished it, or whose result the plugin could not read: the
 	// task then settles at the reserved quota.
-	keepReservation bool
+	keepReservation   bool
+	lecapiSubmitRoute string
 }
 
 func New(plugin *pluginruntime.LoadedPlugin) *TaskAdaptor { return &TaskAdaptor{plugin: plugin} }
@@ -593,6 +596,9 @@ func (a *TaskAdaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, bod
 		c.Request.Method = strings.ToUpper(a.submit.Method)
 		defer func() { c.Request.Method = originalMethod }()
 	}
+	if info.ChannelType != constant.ChannelTypeNewAPI && a.submit != nil && a.submit.LecAPIRouteAlternatives != nil && slices.Contains(a.plugin.Meta.RequiredCapabilities, pluginruntime.CapabilityLecAPIVideoPool) {
+		return a.submitLecAPIVideoPool(c, info, body)
+	}
 	resp, err := channel.DoTaskApiRequest(a, c, info, body)
 	if release != nil {
 		if err != nil || resp == nil {
@@ -699,7 +705,11 @@ func (a *TaskAdaptor) ParseResponse(c *gin.Context, resp *http.Response, info *r
 	}
 	headers := make(map[string][]string, len(resp.Header))
 	maps.Copy(headers, resp.Header)
-	value, err := a.plugin.Engine.Call(c.Request.Context(), "parseSubmitResponse", a.submitContext(c, info), map[string]any{"statusCode": resp.StatusCode, "headers": headers, "body": responseBody})
+	submitContext := a.submitContext(c, info)
+	if a.lecapiSubmitRoute != "" {
+		submitContext["lecapiSubmitRoute"] = a.lecapiSubmitRoute
+	}
+	value, err := a.plugin.Engine.Call(c.Request.Context(), "parseSubmitResponse", submitContext, map[string]any{"statusCode": resp.StatusCode, "headers": headers, "body": responseBody})
 	if err != nil {
 		logger.LogDebug(
 			c,
@@ -767,6 +777,11 @@ func (a *TaskAdaptor) ParseResponse(c *gin.Context, resp *http.Response, info *r
 		CompletionTokens: positiveInt(parsed.Immediate.CompletionTokens), TotalTokens: positiveInt(parsed.Immediate.TotalTokens),
 	}
 	response.Immediate = immediate
+	if a.lecapiSubmitRoute != "" && (immediate.Status == model.TaskStatusSuccess || immediate.Status == model.TaskStatusFailure) {
+		if err := model.RecordLecAPIRouteOutcome(info.ChannelId, a.lecapiSubmitRoute, immediate.Status == model.TaskStatusSuccess); err != nil {
+			logger.LogWarn(c, common.LogText("could not record LecAPI route outcome: %s", err.Error()))
+		}
+	}
 	if immediate.Status != model.TaskStatusSuccess || !a.hasHook(c.Request.Context(), "extractUsageOnComplete") {
 		return response, nil
 	}

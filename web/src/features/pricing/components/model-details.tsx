@@ -160,6 +160,7 @@ function ModelHeader(props: { model: PricingModel }) {
   const { t } = useTranslation()
   const { status } = useStatus()
   const model = props.model
+  const displayName = model.display_name || model.model_name
   const modelIconKey = model.icon || model.vendor_icon
   const modelIcon = modelIconKey ? getLobeIcon(modelIconKey, 30) : null
   const description = model.description || model.vendor_description || null
@@ -175,8 +176,20 @@ function ModelHeader(props: { model: PricingModel }) {
           {family ? ` / ${family}` : ''}
         </span>
       </div>
-      <div className='flex min-w-0 items-start gap-3'>
-        <h1 className='stolas-model-detail-name'>{model.model_name}</h1>
+      <div className='flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1'>
+        <h1
+          className={cn(
+            'stolas-model-detail-name min-w-0',
+            displayName !== model.model_name && 'basis-full'
+          )}
+        >
+          {displayName}
+        </h1>
+        {displayName !== model.model_name && (
+          <code className='text-muted-foreground text-sm [overflow-wrap:anywhere]'>
+            {model.model_name}
+          </code>
+        )}
         <CopyButton
           value={model.model_name || ''}
           className='mt-1 size-7 shrink-0'
@@ -683,7 +696,7 @@ export function ModelDetailsDrawer(props: ModelDetailsDrawerProps) {
     <Dialog
       open={open}
       onOpenChange={onOpenChange}
-      title={props.model.model_name}
+      title={props.model.display_name || props.model.model_name}
       description={t('Model details')}
       headerClassName='sr-only'
       contentClassName='stolas-model-detail-dialog'

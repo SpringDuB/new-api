@@ -12,22 +12,23 @@ import (
 )
 
 const (
-	CapabilityJSONClone      = "json-clone@1"
-	CapabilitySubmitSSEDelta = "submit-sse-delta@1"
-	CapabilityJSONOrder      = "json-order@1"
-	CapabilityDurationAuto   = "duration-auto@1"
-	CapabilitySubmitNoRetry  = "submit-no-retry@1"
-	CapabilityMediaDuration  = "media-duration@1"
-	CapabilityJSONFileUpload = "json-file-upload@1"
-	MaxJSONToolBytes         = 1 << 20
-	maxJSONToolDepth         = 32
-	maxJSONToolNodes         = 32768
-	maxJSONChanges           = 256
+	CapabilityJSONClone       = "json-clone@1"
+	CapabilitySubmitSSEDelta  = "submit-sse-delta@1"
+	CapabilityJSONOrder       = "json-order@1"
+	CapabilityDurationAuto    = "duration-auto@1"
+	CapabilitySubmitNoRetry   = "submit-no-retry@1"
+	CapabilityLecAPIVideoPool = "lecapi-video-pool@1"
+	CapabilityMediaDuration   = "media-duration@1"
+	CapabilityJSONFileUpload  = "json-file-upload@1"
+	MaxJSONToolBytes          = 1 << 20
+	maxJSONToolDepth          = 32
+	maxJSONToolNodes          = 32768
+	maxJSONChanges            = 256
 )
 
 // HasCapability describes host APIs independently of a plugin's mutable globals.
 func HasCapability(name string) bool {
-	return name == CapabilityJSONClone || name == CapabilitySubmitSSEDelta || name == CapabilityJSONOrder || name == CapabilityDurationAuto || name == CapabilitySubmitNoRetry || name == CapabilityMediaDuration || name == CapabilityJSONFileUpload
+	return name == CapabilityJSONClone || name == CapabilitySubmitSSEDelta || name == CapabilityJSONOrder || name == CapabilityDurationAuto || name == CapabilitySubmitNoRetry || name == CapabilityMediaDuration || name == CapabilityJSONFileUpload || name == CapabilityLecAPIVideoPool
 }
 
 // ValidateJSONPath checks a path into a JSON document by the rules of a JSON

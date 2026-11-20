@@ -117,6 +117,16 @@ export type TaskPluginDetail = {
   has_icon?: boolean
   /** Declared routes the gateway serves only under /{key}, as "METHOD /path". */
   skipped_routes?: string[]
+  video_routes?: Array<{
+    model: string
+    route: string
+    resolutions: string[]
+    stats?: Array<{
+      channel_id: number
+      request_count: number
+      success_rate: number
+    }>
+  }>
   /** Set when the upload put this version into service. */
   pricing_issues?: ModelPricingIssue[]
 }

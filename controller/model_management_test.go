@@ -265,6 +265,19 @@ export const protocols = {openai_image: {decodeRequest(){return {};}, render(){r
 	})
 }
 
+func TestPricingCatalogOmitsEquivalentTaskAliases(t *testing.T) {
+	canonical := model.Pricing{ModelName: "short-id", DisplayName: "Video 01", EnableGroup: []string{"default"}, ModelPrice: 1}
+	alias := canonical
+	alias.ModelName, alias.CatalogAliasOf = "legacy-long-id", canonical.ModelName
+	alias.PricingVersion = "cache-version"
+	differentPrice := alias
+	differentPrice.ModelName, differentPrice.ModelPrice = "custom-price", 2
+	differentGroup := alias
+	differentGroup.ModelName, differentGroup.EnableGroup = "custom-access", []string{"vip"}
+	assert.Equal(t, []model.Pricing{differentPrice, canonical, differentGroup}, distinctPricingCatalogModels([]model.Pricing{alias, differentPrice, canonical, differentGroup}))
+	assert.Equal(t, []model.Pricing{alias}, distinctPricingCatalogModels([]model.Pricing{alias}), "do not remove a callable alias when its canonical model is not visible")
+}
+
 func TestModelPricingConversionDatabaseMatrix(t *testing.T) {
 	previousQuota := common.QuotaPerUnit
 	common.QuotaPerUnit = 500000

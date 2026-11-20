@@ -318,14 +318,46 @@ func GetTaskPluginRuntime(c *gin.Context) {
 }
 
 type taskPluginDetail struct {
-	Plugin        *model.TaskPlugin `json:"plugin,omitempty"`
-	Meta          jsplugin.Meta     `json:"meta"`
-	Source        string            `json:"source"`
-	Layer         string            `json:"layer"`
-	HasIcon       bool              `json:"has_icon"`
-	SkippedRoutes []string          `json:"skipped_routes"`
+	Plugin        *model.TaskPlugin  `json:"plugin,omitempty"`
+	Meta          jsplugin.Meta      `json:"meta"`
+	Source        string             `json:"source"`
+	Layer         string             `json:"layer"`
+	HasIcon       bool               `json:"has_icon"`
+	SkippedRoutes []string           `json:"skipped_routes"`
+	VideoRoutes   []lecapiVideoRoute `json:"video_routes,omitempty"`
 	// PricingIssues is set by an upload that puts the version into service.
 	PricingIssues []model.ModelPricingIssue `json:"pricing_issues,omitempty"`
+}
+
+type lecapiVideoRoute struct {
+	Model       string                  `json:"model"`
+	Route       string                  `json:"route"`
+	Resolutions []string                `json:"resolutions"`
+	Stats       []model.LecAPIRouteStat `json:"stats,omitempty"`
+}
+
+func lecapiVideoRouteDetails(c *gin.Context, loaded *jsplugin.LoadedPlugin) []lecapiVideoRoute {
+	if loaded.Meta.Key != "lecapi" || !loaded.Engine.HasExport("listLecAPIVideoRoutes") {
+		return nil
+	}
+	var routes []lecapiVideoRoute
+	if err := loaded.Engine.CallInto(c.Request.Context(), &routes, "listLecAPIVideoRoutes"); err != nil {
+		logger.LogWarn(c, common.LogText("could not load LecAPI video routes: %s", err.Error()))
+		return nil
+	}
+	stats, err := model.LecAPIRouteStats(0, nil)
+	if err != nil {
+		logger.LogWarn(c, common.LogText("could not load LecAPI route statistics: %s", err.Error()))
+		return routes
+	}
+	byRoute := make(map[string][]model.LecAPIRouteStat)
+	for _, stat := range stats {
+		byRoute[stat.Route] = append(byRoute[stat.Route], stat)
+	}
+	for i := range routes {
+		routes[i].Stats = byRoute[routes[i].Route]
+	}
+	return routes
 }
 
 // taskPluginSkippedRoutes lists, as "METHOD /path", the declared top-level
@@ -388,7 +420,11 @@ func GetTaskPlugin(c *gin.Context) {
 			taskPluginCompileError(c, compileErr)
 			return
 		}
-		common.ApiSuccess(c, taskPluginDetail{Plugin: plugin, Meta: loaded.Meta, Source: string(plugin.Source), Layer: "override", HasIcon: plugin.HasIcon(), SkippedRoutes: taskPluginSkippedRoutes(plugin.Key, plugin.Version)})
+		detail := taskPluginDetail{Plugin: plugin, Meta: loaded.Meta, Source: string(plugin.Source), Layer: "override", HasIcon: plugin.HasIcon(), SkippedRoutes: taskPluginSkippedRoutes(plugin.Key, plugin.Version)}
+		if version == "" {
+			detail.VideoRoutes = lecapiVideoRouteDetails(c, loaded)
+		}
+		common.ApiSuccess(c, detail)
 		return
 	}
 	if !errors.Is(err, gorm.ErrRecordNotFound) || version != "" {
@@ -406,7 +442,7 @@ func GetTaskPlugin(c *gin.Context) {
 		return
 	}
 	_, _, hasIcon := plugins.Icon(key)
-	common.ApiSuccess(c, taskPluginDetail{Meta: loaded.Meta, Source: source, Layer: "factory", HasIcon: hasIcon, SkippedRoutes: taskPluginSkippedRoutes(key, loaded.Meta.Version)})
+	common.ApiSuccess(c, taskPluginDetail{Meta: loaded.Meta, Source: source, Layer: "factory", HasIcon: hasIcon, SkippedRoutes: taskPluginSkippedRoutes(key, loaded.Meta.Version), VideoRoutes: lecapiVideoRouteDetails(c, loaded)})
 }
 
 type taskPluginDryRunRequest struct {

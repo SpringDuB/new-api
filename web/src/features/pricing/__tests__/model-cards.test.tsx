@@ -38,6 +38,7 @@ import {
 import { CachedPriceCell } from '../components/cached-price-cell'
 import { ModelCard } from '../components/model-card'
 import { ModelCardGrid } from '../components/model-card-grid'
+import { filterBySearch } from '../lib/filters'
 import { applyModelSquareDisplay } from '../lib/model-square-display'
 import type { PricingModel } from '../types'
 
@@ -89,11 +90,34 @@ afterEach(() => {
 })
 
 describe('model cards', () => {
+  it('shows the display name and API model ID without a vendor label', async () => {
+    const user = userEvent.setup()
+    const onClick = vi.fn()
+    const model = pricingModel({
+      model_name: 'seedance-2-5-01',
+      display_name: 'Seedance 2.5 · 多参考',
+      vendor_name: 'ByteDance',
+    })
+    render(
+      <ModelCard model={model} onClick={onClick} presentation='directory' />
+    )
+    expect(
+      screen.getByRole('heading', { name: model.display_name })
+    ).toBeVisible()
+    expect(screen.getByText(model.model_name)).toBeVisible()
+    expect(screen.queryByText('ByteDance')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Copy model name' }))
+    expect(await navigator.clipboard.readText()).toBe(model.model_name)
+    await user.click(screen.getByRole('button', { name: 'Details' }))
+    expect(onClick).toHaveBeenCalledWith(model.model_name)
+    expect(filterBySearch([model], '多参考')).toEqual([model])
+    expect(filterBySearch([model], model.model_name)).toEqual([model])
+  })
   it.each([
     undefined,
     { avg_latency_ms: Number.NaN, avg_tps: 0, success_rate: Number.NaN },
   ])(
-    'omits empty performance metrics from a directory entry and keeps its details action: %j',
+    'omits empty directory metrics and keeps the details action: %j',
     async (perf) => {
       const onClick = vi.fn()
       render(
@@ -133,9 +157,46 @@ describe('model cards', () => {
         }}
       />
     )
-    expect(
-      screen.getByLabelText('Performance metrics for the last 24 hours')
-    ).toHaveTextContent('0.00%')
+    const metrics = screen.getByLabelText(
+      'Performance metrics for the last 24 hours'
+    )
+    expect(within(metrics).getByText('0.00%')).toBeVisible()
+  })
+
+  it('shows the colored success history alongside the metrics below the price', () => {
+    render(
+      <ModelCard
+        model={pricingModel()}
+        onClick={vi.fn()}
+        presentation='directory'
+        perf={{
+          avg_latency_ms: 1200,
+          avg_tps: 42,
+          success_rate: 99.8,
+          recent_success_series: [
+            { ts: 7200, success_rate: 100 },
+            { ts: 3600, success_rate: 0 },
+          ],
+        }}
+      />
+    )
+    const metrics = screen.getByLabelText(
+      'Performance metrics for the last 24 hours'
+    )
+    expect(within(metrics).getByText('1.20s')).toBeVisible()
+    expect(within(metrics).getByText('99.80%')).toBeVisible()
+    expect(within(metrics).getByText('42.0t/s')).toBeVisible()
+    const history = within(metrics).getByRole('img', { name: 'Success rate' })
+    expect(history.children[0]).toHaveClass('bg-red-500')
+    expect(history.children[1]).toHaveClass('bg-emerald-500')
+    for (const item of [
+      screen.getByRole('group', { name: 'Pricing' }),
+      screen.getByRole('button', { name: 'Details' }),
+    ]) {
+      expect(
+        item.compareDocumentPosition(metrics) & Node.DOCUMENT_POSITION_FOLLOWING
+      ).toBeTruthy()
+    }
   })
 
   it('uses a paginated tile gallery while preserving promotions, group metadata, and task price units', async () => {

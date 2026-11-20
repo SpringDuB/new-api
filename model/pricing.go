@@ -28,6 +28,8 @@ type PricingPluginVariant struct {
 type Pricing struct {
 	BillingPluginVariants  []PricingPluginVariant               `json:"billing_plugin_variants,omitempty"`
 	ModelName              string                               `json:"model_name"`
+	DisplayName            string                               `json:"display_name,omitempty"`
+	CatalogAliasOf         string                               `json:"-"`
 	Description            string                               `json:"description,omitempty"`
 	Icon                   string                               `json:"icon,omitempty"`
 	Tags                   string                               `json:"tags,omitempty"`
@@ -433,6 +435,12 @@ func updatePricing() {
 			}
 		}
 		if ok && plugin != nil {
+			if defaults, exists := taskPluginModelDefaults(pluginGeneration, model); exists {
+				pricing.DisplayName = defaults.DisplayName
+				if usageModel != model && defaults.DisplayName != "" {
+					pricing.CatalogAliasOf = usageModel
+				}
+			}
 			usageSchema, usageExamples := plugin.Meta.UsageForModel(usageModel)
 			pricing.BillingUsageSchema = jsplugin.CloneUsageSchema(usageSchema)
 			pricing.BillingUsageExamples = jsplugin.CloneUsageExamples(usageExamples)

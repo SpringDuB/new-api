@@ -46,6 +46,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { MODEL_PRICING_ISSUES_QUERY_KEY } from '@/features/system-settings/models/pricing-issues'
+import { toIntlLocale } from '@/i18n/languages'
+import { formatNumber } from '@/lib/format'
 import { handleServerError } from '@/lib/handle-server-error'
 import { resolveLocalizedText } from '@/lib/localized-text'
 
@@ -119,6 +121,7 @@ function PluginDetailContent(props: { plugin: TaskPluginListItem }) {
     onError: (error) => handleServerError(error),
   })
   const detail = detailQuery.data
+  const locale = toIntlLocale(i18n.language)
   const versions = versionsQuery.data ?? []
   const description = resolveLocalizedText(
     detail?.meta.description ?? props.plugin?.meta.description,
@@ -228,6 +231,9 @@ function PluginDetailContent(props: { plugin: TaskPluginListItem }) {
             aria-label={t('Plugin details')}
           >
             <TabsTrigger value='overview'>{t('Overview')}</TabsTrigger>
+            {key === 'lecapi' && (
+              <TabsTrigger value='routes'>{t('Routes')}</TabsTrigger>
+            )}
             <TabsTrigger value='billing'>{t('Billing parameters')}</TabsTrigger>
             <TabsTrigger value='source'>{t('Plugin source')}</TabsTrigger>
             <TabsTrigger value='versions'>{t('Version history')}</TabsTrigger>
@@ -244,6 +250,65 @@ function PluginDetailContent(props: { plugin: TaskPluginListItem }) {
               />
             ))}
         </TabsContent>
+        {key === 'lecapi' && (
+          <TabsContent value='routes' className={panelClassName}>
+            {detailState ??
+              (detail?.video_routes?.length ? (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>{t('Model')}</TableHead>
+                      <TableHead>{t('Route')}</TableHead>
+                      <TableHead>{t('Output resolution')}</TableHead>
+                      <TableHead>{t('Channel')}</TableHead>
+                      <TableHead className='text-right'>
+                        {t('Requests')}
+                      </TableHead>
+                      <TableHead className='text-right'>
+                        {t('Success rate')}
+                      </TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {detail.video_routes.flatMap((route) =>
+                      (route.stats?.length ? route.stats : [null]).map(
+                        (stat) => (
+                          <TableRow
+                            key={`${route.model}:${route.route}:${stat?.channel_id ?? 0}`}
+                          >
+                            <TableCell className='font-mono text-xs'>
+                              {route.model}
+                            </TableCell>
+                            <TableCell className='font-mono text-xs'>
+                              {route.route}
+                            </TableCell>
+                            <TableCell>
+                              {route.resolutions.join(' / ')}
+                            </TableCell>
+                            <TableCell>
+                              {stat ? `#${stat.channel_id}` : '–'}
+                            </TableCell>
+                            <TableCell className='text-right tabular-nums'>
+                              {stat
+                                ? formatNumber(stat.request_count, locale)
+                                : '–'}
+                            </TableCell>
+                            <TableCell className='text-right tabular-nums'>
+                              {stat
+                                ? `${formatNumber(stat.success_rate, locale)}%`
+                                : '–'}
+                            </TableCell>
+                          </TableRow>
+                        )
+                      )
+                    )}
+                  </TableBody>
+                </Table>
+              ) : (
+                <EmptyState title={t('No data')} />
+              ))}
+          </TabsContent>
+        )}
         <TabsContent value='billing' className={panelClassName}>
           {detailState ?? (
             <div className='space-y-6'>

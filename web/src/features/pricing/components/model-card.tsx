@@ -87,6 +87,7 @@ function DirectoryPrice(props: {
 export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
   const { t, i18n } = useTranslation()
   const isDirectory = props.presentation === 'directory'
+  const displayName = props.model.display_name || props.model.model_name
   const tokenUnit = props.tokenUnit ?? DEFAULT_TOKEN_UNIT
   const priceRate = props.priceRate ?? 1
   const usdExchangeRate = props.usdExchangeRate ?? 1
@@ -412,7 +413,7 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
   return (
     <Card
       role={isDirectory ? 'article' : undefined}
-      aria-label={isDirectory ? props.model.model_name : undefined}
+      aria-label={isDirectory ? displayName : undefined}
       data-highlight={props.model.square_display?.highlight || undefined}
       data-artwork={artwork ? true : undefined}
       className={cn(
@@ -489,12 +490,13 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
         <div className='min-w-0 flex-1'>
           <h3
             className={cn(
-              'font-mono text-[15px] leading-snug font-semibold',
+              'text-[15px] leading-snug font-semibold',
+              !props.model.display_name && 'font-mono',
               isDirectory ? 'truncate' : 'line-clamp-2 [overflow-wrap:anywhere]'
             )}
-            title={props.model.model_name}
+            title={displayName}
           >
-            {props.model.model_name}
+            {displayName}
           </h3>
           {isDirectory ? (
             <div className='stolas-model-meta'>
@@ -503,11 +505,12 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
                   {getModelCategoryLabels(t)[getModelCategory(props.model)]}
                 </span>
               )}
-              {props.model.vendor_name && (
-                <span className='truncate' title={props.model.vendor_name}>
-                  {props.model.vendor_name}
-                </span>
-              )}
+              <code
+                className='min-w-0 truncate font-mono'
+                title={props.model.model_name}
+              >
+                {props.model.model_name}
+              </code>
               {copyAction}
             </div>
           ) : (
