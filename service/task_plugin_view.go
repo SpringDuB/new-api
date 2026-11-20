@@ -173,6 +173,33 @@ func BuildTaskPluginView(task *model.Task) (dto.TaskView, error) {
 	return view, nil
 }
 
+// PublicUpstreamVideoTask preserves provider result URLs in upstream mode.
+// The gateway owns identity and lifecycle fields on every query.
+func PublicUpstreamVideoTask(task *model.Task, legacy bool) map[string]any {
+	view, _ := BuildTaskPluginView(task)
+	result, _ := view.Data.(map[string]any)
+	if result == nil {
+		result = make(map[string]any)
+	}
+	video := task.ToOpenAIVideo()
+	result["id"], result["object"], result["model"] = video.ID, video.Object, video.Model
+	result["status"], result["progress"], result["created_at"] = video.Status, video.Progress, video.CreatedAt
+	if legacy || result["task_id"] != nil {
+		result["task_id"] = video.ID
+	}
+	if video.CompletedAt > 0 {
+		result["completed_at"] = video.CompletedAt
+	} else {
+		delete(result, "completed_at")
+	}
+	if task.Status != model.TaskStatusFailure {
+		delete(result, "error")
+	} else {
+		result["error"] = map[string]string{"code": "video_generation_failed", "message": "Video generation failed"}
+	}
+	return result
+}
+
 // replacePrivateTaskID rewrites exact private IDs only in known task-ID fields.
 // Map keys and opaque strings, including URLs containing the ID, are preserved.
 func replacePrivateTaskID(value any, privateTaskID, publicTaskID string) any {

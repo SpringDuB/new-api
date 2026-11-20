@@ -13,6 +13,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
@@ -21,6 +22,8 @@ import (
 	relaychannel "github.com/QuantumNous/new-api/relay/channel"
 	taskplugin "github.com/QuantumNous/new-api/relay/channel/task/jsplugin"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -1041,12 +1044,19 @@ func TestAlibabaSynchronousMultiImageAndStream(t *testing.T) {
 // the stream request with one JSON body, which settles instead of failing
 // after that gateway has billed it.
 func TestAlibabaInterleavedStreamOutcomes(t *testing.T) {
-	plugin := newAlibabaPlugin(t)
+	t.Setenv(system_setting.TaskArtifactStoreModeEnv, system_setting.TaskArtifactStoreModeUpstream)
+	source, err := builtinplugins.Source("alibaba")
+	require.NoError(t, err)
+	registry := jsplugin.NewRegistry()
+	plugin, err := registry.RegisterFactory(source, jsplugin.Options{Key: "alibaba"})
+	require.NoError(t, err)
+	const officialEndpoint = "https://dashscope.aliyuncs.com"
 	route := plugin.Meta.Routes[slices.IndexFunc(plugin.Meta.Routes, func(route jsplugin.Route) bool {
 		return route.Path == "/api/v1/services/aigc/multimodal-generation/generation"
 	})]
-	submit := func(t *testing.T, channelType int, contentType, body string) (*taskplugin.TaskAdaptor, *relaycommon.RelayInfo, *relaychannel.TaskSubmitResponse, string) {
-		info := &relaycommon.RelayInfo{OriginModelName: "wan2.6-image", ChannelMeta: &relaycommon.ChannelMeta{ChannelType: channelType, UpstreamModelName: "wan2.6-image", ChannelBaseUrl: "https://upstream.example", ApiKey: "key"},
+	submit := func(t *testing.T, plugin *jsplugin.LoadedPlugin, endpoint string, channelType int, contentType, body string) (*taskplugin.TaskAdaptor, *relaycommon.RelayInfo, *relaychannel.TaskSubmitResponse, *dto.TaskError, string) {
+		t.Helper()
+		info := &relaycommon.RelayInfo{OriginModelName: "wan2.6-image", ChannelMeta: &relaycommon.ChannelMeta{ChannelType: channelType, UpstreamModelName: "wan2.6-image", ChannelBaseUrl: endpoint, ApiKey: "key"},
 			TaskRelayInfo: &relaycommon.TaskRelayInfo{PublicTaskID: "task_public"}}
 		adaptor := taskplugin.New(plugin)
 		adaptor.Init(info)
@@ -1058,27 +1068,32 @@ func TestAlibabaInterleavedStreamOutcomes(t *testing.T) {
 		c.Set("task_request", map[string]any{"model": "wan2.6-image", "metadata": map[string]any{"upstream_mode": "sync",
 			"input":      map[string]any{"messages": []any{map[string]any{"role": "user", "content": []any{map[string]any{"text": "a recipe"}}}}},
 			"parameters": map[string]any{"enable_interleave": true, "stream": true, "max_images": 3}}})
-		require.Nil(t, adaptor.ValidateRequestAndSetAction(c, info))
-		request := httptest.NewRequest(http.MethodPost, "https://upstream.example", nil)
+		if taskErr := adaptor.ValidateRequestAndSetAction(c, info); taskErr != nil {
+			return adaptor, info, nil, taskErr, recorder.Body.String()
+		}
+		request := httptest.NewRequest(http.MethodPost, endpoint, nil)
 		require.NoError(t, adaptor.BuildRequestHeader(c, request, info))
 		require.Equal(t, "enable", request.Header.Get("X-DashScope-Sse"), "DashScope and current gateways stream interleaved output")
 		parsed, taskErr := adaptor.ParseResponse(c, &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {contentType}}, Body: io.NopCloser(strings.NewReader(body))}, info)
-		require.Nil(t, taskErr)
-		require.NotNil(t, parsed.Immediate)
-		return adaptor, info, parsed, recorder.Body.String()
+		return adaptor, info, parsed, taskErr, recorder.Body.String()
 	}
 	const image = "id:1\nevent:result\n:HTTP_STATUS/200\ndata:{\"output\":{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":[{\"image\":\"https://cdn.example/1.png\"}]},\"finish_reason\":\"null\"}],\"finished\":false},\"usage\":{\"image_count\":1},\"request_id\":\"r\"}\n\n"
 	const failed = "id:2\nevent:error\n:HTTP_STATUS/400\ndata:{\"code\":\"DataInspectionFailed\",\"message\":\"Output data may contain inappropriate content.\",\"request_id\":\"r\"}\n\n"
 
 	t.Run("an error event before any image fails the task", func(t *testing.T) {
-		_, _, parsed, relayed := submit(t, 0, "text/event-stream", failed)
+		_, _, parsed, taskErr, relayed := submit(t, plugin, "https://dashscope-intl.aliyuncs.com", constant.ChannelTypeAli, "text/event-stream", failed)
+		require.Nil(t, taskErr)
+		require.NotNil(t, parsed.Immediate)
 		assert.Equal(t, failed, relayed)
 		assert.Equal(t, "FAILURE", parsed.Immediate.Status)
 		assert.Equal(t, "DataInspectionFailed: Output data may contain inappropriate content.", parsed.Immediate.Reason)
 	})
 
-	t.Run("an error event after an image keeps the reservation", func(t *testing.T) {
-		adaptor, info, parsed, relayed := submit(t, 0, "text/event-stream", image+failed)
+	t.Run("direct official images are streamed even when OSS is selected", func(t *testing.T) {
+		t.Setenv(system_setting.TaskArtifactStoreModeEnv, system_setting.TaskArtifactStoreModeOSS)
+		adaptor, info, parsed, taskErr, relayed := submit(t, plugin, officialEndpoint, constant.ChannelTypeAli, "text/event-stream", image+failed)
+		require.Nil(t, taskErr)
+		require.NotNil(t, parsed.Immediate)
 		assert.Equal(t, image+failed, relayed)
 		assert.Equal(t, "SUCCESS", parsed.Immediate.Status)
 		assert.Equal(t, "task_public", parsed.UpstreamTaskID)
@@ -1086,9 +1101,35 @@ func TestAlibabaInterleavedStreamOutcomes(t *testing.T) {
 		assert.Nil(t, adaptor.AdjustBillingOnSubmit(info, parsed.TaskData))
 	})
 
+	t.Run("unavailable OSS never delivers or accepts a partial image", func(t *testing.T) {
+		t.Setenv(system_setting.TaskArtifactStoreModeEnv, system_setting.TaskArtifactStoreModeOSS)
+		t.Setenv("TASK_ARTIFACT_STORE_OSS_ENDPOINT", "")
+		require.False(t, service.GetTaskArtifactStore().Enabled())
+
+		_, _, parsed, taskErr, relayed := submit(t, plugin, "https://dashscope.aliyuncs.com.private.example", constant.ChannelTypeAli, "text/event-stream", image+failed)
+		require.NotNil(t, taskErr)
+		assert.Equal(t, http.StatusBadGateway, taskErr.StatusCode)
+		assert.True(t, taskErr.NoRetry)
+		assert.Nil(t, parsed)
+		assert.Empty(t, relayed)
+	})
+
+	t.Run("an uploaded override cannot opt into direct delivery", func(t *testing.T) {
+		override, err := registry.Register(source, jsplugin.Options{Key: "alibaba"})
+		require.NoError(t, err)
+		_, _, parsed, taskErr, relayed := submit(t, override, officialEndpoint, constant.ChannelTypeAli, "text/event-stream", image+failed)
+		require.NotNil(t, taskErr)
+		assert.Equal(t, http.StatusBadRequest, taskErr.StatusCode)
+		assert.Nil(t, parsed)
+		assert.Empty(t, relayed)
+	})
+
 	t.Run("an earlier gateway answers with JSON", func(t *testing.T) {
+		t.Setenv(system_setting.TaskArtifactStoreModeEnv, system_setting.TaskArtifactStoreModeOSS)
 		body := `{"request_id":"r","output":{"finished":true,"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":[{"text":"step"},{"image":"https://cdn.example/1.png"},{"image":"https://cdn.example/2.png"}]}}]},"usage":{"image_count":2}}`
-		_, _, parsed, relayed := submit(t, constant.ChannelTypeNewAPI, "application/json", body)
+		_, _, parsed, taskErr, relayed := submit(t, plugin, "https://gateway.example", constant.ChannelTypeNewAPI, "application/json", body)
+		require.Nil(t, taskErr)
+		require.NotNil(t, parsed.Immediate)
 		assert.Empty(t, relayed, "the presenter answers the client")
 		assert.Equal(t, "SUCCESS", parsed.Immediate.Status)
 		assert.Equal(t, map[string]any{"image_count": float64(2)}, parsed.Immediate.UsageFacts)

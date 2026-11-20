@@ -144,12 +144,36 @@ type TaskPrivateData struct {
 	PluginState json.RawMessage `json:"plugin_state,omitempty"`
 	// PollFailures counts consecutive unrecognized or transient poll outcomes.
 	PollFailures int `json:"poll_failures,omitempty"`
+	// LecAPIPoll is host-owned progress for the current video route.
+	LecAPIPoll LecAPIPollState `json:"lecapi_poll,omitzero"`
+	// The host retains validated route bodies separately from plugin state.
+	LecAPIRetryPayload json.RawMessage `json:"lecapi_retry_payload,omitempty"`
+
 	// ResultDiscarded marks an immediate terminal result whose submit route
 	// declared retainResult: false. The upstream snapshot was never written
 	// and every retrieval surface treats the task as not found. The zero
 	// value keeps historical rows retained and retrievable.
 	ResultDiscarded bool `json:"result_discarded,omitempty"`
 }
+
+type LecAPIPollState struct {
+	RetryInFlight      bool  `json:"retry_in_flight,omitempty"`
+	RetryDispatched    bool  `json:"retry_dispatched,omitempty"`
+	RetryUntil         int64 `json:"retry_until,omitempty"`
+	Revision           int64 `json:"revision,omitempty"`
+	RecheckAt          int64 `json:"recheck_at,omitempty"`
+	NotFound           int   `json:"not_found,omitempty"`
+	CreateGatewayError bool  `json:"create_gateway_error,omitempty"`
+}
+
+const (
+	LecAPIGatewayRecheckDelay = 30 * time.Second
+	LecAPIRetrySubmitTimeout  = 60 * time.Second
+)
+
+// ErrLecAPIRetryClaimLost means the poller could not durably claim a route.
+// The persisted task, rather than this poller's local snapshot, must drive recovery.
+var ErrLecAPIRetryClaimLost = errors.New("LecAPI route retry claim lost")
 
 const (
 	TaskArchivePending   = "pending"
@@ -290,7 +314,7 @@ func (p TaskPrivateData) Value() (driver.Value, error) {
 		p.Execution == nil && p.ClientRequest == nil && p.Response == nil && p.ImageRequestMode == "" && len(p.ImageArtifacts) == 0 && p.ArtifactArchive == nil && p.BillingSource == "" && p.SubscriptionId == 0 &&
 		p.TokenId == 0 && p.NodeName == "" && p.BillingContext == nil &&
 		!p.ResponsesBackground && len(p.PluginState) == 0 && p.PollFailures == 0 &&
-		!p.ResultDiscarded {
+		!p.ResultDiscarded && p.LecAPIPoll == (LecAPIPollState{}) && len(p.LecAPIRetryPayload) == 0 {
 		return nil, nil
 	}
 	// 同 Properties.Value:string 避免 PG simple protocol 的 bytea 编码。
@@ -622,8 +646,8 @@ func (t *Task) UpdateQuota() error {
 }
 
 // UpdateWithStatus performs a conditional UPDATE guarded by fromStatus (CAS).
-// Returns (true, nil) if this caller won the update, (false, nil) if
-// another process already moved the task out of fromStatus. MySQL commonly
+// Returns (true, nil) if this caller won the update. A stale status or
+// LecAPI route revision returns (false, nil). MySQL commonly
 // reports changed rows rather than matched rows, so a same-value no-op update
 // can also return false even when the status predicate still matched.
 //
@@ -632,6 +656,8 @@ func (t *Task) UpdateQuota() error {
 // zero rows, which silently bypasses the CAS guard.
 func (t *Task) UpdateWithStatus(fromStatus TaskStatus) (bool, error) {
 	updated := false
+	revision := t.PrivateData.LecAPIPoll.Revision
+	retryPayload := t.PrivateData.LecAPIRetryPayload
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		var current Task
 		err := lockForUpdate(tx).Select("id", "private_data").Where("id = ? AND status = ?", t.ID, fromStatus).First(&current).Error
@@ -641,6 +667,15 @@ func (t *Task) UpdateWithStatus(fromStatus TaskStatus) (bool, error) {
 		if err != nil {
 			return err
 		}
+		// Video route replacement can keep the same public status. Check the
+		// private poll revision while holding the row lock before changing it.
+		if current.PrivateData.LecAPIPoll.Revision != revision {
+			return nil
+		}
+		if revision != 0 || t.Platform == "lecapi" && t.PrivateData.Execution != nil &&
+			t.PrivateData.Execution.TaskPlugin != nil && t.PrivateData.Execution.TaskPlugin.Key == "lecapi" {
+			t.PrivateData.LecAPIPoll.Revision++
+		}
 		// A submit response can be captured after this poll loaded the row.
 		// Preserve that immutable audit record when applying mutable poll state.
 		if current.PrivateData.SubmissionResponse != nil {
@@ -649,10 +684,17 @@ func (t *Task) UpdateWithStatus(fromStatus TaskStatus) (bool, error) {
 		if current.PrivateData.Response != nil {
 			t.PrivateData.Response = current.PrivateData.Response
 		}
+		if t.Status == TaskStatusSuccess || t.Status == TaskStatusFailure {
+			t.PrivateData.LecAPIRetryPayload = nil
+		}
 		result := tx.Model(t).Where("status = ?", fromStatus).Select("*").Updates(t)
 		updated = result.RowsAffected > 0
 		return result.Error
 	})
+	if err != nil || !updated {
+		t.PrivateData.LecAPIPoll.Revision = revision
+		t.PrivateData.LecAPIRetryPayload = retryPayload
+	}
 	return updated, err
 }
 

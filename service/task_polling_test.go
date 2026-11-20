@@ -791,6 +791,43 @@ func TestSweepTimedOutTasksHonorsRefundRolloutBoundary(t *testing.T) {
 	assert.Equal(t, int64(1), countLogs(t))
 }
 
+func TestSweepTimedOutTasksRecordsLecAPIRouteFailure(t *testing.T) {
+	truncate(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.PerfMetric{}))
+
+	const (
+		userID    = 405
+		channelID = 94005
+		taskQuota = 900
+		route     = "lec-test-timeout-sweep"
+	)
+	seedUser(t, userID, 10_000)
+	require.NoError(t, model.DB.Where("model_name = ? AND `group` = ?", model.LecAPIRouteMetricPrefix+route, "94005").Delete(&model.PerfMetric{}).Error)
+	t.Cleanup(func() {
+		model.DB.Where("model_name = ? AND `group` = ?", model.LecAPIRouteMetricPrefix+route, "94005").Delete(&model.PerfMetric{})
+	})
+
+	task := makeTask(userID, channelID, taskQuota, 0, BillingSourceWallet, 0)
+	task.TaskID = "lecapi_route_timeout"
+	task.Progress = "50%"
+	task.SubmitTime = time.Now().Add(-2 * time.Minute).Unix()
+	task.PrivateData.Execution = &model.TaskExecutionSnapshot{TaskPlugin: &model.TaskPluginSnapshot{Key: "lecapi"}}
+	task.PrivateData.PluginState = []byte(`{"lecapiSubmitRoute":"lec-test-timeout-sweep"}`)
+	require.NoError(t, model.DB.Create(task).Error)
+
+	previousTimeout := constant.TaskTimeoutMinutes
+	constant.TaskTimeoutMinutes = 1
+	t.Cleanup(func() { constant.TaskTimeoutMinutes = previousTimeout })
+
+	sweepTimedOutTasks(context.Background())
+
+	var metric model.PerfMetric
+	err := model.DB.Where("model_name = ? AND `group` = ?", model.LecAPIRouteMetricPrefix+route, "94005").First(&metric).Error
+	assert.NoError(t, err)
+	assert.Equal(t, int64(1), metric.RequestCount)
+	assert.Zero(t, metric.SuccessCount)
+}
+
 // TASK_TIMEOUT_MINUTES defaults to 72 hours, the longest a vendor keeps a
 // task running (Ark can be configured to 72h, Vidu off-peak runs 48h).
 func TestSweepTimedOutTasksAtTheDefaultDeadline(t *testing.T) {
@@ -831,6 +868,33 @@ type scriptedPollingAdaptor struct {
 	fetchErr   error
 	parse      *relaycommon.TaskInfo
 	parseErr   error
+}
+
+type failedTaskRetryAdaptor struct {
+	scriptedPollingAdaptor
+	prepared bool
+	attempts int
+	fetches  int
+	noRoutes bool
+}
+
+func (a *failedTaskRetryAdaptor) FetchTask(baseURL, key string, task *model.Task, proxy string) (*http.Response, error) {
+	a.fetches++
+	return a.scriptedPollingAdaptor.FetchTask(baseURL, key, task, proxy)
+}
+
+func (a *failedTaskRetryAdaptor) PrepareTaskFailureRetry(*model.Task, bool) (bool, bool) {
+	a.prepared = true
+	return !a.noRoutes, false
+}
+
+func (a *failedTaskRetryAdaptor) RetryTaskAfterFailure(_ context.Context, task *model.Task, result *relaycommon.TaskInfo) (bool, error) {
+	a.attempts++
+	task.PrivateData.UpstreamTaskID = "replacement-upstream-task"
+	task.PrivateData.LecAPIPoll = model.LecAPIPollState{Revision: task.PrivateData.LecAPIPoll.Revision}
+	task.PrivateData.PluginState = []byte(`{"lecapiSubmitRoute":"lec-replacement"}`)
+	result.Status = string(model.TaskStatusSubmitted)
+	return true, nil
 }
 
 func (a *scriptedPollingAdaptor) Init(*relaycommon.RelayInfo) {}
@@ -875,6 +939,194 @@ func (a *scriptedBatchPollingAdaptor) ParseBatchResult([]*model.Task, *http.Resp
 		return nil, a.parseErr
 	}
 	return a.results, nil
+}
+
+func TestUpdateVideoSingleTaskKeepsTaskActiveAfterRouteRetry(t *testing.T) {
+	truncate(t)
+	const channelID = 40506
+	const userID = 40507
+	require.NoError(t, model.DB.AutoMigrate(&model.PerfMetric{}))
+	seedTaskPollingChannel(t, channelID, true)
+	seedUser(t, userID, 10_000)
+	task := seedPollingTask(t, channelID, "lecapi_delayed_retry", "failed-upstream-task")
+	task.Platform = constant.TaskPlatform("lecapi")
+	task.UserId = userID
+	task.Quota = 1_200
+	task.PrivateData.Execution = &model.TaskExecutionSnapshot{TaskPlugin: &model.TaskPluginSnapshot{Key: "lecapi"}}
+	task.PrivateData.BillingSource = BillingSourceWallet
+	task.PrivateData.BillingContext = &model.TaskBillingContext{ModelPrice: 0.02, GroupRatio: 1, OriginModelName: "seedance-2-5-02"}
+	task.PrivateData.PluginState = []byte(`{"lecapiSubmitRoute":"lec-original"}`)
+	require.NoError(t, task.Update())
+
+	adaptor := &failedTaskRetryAdaptor{scriptedPollingAdaptor: scriptedPollingAdaptor{
+		parse: relaycommon.FailTaskInfo("upstream generation failed"),
+	}}
+	channel := &model.Channel{Id: channelID, Type: constant.ChannelTypeKling, Key: "sk-test"}
+	err := updateVideoSingleTask(context.Background(), adaptor, channel, task.GetUpstreamTaskID(), map[string]*model.Task{
+		task.GetUpstreamTaskID(): task,
+	})
+	require.NoError(t, err)
+	require.True(t, adaptor.prepared)
+	assert.Equal(t, 1, adaptor.attempts)
+
+	var persisted model.Task
+	require.NoError(t, model.DB.First(&persisted, task.ID).Error)
+	assert.EqualValues(t, model.TaskStatusSubmitted, persisted.Status)
+	assert.Equal(t, "replacement-upstream-task", persisted.GetUpstreamTaskID())
+	assert.Equal(t, task.Quota, persisted.Quota, "a route replacement must keep the original reservation")
+	assert.Empty(t, persisted.FailReason)
+	assert.Equal(t, int64(0), countLogs(t), "an accepted replacement must not refund or settle the failed route")
+}
+
+func TestLecAPIPollingRechecksBeforeSwitching(t *testing.T) {
+	truncate(t)
+	const channelID = 40841
+	seedTaskPollingChannel(t, channelID, true)
+	require.NoError(t, model.DB.AutoMigrate(&model.PerfMetric{}))
+	channel := &model.Channel{Id: channelID, Type: constant.ChannelTypeKling}
+	task := seedPollingTask(t, channelID, "lec_gateway_recheck", "original-upstream")
+	task.Status = model.TaskStatusSubmitted
+	task.Action = constant.TaskActionTextToVideo
+	task.Platform = "lecapi"
+	task.PrivateData.Execution = &model.TaskExecutionSnapshot{TaskPlugin: &model.TaskPluginSnapshot{Key: "lecapi"}}
+	require.NoError(t, task.Update())
+	adaptor := &failedTaskRetryAdaptor{scriptedPollingAdaptor: scriptedPollingAdaptor{statusCode: http.StatusBadGateway}}
+	for range 2 {
+		require.NoError(t, updateVideoSingleTask(t.Context(), adaptor, channel, "original-upstream", map[string]*model.Task{"original-upstream": task}))
+	}
+	require.Equal(t, 1, adaptor.fetches, "no GET before the recheck is due")
+	require.Zero(t, adaptor.attempts)
+	var reloaded model.Task
+	require.NoError(t, model.DB.First(&reloaded, task.ID).Error)
+	require.Greater(t, reloaded.PrivateData.LecAPIPoll.RecheckAt, time.Now().UnixMilli())
+
+	// Advance the persisted deadline instead of sleeping in the test.
+	reloaded.PrivateData.LecAPIPoll.RecheckAt = time.Now().Add(-time.Second).UnixMilli()
+	require.NoError(t, reloaded.Update())
+	var stale model.Task
+	require.NoError(t, model.DB.First(&stale, task.ID).Error)
+	adaptor.statusCode = http.StatusGatewayTimeout
+	for _, snapshot := range []*model.Task{&reloaded, &stale} {
+		require.NoError(t, updateVideoSingleTask(t.Context(), adaptor, channel, "original-upstream", map[string]*model.Task{"original-upstream": snapshot}))
+	}
+	require.Equal(t, 1, adaptor.attempts, "a second poll with the same old snapshot cannot submit again")
+	var replacement model.Task
+	require.NoError(t, model.DB.First(&replacement, task.ID).Error)
+	assert.Equal(t, task.TaskID, replacement.TaskID)
+	assert.Equal(t, "replacement-upstream-task", replacement.GetUpstreamTaskID())
+	assert.EqualValues(t, model.TaskStatusSubmitted, replacement.Status)
+	assert.Zero(t, replacement.PrivateData.LecAPIPoll.RecheckAt)
+	assert.False(t, replacement.PrivateData.LecAPIPoll.RetryInFlight)
+
+	// A create response without a task ID gets the same cooldown. There is
+	// no old task to query when it expires, so the next route runs directly.
+	replacement.PrivateData.LecAPIPoll.CreateGatewayError = true
+	replacement.PrivateData.LecAPIPoll.RecheckAt = time.Now().Add(model.LecAPIGatewayRecheckDelay).UnixMilli()
+	require.NoError(t, replacement.Update())
+	id := replacement.GetUpstreamTaskID()
+	tasks := map[string]*model.Task{id: &replacement}
+	fetches := adaptor.fetches
+	require.NoError(t, updateVideoSingleTask(t.Context(), adaptor, channel, id, tasks))
+	require.Equal(t, 1, adaptor.attempts)
+	replacement.PrivateData.LecAPIPoll.RecheckAt = time.Now().Add(-time.Second).UnixMilli()
+	require.NoError(t, replacement.Update())
+	require.NoError(t, updateVideoSingleTask(t.Context(), adaptor, channel, id, tasks))
+	assert.Equal(t, 2, adaptor.attempts)
+	assert.Equal(t, fetches, adaptor.fetches)
+}
+
+func TestLecAPIPollingRecoversAbandonedRouteClaim(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		deadline  time.Duration
+		wantRetry bool
+		exhausted bool
+	}{
+		{name: "active claim", deadline: time.Minute},
+		{name: "expired claim", deadline: -time.Minute, wantRetry: true},
+		{name: "legacy claim", wantRetry: true},
+		{name: "no remaining route refunds once", deadline: -time.Minute, exhausted: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			truncate(t)
+			const channelID = 40843
+			const userID = 40844
+			require.NoError(t, model.DB.AutoMigrate(&model.PerfMetric{}))
+			seedTaskPollingChannel(t, channelID, true)
+			seedUser(t, userID, 10_000)
+			task := seedPollingTask(t, channelID, "lec_recovered", "old-upstream")
+			task.Platform = "lecapi"
+			task.Action = constant.TaskActionTextToVideo
+			task.Status = model.TaskStatusSubmitted
+			task.Quota = 1200
+			task.PrivateData.Execution = &model.TaskExecutionSnapshot{TaskPlugin: &model.TaskPluginSnapshot{Key: "lecapi"}}
+			past := time.Now().Add(-10 * time.Minute)
+			task.SubmitTime = past.Unix()
+			task.UserId = userID
+			task.PrivateData.BillingSource = BillingSourceWallet
+			task.PrivateData.LecAPIPoll.RetryInFlight = true
+			if tc.deadline != 0 {
+				task.PrivateData.LecAPIPoll.RetryUntil = time.Now().Add(tc.deadline).UnixMilli()
+			}
+			require.NoError(t, task.Update())
+			require.NoError(t, model.DB.Model(task).UpdateColumn("updated_at", past.Unix()).Error)
+
+			adaptor := &failedTaskRetryAdaptor{noRoutes: tc.exhausted}
+			ch := &model.Channel{Id: channelID, Type: constant.ChannelTypeKling}
+			var first, stale model.Task
+			require.NoError(t, model.DB.First(&first, task.ID).Error)
+			require.NoError(t, model.DB.First(&stale, task.ID).Error)
+			for _, snapshot := range []*model.Task{&first, &stale} {
+				id := snapshot.GetUpstreamTaskID()
+				require.NoError(t, updateVideoSingleTask(t.Context(), adaptor, ch, id, map[string]*model.Task{id: snapshot}))
+			}
+			var persisted model.Task
+			require.NoError(t, model.DB.First(&persisted, task.ID).Error)
+			assert.Equal(t, task.TaskID, persisted.TaskID)
+			assert.Zero(t, adaptor.fetches, "the original route already failed")
+			if tc.exhausted {
+				assert.EqualValues(t, model.TaskStatusFailure, persisted.Status)
+				assert.False(t, persisted.PrivateData.LecAPIPoll.RetryInFlight)
+				assert.Zero(t, persisted.Quota)
+				assert.Equal(t, 10_000+task.Quota, getUserQuota(t, userID))
+				assert.Equal(t, int64(1), countLogs(t))
+				assert.Zero(t, adaptor.attempts)
+				return
+			}
+			assert.Equal(t, task.Quota, persisted.Quota)
+			assert.Equal(t, 10_000, getUserQuota(t, userID))
+			assert.Zero(t, countLogs(t))
+			if tc.wantRetry {
+				assert.Equal(t, 1, adaptor.attempts)
+				assert.Equal(t, "replacement-upstream-task", persisted.GetUpstreamTaskID())
+			} else {
+				assert.Zero(t, adaptor.attempts)
+				assert.Equal(t, "old-upstream", persisted.GetUpstreamTaskID())
+			}
+		})
+	}
+}
+
+func TestLecAPIPollingRequiresFiveMissingResults(t *testing.T) {
+	truncate(t)
+	const channelID = 40842
+	channel := &model.Channel{Id: channelID, Type: constant.ChannelTypeKling}
+	task := seedPollingTask(t, channelID, "lec_missing", "missing-upstream")
+	task.Status = model.TaskStatusSubmitted
+	task.Action = constant.TaskActionTextToVideo
+	task.Platform = "lecapi"
+	task.PrivateData.Execution = &model.TaskExecutionSnapshot{TaskPlugin: &model.TaskPluginSnapshot{Key: "lecapi"}}
+	require.NoError(t, task.Update())
+	adaptor := &failedTaskRetryAdaptor{scriptedPollingAdaptor: scriptedPollingAdaptor{statusCode: http.StatusNotFound}}
+	for i := range 5 {
+		require.NoError(t, updateVideoSingleTask(t.Context(), adaptor, channel, "missing-upstream", map[string]*model.Task{"missing-upstream": task}))
+		if i < 4 {
+			require.EqualValues(t, model.TaskStatusSubmitted, task.Status)
+			require.Zero(t, adaptor.attempts)
+		}
+	}
+	assert.Equal(t, 1, adaptor.attempts)
+	assert.Equal(t, "replacement-upstream-task", task.GetUpstreamTaskID())
 }
 
 func TestUpdateVideoSingleTaskPollClassification(t *testing.T) {

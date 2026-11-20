@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -13,7 +14,10 @@ import (
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/driver/mysql"
+	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	"gorm.io/gorm/schema"
 )
 
 func TestMain(m *testing.M) {
@@ -347,4 +351,80 @@ func TestUpdateWithStatus_PersistsPluginStateAndPollFailures(t *testing.T) {
 	assert.EqualValues(t, TaskStatusInProgress, reloaded.Status)
 	assert.JSONEq(t, `{"req_key":"new"}`, string(reloaded.PrivateData.PluginState))
 	assert.Equal(t, 4, reloaded.PrivateData.PollFailures)
+}
+
+func TestLecAPIRouteReplacementDatabaseMatrix(t *testing.T) {
+	for _, engine := range []common.DatabaseType{common.DatabaseTypeSQLite, common.DatabaseTypeMySQL, common.DatabaseTypePostgreSQL} {
+		t.Run(string(engine), func(t *testing.T) {
+			var driver gorm.Dialector
+			versionSQL := "SELECT version()"
+			switch engine {
+			case common.DatabaseTypeSQLite:
+				driver, versionSQL = sqlite.Open(":memory:"), "SELECT sqlite_version()"
+			case common.DatabaseTypeMySQL:
+				if os.Getenv("TEST_MYSQL_DSN") == "" {
+					t.Skip("TEST_MYSQL_DSN is not configured")
+				}
+				driver = mysql.Open(os.Getenv("TEST_MYSQL_DSN"))
+			case common.DatabaseTypePostgreSQL:
+				if os.Getenv("TEST_POSTGRES_DSN") == "" {
+					t.Skip("TEST_POSTGRES_DSN is not configured")
+				}
+				driver = postgres.Open(os.Getenv("TEST_POSTGRES_DSN"))
+			}
+			config := newGormConfig(false)
+			config.NamingStrategy = schema.NamingStrategy{TablePrefix: "lec_retry_test_"}
+			db, err := gorm.Open(driver, config)
+			require.NoError(t, err)
+			sqlDB, err := db.DB()
+			require.NoError(t, err)
+			sqlDB.SetMaxOpenConns(1)
+			previousDB, previousMain, previousLog := DB, common.MainDatabaseType(), common.LogDatabaseType()
+			DB = db
+			common.SetDatabaseTypes(engine, previousLog)
+			t.Cleanup(func() {
+				DB = previousDB
+				common.SetDatabaseTypes(previousMain, previousLog)
+				require.NoError(t, db.Migrator().DropTable(&Task{}))
+				require.NoError(t, sqlDB.Close())
+			})
+			require.NoError(t, db.AutoMigrate(&Task{}))
+			var version string
+			require.NoError(t, db.Raw(versionSQL).Scan(&version).Error)
+			t.Logf("database version: %s", version)
+
+			reference := strings.Repeat("a", 2<<20)
+			payload, err := common.Marshal(map[string]string{"reference": reference})
+			require.NoError(t, err)
+			expired := LecAPIPollState{RetryInFlight: true, RetryDispatched: true, RetryUntil: time.Now().Add(-time.Minute).UnixMilli()}
+			original := &Task{TaskID: "task_same_public_id", Platform: "lecapi", Status: TaskStatusSubmitted,
+				PrivateData: TaskPrivateData{UpstreamTaskID: "route-a", LecAPIRetryPayload: payload, LecAPIPoll: expired,
+					Execution: &TaskExecutionSnapshot{TaskPlugin: &TaskPluginSnapshot{Key: "lecapi"}}}}
+			require.NoError(t, DB.Create(original).Error)
+			var stale Task
+			require.NoError(t, DB.First(&stale, original.ID).Error)
+			assert.JSONEq(t, string(payload), string(stale.PrivateData.LecAPIRetryPayload))
+			assert.Equal(t, expired, stale.PrivateData.LecAPIPoll)
+			original.PrivateData.LecAPIPoll = LecAPIPollState{RetryInFlight: true, RetryUntil: time.Now().Add(time.Minute).UnixMilli()}
+			original.PrivateData.UpstreamTaskID = "route-b"
+			claimed, err := original.UpdateWithStatus(TaskStatusSubmitted)
+			require.NoError(t, err)
+			require.True(t, claimed)
+			stale.PrivateData.UpstreamTaskID = "late-response"
+			stale.PrivateData.LecAPIPoll = LecAPIPollState{}
+			claimed, err = stale.UpdateWithStatus(TaskStatusSubmitted)
+			require.NoError(t, err)
+			assert.False(t, claimed)
+			original.Status = TaskStatusSuccess
+			original.PrivateData.LecAPIPoll = LecAPIPollState{Revision: original.PrivateData.LecAPIPoll.Revision}
+			claimed, err = original.UpdateWithStatus(TaskStatusSubmitted)
+			require.NoError(t, err)
+			require.True(t, claimed)
+			var final Task
+			require.NoError(t, DB.First(&final, original.ID).Error)
+			assert.Equal(t, "task_same_public_id", final.TaskID)
+			assert.Equal(t, "route-b", final.GetUpstreamTaskID())
+			assert.Empty(t, final.PrivateData.LecAPIRetryPayload)
+		})
+	}
 }

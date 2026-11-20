@@ -30,13 +30,15 @@ import (
 )
 
 type TaskSubmitResult struct {
-	UpstreamTaskID string
-	TaskData       []byte
-	ClientResponse any
-	Platform       constant.TaskPlatform
-	Quota          int
-	Immediate      *relaycommon.TaskInfo
-	PluginState    []byte
+	LecAPIRetryPayload []byte
+	LecAPIPoll         model.LecAPIPollState
+	UpstreamTaskID     string
+	TaskData           []byte
+	ClientResponse     any
+	Platform           constant.TaskPlatform
+	Quota              int
+	Immediate          *relaycommon.TaskInfo
+	PluginState        []byte
 	//PerCallPrice   types.PriceData
 }
 
@@ -420,13 +422,15 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (_ *TaskSubmit
 	info.PriceData.Quota = finalQuota
 
 	return &TaskSubmitResult{
-		UpstreamTaskID: parsed.UpstreamTaskID,
-		TaskData:       parsed.TaskData,
-		ClientResponse: parsed.ClientResponse,
-		Platform:       platform,
-		Quota:          finalQuota,
-		Immediate:      parsed.Immediate,
-		PluginState:    parsed.PluginState,
+		UpstreamTaskID:     parsed.UpstreamTaskID,
+		LecAPIPoll:         parsed.LecAPIPoll,
+		LecAPIRetryPayload: parsed.LecAPIRetryPayload,
+		TaskData:           parsed.TaskData,
+		ClientResponse:     parsed.ClientResponse,
+		Platform:           platform,
+		Quota:              finalQuota,
+		Immediate:          parsed.Immediate,
+		PluginState:        parsed.PluginState,
 	}, nil
 }
 
@@ -508,11 +512,11 @@ func videoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *d
 		if originTask.Status != model.TaskStatusSuccess && originTask.Status != model.TaskStatusFailure {
 			tryRealtimeFetch(originTask, true)
 		}
-		if len(originTask.Data) > 0 {
-			c.Header("Cache-Control", "private, no-store")
-			return originTask.Data, nil
-		}
-		respBody, err = common.Marshal(originTask.ToOpenAIVideo())
+		c.Header("Cache-Control", "private, no-store")
+		// Keep the vendor's result fields and URLs while making the platform own
+		// the public identity and status, including after an upstream replacement.
+		value := service.PublicUpstreamVideoTask(originTask, !isOpenAIVideoAPI)
+		respBody, err = common.Marshal(value)
 		if err != nil {
 			return nil, service.TaskErrorWrapperLocal(err, "marshal_response_failed", http.StatusInternalServerError)
 		}

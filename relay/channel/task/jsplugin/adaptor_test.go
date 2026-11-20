@@ -2222,11 +2222,12 @@ func TestTaskSubmitStreamContract(t *testing.T) {
 // reserved charge for both pricing modes. A stream that relayed nothing still
 // fails.
 func TestTaskSubmitStreamRelaysToNativeClients(t *testing.T) {
-	plugin, err := pluginruntime.CompilePlugin(documentStreamPlugin, pluginruntime.Options{})
+	plugin, err := pluginruntime.NewRegistry().RegisterFactory(strings.Replace(documentStreamPlugin, `key:"document-stream"`, `key:"doubao"`, 1), pluginruntime.Options{})
 	require.NoError(t, err)
+	const endpoint = "https://ark.cn-beijing.volces.com"
 	const first = "data: {\"part\":\"a\",\"units\":1}\n\n"
 	nativeSubmit := func(t *testing.T, body io.Reader) (*TaskAdaptor, *relaycommon.RelayInfo, *httptest.ResponseRecorder, *channel.TaskSubmitResponse, *taskdto.TaskError) {
-		info := &relaycommon.RelayInfo{OriginModelName: "alias", ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "document", ChannelBaseUrl: "https://provider.example"}, TaskRelayInfo: &relaycommon.TaskRelayInfo{PublicTaskID: "public-document"}}
+		info := &relaycommon.RelayInfo{OriginModelName: "alias", ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "document", ChannelBaseUrl: endpoint}, TaskRelayInfo: &relaycommon.TaskRelayInfo{PublicTaskID: "public-document"}}
 		adaptor := New(plugin)
 		adaptor.Init(info)
 		recorder := httptest.NewRecorder()
@@ -2295,7 +2296,7 @@ func TestTaskSubmitStreamRelaysToNativeClients(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				info := &relaycommon.RelayInfo{OriginModelName: "alias", ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "document", ChannelBaseUrl: "https://provider.example"}, TaskRelayInfo: &relaycommon.TaskRelayInfo{PublicTaskID: "public-document"}}
+				info := &relaycommon.RelayInfo{OriginModelName: "alias", ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "document", ChannelBaseUrl: endpoint}, TaskRelayInfo: &relaycommon.TaskRelayInfo{PublicTaskID: "public-document"}}
 				adaptor := New(plugin)
 				adaptor.Init(info)
 				c, _ := gin.CreateTestContext(w)
@@ -2620,7 +2621,9 @@ export function parseSubmitEventDelta(ctx,event,previous) {
 	}
 
 	t.Run("invalid changes after a relayed event keep the reservation", func(t *testing.T) {
-		info := &relaycommon.RelayInfo{OriginModelName: "alias", ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "document", ChannelBaseUrl: "https://provider.example"}, TaskRelayInfo: &relaycommon.TaskRelayInfo{PublicTaskID: "public-document"}}
+		plugin, err := pluginruntime.NewRegistry().RegisterFactory(strings.Replace(source, `key:"document-stream"`, `key:"alibaba"`, 1), pluginruntime.Options{})
+		require.NoError(t, err)
+		info := &relaycommon.RelayInfo{OriginModelName: "alias", ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "document", ChannelBaseUrl: "https://dashscope.aliyuncs.com"}, TaskRelayInfo: &relaycommon.TaskRelayInfo{PublicTaskID: "public-document"}}
 		adaptor := New(plugin)
 		adaptor.Init(info)
 		recorder := httptest.NewRecorder()

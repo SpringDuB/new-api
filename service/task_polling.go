@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -32,6 +33,13 @@ type TaskPollingAdaptor interface {
 	// AdjustBillingOnComplete 在任务到达终态（成功/失败）时由轮询循环调用。
 	// 返回正数触发差额结算（补扣/退还），返回 0 保持预扣费金额不变。
 	AdjustBillingOnComplete(task *model.Task, taskResult *relaycommon.TaskInfo) int
+}
+
+// TaskFailureRetryAdaptor optionally replaces a definitively failed async task
+// with a compatible upstream route while preserving its original reservation.
+type TaskFailureRetryAdaptor interface {
+	PrepareTaskFailureRetry(task *model.Task, recoverExpired bool) (ready bool, alreadyInFlight bool)
+	RetryTaskAfterFailure(ctx context.Context, task *model.Task, result *relaycommon.TaskInfo) (bool, error)
 }
 
 type BatchTaskPollingAdaptor interface {
@@ -109,6 +117,7 @@ func sweepTimedOutTasks(ctx context.Context) {
 			continue
 		}
 		timedOutCount++
+		perfmetrics.RecordTaskResult(task, relaycommon.FailTaskInfo(task.FailReason))
 		if !isLegacy && task.Quota != 0 {
 			RefundTaskQuota(ctx, task, reason)
 		}
@@ -508,11 +517,62 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 		key = privateData.Key
 	}
 	snap := task.Snapshot()
+	retryPolicy := &task.PrivateData.LecAPIPoll
+	_, canRetry := adaptor.(TaskFailureRetryAdaptor)
+	lecapiVideo := canRetry && task.Platform == "lecapi" && IsVideoTask(task.Action) &&
+		task.PrivateData.Execution != nil && task.PrivateData.Execution.TaskPlugin != nil &&
+		task.PrivateData.Execution.TaskPlugin.Key == "lecapi" && ch.Type != constant.ChannelTypeNewAPI
+	if lecapiVideo {
+		now := time.Now().UnixMilli()
+		if retryPolicy.RetryInFlight {
+			retryUntil := retryPolicy.RetryUntil
+			if retryUntil == 0 {
+				// Legacy claims did not say whether a request left the process.
+				retryUntil = time.Unix(max(task.UpdatedAt, task.SubmitTime), 0).
+					Add(model.LecAPIRetrySubmitTimeout + model.LecAPIGatewayRecheckDelay).UnixMilli()
+			}
+			if retryUntil > now {
+				return nil
+			}
+			return finishOrRetryVideoTask(ctx, adaptor, task, snap.Status, relaycommon.FailTaskInfo("Failed to query the upstream task status"))
+		}
+		if retryPolicy.RecheckAt > now {
+			return nil
+		}
+	}
+	if lecapiVideo && retryPolicy.CreateGatewayError {
+		return finishOrRetryVideoTask(ctx, adaptor, task, snap.Status, relaycommon.FailTaskInfo("Upstream task not found"))
+	}
 	resp, err := adaptor.FetchTask(baseURL, key, task, proxy)
 	if err != nil {
+		if lecapiVideo {
+			retryPolicy.NotFound = 0
+		}
 		return recordPollFailure(ctx, adaptor, task, snap.Status, pollClassTransport, 0, err.Error())
 	}
 	defer resp.Body.Close()
+	if lecapiVideo {
+		switch resp.StatusCode {
+		case http.StatusBadGateway, http.StatusGatewayTimeout:
+			retryPolicy.NotFound = 0
+			if retryPolicy.RecheckAt != 0 {
+				return finishOrRetryVideoTask(ctx, adaptor, task, snap.Status, relaycommon.FailTaskInfo("Failed to query the upstream task status"))
+			}
+			retryPolicy.RecheckAt = time.Now().Add(model.LecAPIGatewayRecheckDelay).UnixMilli()
+			_, err := task.UpdateWithStatus(snap.Status)
+			return err
+		case http.StatusNotFound, http.StatusGone:
+			retryPolicy.RecheckAt = 0
+			retryPolicy.NotFound++
+			if retryPolicy.NotFound >= 5 {
+				return finishOrRetryVideoTask(ctx, adaptor, task, snap.Status, relaycommon.FailTaskInfo("Upstream task not found"))
+			}
+			_, err := task.UpdateWithStatus(snap.Status)
+			return err
+		default:
+			retryPolicy.RecheckAt, retryPolicy.NotFound = 0, 0
+		}
+	}
 	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return recordPollFailure(ctx, adaptor, task, snap.Status, pollClassTransport, resp.StatusCode, err.Error())
@@ -523,7 +583,7 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 	switch classifyPollHTTP(resp.StatusCode) {
 	case pollClassNotFound:
 		logger.LogWarn(ctx, common.LogText("task %s poll %s (failures=%d, http=%d): %s", task.TaskID, pollClassNotFound, task.PrivateData.PollFailures, resp.StatusCode, unrecognizedPollDetail("", responseBody)))
-		return failTaskFromPoll(ctx, adaptor, task, snap.Status, "Upstream task not found")
+		return failTaskFromPoll(ctx, adaptor, task, snap.Status, relaycommon.FailTaskInfo("Upstream task not found"))
 	case pollClassAuth:
 		logger.LogWarn(ctx, common.LogText("task poll auth failure channel_id=%d task=%s http=%d", ch.Id, task.TaskID, resp.StatusCode))
 		return recordPollFailure(ctx, adaptor, task, snap.Status, pollClassAuth, resp.StatusCode, "")
@@ -564,6 +624,9 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 	if isNonTerminalPollStatus(parsedStatus) {
 		task.PrivateData.PollFailures = 0
 	}
+	if parsedStatus == model.TaskStatusFailure {
+		return finishOrRetryVideoTask(ctx, adaptor, task, snap.Status, taskResult)
+	}
 
 	now := time.Now().Unix()
 	shouldFinalizeBilling := false
@@ -595,17 +658,7 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 			task.PrivateData.ResultURL = taskcommon.BuildProxyURL(task.TaskID)
 		}
 		shouldFinalizeBilling = true
-	case model.TaskStatusFailure:
-		logger.LogJson(ctx, common.LogText("Task %s failed", taskId), task)
-		task.Status = model.TaskStatusFailure
-		task.Progress = taskcommon.ProgressComplete
-		if task.FinishTime == 0 {
-			task.FinishTime = now
-		}
-		task.FailReason = taskResult.Reason
-		logger.LogInfo(ctx, common.LogText("Task %s failed: %s", task.TaskID, task.FailReason))
-		taskResult.Progress = taskcommon.ProgressComplete
-		shouldFinalizeBilling = true
+
 	}
 	if taskResult.Progress != "" {
 		task.Progress = taskResult.Progress
@@ -621,7 +674,7 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 			logger.LogWarn(ctx, common.LogText("Task %s CAS lost or no-op update, skip billing", task.TaskID))
 			shouldFinalizeBilling = false
 		}
-	} else if !snap.Equal(task.Snapshot()) {
+	} else if !snap.Equal(task.Snapshot()) || privateData.LecAPIPoll != task.PrivateData.LecAPIPoll {
 		if _, err := task.UpdateWithStatus(snap.Status); err != nil {
 			logger.LogError(ctx, common.LogText("Failed to update task %s: %s", task.TaskID, err.Error()))
 		}
@@ -635,6 +688,83 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 	}
 
 	return nil
+}
+
+// finishOrRetryVideoTask keeps intermediate route failures outside terminal billing.
+func finishOrRetryVideoTask(ctx context.Context, adaptor TaskPollingAdaptor, task *model.Task, fromStatus model.TaskStatus, taskResult *relaycommon.TaskInfo) error {
+	if retryAdaptor, ok := adaptor.(TaskFailureRetryAdaptor); ok {
+		recoverExpired := task.PrivateData.LecAPIPoll.RetryInFlight
+		ready, alreadyInFlight := retryAdaptor.PrepareTaskFailureRetry(task, recoverExpired)
+		if alreadyInFlight {
+			return nil
+		}
+		if ready {
+			failureReason := taskResult.Reason
+			task.Status = model.TaskStatusSubmitted
+			task.Progress = taskcommon.ProgressSubmitted
+			task.FailReason = ""
+			task.PrivateData.PollFailures = 0
+			task.PrivateData.LecAPIPoll = model.LecAPIPollState{
+				Revision:      task.PrivateData.LecAPIPoll.Revision,
+				RetryInFlight: true,
+				RetryUntil:    time.Now().Add(model.LecAPIGatewayRecheckDelay).UnixMilli(),
+			}
+			won, updateErr := task.UpdateWithStatus(fromStatus)
+			if updateErr != nil {
+				return updateErr
+			}
+			if !won {
+				logger.LogWarn(ctx, common.LogText("Task %s retry claim lost, skip retry", task.TaskID))
+				return nil
+			}
+			retried, retryErr := retryAdaptor.RetryTaskAfterFailure(ctx, task, taskResult)
+			if retryErr != nil {
+				logger.LogWarn(ctx, common.LogText("Task %s route retry stopped: %s", task.TaskID, retryErr.Error()))
+			}
+			if errors.Is(retryErr, model.ErrLecAPIRetryClaimLost) {
+				return nil
+			}
+			if retried {
+				// Preserve the accepted ID through a transient write error. CAS
+				// prevents a late response from replacing a newer attempt.
+				for range 3 {
+					won, updateErr = task.UpdateWithStatus(model.TaskStatusSubmitted)
+					if updateErr == nil {
+						break
+					}
+				}
+				if updateErr != nil {
+					return updateErr
+				}
+				if !won {
+					logger.LogWarn(ctx, common.LogText("Task %s retry result could not be persisted, skip finalization", task.TaskID))
+					return nil
+				}
+				if task.Status == model.TaskStatusSuccess {
+					finalizeTerminalTask(ctx, adaptor, task, taskResult)
+				}
+				return nil
+			}
+
+			task.Status = model.TaskStatusFailure
+			task.Progress = taskcommon.ProgressComplete
+			task.FinishTime = time.Now().Unix()
+			task.FailReason = failureReason
+			task.PrivateData.LecAPIPoll = model.LecAPIPollState{Revision: task.PrivateData.LecAPIPoll.Revision}
+			won, updateErr = task.UpdateWithStatus(model.TaskStatusSubmitted)
+			if updateErr != nil {
+				return updateErr
+			}
+			if won {
+				finalizeTerminalTask(ctx, adaptor, task, relaycommon.FailTaskInfo(failureReason))
+			}
+			return nil
+		}
+		if recoverExpired {
+			task.PrivateData.LecAPIPoll = model.LecAPIPollState{Revision: task.PrivateData.LecAPIPoll.Revision}
+		}
+	}
+	return failTaskFromPoll(ctx, adaptor, task, fromStatus, taskResult)
 }
 
 // finalizeTerminalTask 终态统一收尾（状态 CAS 赢家调用，恰好一次）：采样 + 结算 + 失败兜底退款。
@@ -798,7 +928,7 @@ func recordPollFailure(ctx context.Context, adaptor TaskPollingAdaptor, task *mo
 		logger.LogWarn(ctx, common.LogText("task %s poll %s (failures=%d, http=%d): %s", task.TaskID, class, task.PrivateData.PollFailures, statusCode, detail))
 	}
 	if giveUp {
-		return failTaskFromPoll(ctx, adaptor, task, fromStatus, "Failed to query the upstream task status")
+		return failTaskFromPoll(ctx, adaptor, task, fromStatus, relaycommon.FailTaskInfo("Failed to query the upstream task status"))
 	}
 	if _, err := task.UpdateWithStatus(fromStatus); err != nil {
 		return err
@@ -819,14 +949,15 @@ func recordPollFailureForTasks(ctx context.Context, adaptor TaskPollingAdaptor, 
 	return firstErr
 }
 
-func failTaskFromPoll(ctx context.Context, adaptor TaskPollingAdaptor, task *model.Task, fromStatus model.TaskStatus, reason string) error {
+func failTaskFromPoll(ctx context.Context, adaptor TaskPollingAdaptor, task *model.Task, fromStatus model.TaskStatus, result *relaycommon.TaskInfo) error {
 	now := time.Now().Unix()
 	task.Status = model.TaskStatusFailure
 	task.Progress = taskcommon.ProgressComplete
 	if task.FinishTime == 0 {
 		task.FinishTime = now
 	}
-	task.FailReason = reason
+	task.FailReason = result.Reason
+	result.Progress = taskcommon.ProgressComplete
 	won, err := task.UpdateWithStatus(fromStatus)
 	if err != nil {
 		return err
@@ -834,7 +965,7 @@ func failTaskFromPoll(ctx context.Context, adaptor TaskPollingAdaptor, task *mod
 	if !won {
 		return nil
 	}
-	finalizeTerminalTask(ctx, adaptor, task, relaycommon.FailTaskInfo(reason))
+	finalizeTerminalTask(ctx, adaptor, task, result)
 	return nil
 }
 
@@ -844,7 +975,7 @@ func failTasksFromPoll(ctx context.Context, adaptor TaskPollingAdaptor, tasks []
 		if task == nil {
 			continue
 		}
-		if err := failTaskFromPoll(ctx, adaptor, task, task.Status, reason); err != nil && firstErr == nil {
+		if err := failTaskFromPoll(ctx, adaptor, task, task.Status, relaycommon.FailTaskInfo(reason)); err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}

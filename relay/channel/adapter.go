@@ -84,11 +84,13 @@ type TaskAdaptor interface {
 // TaskSubmitResponse is the transport-independent result of parsing an
 // upstream task submission. Parsing must not write to the client response.
 type TaskSubmitResponse struct {
-	UpstreamTaskID string
-	TaskData       []byte
-	ClientResponse any
-	Immediate      *relaycommon.TaskInfo
-	PluginState    []byte
+	LecAPIRetryPayload []byte
+	LecAPIPoll         model.LecAPIPollState
+	UpstreamTaskID     string
+	TaskData           []byte
+	ClientResponse     any
+	Immediate          *relaycommon.TaskInfo
+	PluginState        []byte
 }
 
 // TaskSubmitRetryPolicy protects upstream creation endpoints that cannot

@@ -153,8 +153,13 @@ type TaskAdaptor struct {
 	// the relayed events of a submission whose stream stopped before the
 	// upstream finished it, or whose result the plugin could not read: the
 	// task then settles at the reserved quota.
-	keepReservation   bool
-	lecapiSubmitRoute string
+	keepReservation             bool
+	lecapiSubmitRoute           string
+	lecapiSubmitOutcomeRecorded bool
+	lecapiSubmitPoll            model.LecAPIPollState
+	lecapiRetryURL              string
+	lecapiRetryCandidates       []lecapiRouteCandidate
+	lecapiRetryPayload          []byte
 }
 
 func New(plugin *pluginruntime.LoadedPlugin) *TaskAdaptor { return &TaskAdaptor{plugin: plugin} }
@@ -165,6 +170,7 @@ func (a *TaskAdaptor) DisableSubmitRetry() bool {
 }
 
 func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycommon.RelayInfo) *dto.TaskError {
+	c.Set(pluginruntime.ContextKeyPrivateSubmitStream, false)
 	if pinnedValue, exists := c.Get(pluginruntime.ContextKeyPinnedEndpoint); exists {
 		if pinned, ok := pinnedValue.(pluginruntime.PinnedEndpoint); ok && pinned.Plugin == a.plugin {
 			if protocolValue, present := c.Get(pluginruntime.ContextKeyProtocolRequest); present {
@@ -235,13 +241,20 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 			return taskErr
 		}
 	}
-	if _, err := a.buildSubmit(c, info); err != nil {
+	descriptor, err := a.buildSubmit(c, info)
+	if err != nil {
 		// utils.fetch failures in the build hook name the host fetched: the
 		// channel base URL or one of the plugin's allowed hosts, which an
 		// installed plugin may point at private hosts.
 		taskErr := service.TaskErrorWrapper(err, "plugin_request_invalid", http.StatusBadRequest, append(common.UpstreamAddresses(c), a.plugin.Meta.AllowedHosts...)...)
 		taskErr.LocalError = true
 		return taskErr
+	}
+	if _, native := c.Get(pluginruntime.ContextKeyPinnedRoute); native && descriptor.ResponseType == "sse" && !a.relaysSubmitEvents(c, info) {
+		if !model.IsImageTaskAction(info.Action) || !service.TaskArtifactOSSRequired() {
+			return service.TaskErrorWrapperLocal(errors.New("This upstream does not support native streaming without private image delivery"), "plugin_request_invalid", http.StatusBadRequest)
+		}
+		c.Set(pluginruntime.ContextKeyPrivateSubmitStream, true)
 	}
 	return nil
 }
@@ -579,7 +592,7 @@ func (a *TaskAdaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, bod
 	var release context.CancelFunc
 	if _, native := c.Get(pluginruntime.ContextKeyPinnedRoute); native && a.submit != nil && a.submit.ResponseType == "sse" {
 		original := c.Request
-		if relaysSubmitEvents(c, info) {
+		if a.relaysSubmitEvents(c, info) {
 			original = original.WithContext(context.WithoutCancel(original.Context()))
 		}
 		timeout := time.Duration(constant.TaskPluginProtocolTimeoutSeconds) * time.Second
@@ -596,10 +609,13 @@ func (a *TaskAdaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, bod
 		c.Request.Method = strings.ToUpper(a.submit.Method)
 		defer func() { c.Request.Method = originalMethod }()
 	}
+	var resp *http.Response
+	var err error
 	if info.ChannelType != constant.ChannelTypeNewAPI && a.submit != nil && a.submit.LecAPIRouteAlternatives != nil && slices.Contains(a.plugin.Meta.RequiredCapabilities, pluginruntime.CapabilityLecAPIVideoPool) {
-		return a.submitLecAPIVideoPool(c, info, body)
+		resp, err = a.submitLecAPIVideoPool(c, info, body)
+	} else {
+		resp, err = channel.DoTaskApiRequest(a, c, info, body)
 	}
-	resp, err := channel.DoTaskApiRequest(a, c, info, body)
 	if release != nil {
 		if err != nil || resp == nil {
 			release()
@@ -623,11 +639,24 @@ func (b deadlineBody) Close() error {
 	return err
 }
 
-// relaysSubmitEvents reports whether the submission came through a native
-// route, whose client receives an SSE reply event by event.
-func relaysSubmitEvents(c *gin.Context, info *relaycommon.RelayInfo) bool {
-	_, native := c.Get(pluginruntime.ContextKeyPinnedRoute)
-	return native && !service.IsGeneratedMediaTask(info.Action)
+// Raw frames are public only on native routes backed by an official provider.
+// An uploaded override or a gateway using the vendor's API shape stays private.
+func (a *TaskAdaptor) relaysSubmitEvents(c *gin.Context, info *relaycommon.RelayInfo) bool {
+	if _, native := c.Get(pluginruntime.ContextKeyPinnedRoute); !native || a.submit == nil || !a.plugin.IsFactory() || info.ChannelType == constant.ChannelTypeNewAPI {
+		return false
+	}
+	upstream, err := url.Parse(a.submit.URL)
+	if err != nil || upstream.Scheme != "https" || upstream.User != nil || (upstream.Port() != "" && upstream.Port() != "443") {
+		return false
+	}
+	switch a.plugin.Meta.Key {
+	case "alibaba":
+		return slices.Contains([]string{"dashscope.aliyuncs.com", "dashscope-intl.aliyuncs.com", "dashscope-us.aliyuncs.com", "cn-hongkong.dashscope.aliyuncs.com"}, strings.ToLower(upstream.Hostname()))
+	case "doubao":
+		return strings.EqualFold(upstream.Hostname(), "ark.cn-beijing.volces.com")
+	default:
+		return false
+	}
 }
 
 // submitReplyLimit bounds the submit reply and each of its SSE events. A
@@ -676,7 +705,7 @@ func (a *TaskAdaptor) ParseResponse(c *gin.Context, resp *http.Response, info *r
 		// upstream may already have performed billable work.
 		defer resp.Body.Close()
 		var client *gin.Context
-		if relaysSubmitEvents(c, info) {
+		if a.relaysSubmitEvents(c, info) {
 			client = c
 		}
 		var stopped bool
@@ -757,13 +786,18 @@ func (a *TaskAdaptor) ParseResponse(c *gin.Context, resp *http.Response, info *r
 	}
 	pluginState, _ := encodeReturnedPluginState(value)
 	if len(pluginState) > maxTaskPluginPersistedJSONBytes {
-		logger.LogWarn(c, common.LogText("task plugin %s rejected oversized submit state (%d bytes)", a.plugin.Meta.Key, len(pluginState)))
-		pluginState = nil
+		pluginState = withoutLecAPIRetryState(pluginState)
+		if len(pluginState) > maxTaskPluginPersistedJSONBytes {
+			logger.LogWarn(c, common.LogText("task plugin %s rejected oversized submit state (%d bytes)", a.plugin.Meta.Key, len(pluginState)))
+			pluginState = nil
+		}
 	}
 	response := &channel.TaskSubmitResponse{
-		UpstreamTaskID: parsed.TaskID,
-		TaskData:       taskData,
-		PluginState:    pluginState,
+		UpstreamTaskID:     parsed.TaskID,
+		LecAPIPoll:         a.lecapiSubmitPoll,
+		LecAPIRetryPayload: a.lecapiRetryPayload,
+		TaskData:           taskData,
+		PluginState:        pluginState,
 	}
 	logger.LogDebug(c, "task_plugin subsystem=adaptor event=parse_submit_complete plugin=%q status=%d task_data_bytes=%d immediate=%t elapsed_ms=%d",
 		a.plugin.Meta.Key, resp.StatusCode, len(taskData), parsed.Immediate != nil, time.Since(started).Milliseconds())
@@ -777,7 +811,7 @@ func (a *TaskAdaptor) ParseResponse(c *gin.Context, resp *http.Response, info *r
 		CompletionTokens: positiveInt(parsed.Immediate.CompletionTokens), TotalTokens: positiveInt(parsed.Immediate.TotalTokens),
 	}
 	response.Immediate = immediate
-	if a.lecapiSubmitRoute != "" && (immediate.Status == model.TaskStatusSuccess || immediate.Status == model.TaskStatusFailure) {
+	if a.lecapiSubmitRoute != "" && !a.lecapiSubmitOutcomeRecorded && (immediate.Status == model.TaskStatusSuccess || immediate.Status == model.TaskStatusFailure) {
 		if err := model.RecordLecAPIRouteOutcome(info.ChannelId, a.lecapiSubmitRoute, immediate.Status == model.TaskStatusSuccess); err != nil {
 			logger.LogWarn(c, common.LogText("could not record LecAPI route outcome: %s", err.Error()))
 		}
@@ -2021,6 +2055,10 @@ func (a *TaskAdaptor) submitContext(c *gin.Context, info *relaycommon.RelayInfo)
 	ctx["upstreamModel"] = info.UpstreamModelName
 	ctx["baseUrl"] = info.ChannelBaseUrl
 	ctx["userSetting"] = info.UserSetting
+	if a.lecapiRetryURL != "" && len(a.lecapiRetryCandidates) > 0 {
+		ctx["lecapiRetryURL"] = a.lecapiRetryURL
+		ctx["lecapiRetryCandidates"] = jsonValue(a.lecapiRetryCandidates)
+	}
 	if err := a.applyUpstreamCredentials(ctx, info.ChannelType, info.ApiKey, info.ChannelSetting.Proxy); err != nil {
 		ctx["authError"] = err.Error()
 	}

@@ -68,7 +68,7 @@ func buildDashboardTaskQueryResponse(c *gin.Context, task *model.Task) (*model.T
 	case "/v1/video/generations":
 		queryPath = "/v1/video/generations/" + task.TaskID
 		if !ossRequired {
-			body = task.Data
+			body, err = common.Marshal(service.PublicUpstreamVideoTask(task, true))
 			break
 		}
 		var response service.PublicVideoTask

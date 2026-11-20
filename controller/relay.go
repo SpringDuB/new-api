@@ -679,6 +679,11 @@ func executeTaskSubmissionWith(
 		task.PrivateData.ClientRequest, _ = snapshot.(*model.TaskClientRequestSnapshot)
 	}
 	task.PrivateData.UpstreamTaskID = result.UpstreamTaskID
+	task.PrivateData.LecAPIPoll = result.LecAPIPoll
+	task.PrivateData.LecAPIRetryPayload = result.LecAPIRetryPayload
+	if task.Platform == "lecapi" && service.IsVideoTask(relayInfo.Action) {
+		task.PrivateData.Key = relayInfo.ApiKey
+	}
 	task.PrivateData.BillingSource = relayInfo.BillingSource
 	task.PrivateData.SubscriptionId = relayInfo.SubscriptionId
 	task.PrivateData.TokenId = relayInfo.TokenId
@@ -827,7 +832,7 @@ func presentTaskSubmission(c *gin.Context, outcome *taskSubmissionOutcome) {
 		c.JSON(http.StatusOK, response)
 		return
 	}
-	if service.TaskArtifactOSSRequired() && model.IsImageTaskAction(outcome.Task.Action) {
+	if (c.GetBool(pluginruntime.ContextKeyPrivateSubmitStream) || service.TaskArtifactOSSRequired()) && model.IsImageTaskAction(outcome.Task.Action) {
 		response, err := service.BuildPublicImageTask(c.Request.Context(), outcome.Task)
 		if err != nil {
 			respondPluginProtocolError(c, http.StatusBadGateway, "image_delivery_failed", "Image delivery failed")
@@ -893,7 +898,7 @@ func respondTaskSubmissionError(c *gin.Context, taskErr *taskdto.TaskError) {
 	if c.Writer.Written() {
 		return
 	}
-	if service.IsGeneratedMediaTask(c.GetString("task_action")) {
+	if c.GetBool(pluginruntime.ContextKeyPrivateSubmitStream) || service.IsGeneratedMediaTask(c.GetString("task_action")) {
 		status := taskErr.StatusCode
 		if status < 400 || status > 599 {
 			status = http.StatusBadGateway

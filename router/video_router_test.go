@@ -16,7 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestOpenAIVideoRouteReturnsUpstreamWithStorageOff(t *testing.T) {
+func TestOpenAIVideoRouteKeepsPlatformIdentityWithStorageOff(t *testing.T) {
 	require.NoError(t, i18n.Init())
 	gin.SetMode(gin.TestMode)
 	t.Setenv("TASK_ARTIFACT_STORE_MODE", "upstream")
@@ -84,7 +84,8 @@ func TestOpenAIVideoRouteReturnsUpstreamWithStorageOff(t *testing.T) {
 		Status:    model.TaskStatusSuccess,
 		Progress:  "100%",
 		PrivateData: model.TaskPrivateData{
-			ResultURL: "data:video/mp4;base64,ZGF0YQ==",
+			ResultURL:      "data:video/mp4;base64,ZGF0YQ==",
+			UpstreamTaskID: "jimeng-private-1",
 		},
 	}
 	task.SetData(map[string]any{
@@ -108,7 +109,12 @@ func TestOpenAIVideoRouteReturnsUpstreamWithStorageOff(t *testing.T) {
 	engine.ServeHTTP(recorder, request)
 
 	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
-	assert.JSONEq(t, string(task.Data), recorder.Body.String())
+	var response map[string]any
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	assert.Equal(t, task.TaskID, response["id"])
+	assert.Equal(t, "completed", response["status"])
+	assert.NotContains(t, recorder.Body.String(), "jimeng-private-1")
+	assert.Contains(t, recorder.Body.String(), "https://cdn.example/video.mp4")
 
 	for _, testCase := range []struct {
 		name          string

@@ -2,6 +2,7 @@ package plugins_test
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"maps"
 	"net/http"
@@ -1301,16 +1302,20 @@ func TestLecAPIPoolOnlyRetriesDefinitiveRouteRejections(t *testing.T) {
 	previous := client.Transport
 	t.Cleanup(func() { client.Transport = previous })
 	for _, tc := range []struct {
-		name     string
-		status   int
-		response string
-		attempts []string
-		prefer   string
+		name          string
+		status        int
+		response      string
+		attempts      []string
+		prefer        string
+		gatewayTaskID string
 	}{
 		{name: "explicit throttling", status: 429, response: `{"error":{"code":"rate_limit_exceeded"}}`, attempts: []string{"lec-mf-seedance-2-5-30ref", "lec-hc-seedance-2-5-3010"}},
+		{name: "gateway error with upstream task id", status: 502, response: `{"task_id":"recoverable","error":{"message":"bad gateway"}}`, attempts: []string{"lec-mf-seedance-2-5-30ref"}, gatewayTaskID: "recoverable"},
+		{name: "gateway timeout without task id", status: 504, response: `{"id":"proxy-trace-id","error":{"message":"timeout"}}`, attempts: []string{"lec-mf-seedance-2-5-30ref"}, gatewayTaskID: "task_public"},
 		{name: "ambiguous server failure", status: 503, response: `{"error":{"message":"upstream timed out"}}`, attempts: []string{"lec-mf-seedance-2-5-30ref"}},
 		{name: "task id present", status: 429, response: `{"task_id":"accepted","error":{"code":"rate_limit_exceeded"}}`, attempts: []string{"lec-mf-seedance-2-5-30ref"}},
 		{name: "business rejection", status: 400, response: `{"error":{"code":"content_policy_violation"}}`, attempts: []string{"lec-mf-seedance-2-5-30ref"}},
+		{name: "last compatible route rejection", status: 429, response: `{"error":{"code":"rate_limit_exceeded"}}`, attempts: []string{"lec-hc-seedance-2-5-3010"}, prefer: "lec-mf-seedance-2-5-30ref"},
 		{name: "higher success rate first", status: 202, response: `{"id":"accepted","status":"queued"}`, attempts: []string{"lec-hc-seedance-2-5-3010"}, prefer: "lec-hc-seedance-2-5-3010"},
 		{name: "unmatched route cannot override resolution", status: 202, response: `{"id":"accepted","status":"queued"}`, attempts: []string{"lec-hc-seedance-2-5-3010"}, prefer: "lec-mf-seedance-2-5-30ref"},
 	} {
@@ -1342,7 +1347,7 @@ func TestLecAPIPoolOnlyRetriesDefinitiveRouteRejections(t *testing.T) {
 				params["resolution"] = "480p"
 			}
 			ctx.Set("task_request", params)
-			info := &relaycommon.RelayInfo{TaskRelayInfo: &relaycommon.TaskRelayInfo{}, OriginModelName: "seedance-2-5-02",
+			info := &relaycommon.RelayInfo{TaskRelayInfo: &relaycommon.TaskRelayInfo{PublicTaskID: "task_public"}, OriginModelName: "seedance-2-5-02",
 				ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "seedance-2-5-02", ChannelId: channelID, ApiKey: "stub", ChannelBaseUrl: "https://lec.example"}}
 			adaptor := taskplugin.New(plugin)
 			adaptor.Init(info)
@@ -1356,7 +1361,27 @@ func TestLecAPIPoolOnlyRetriesDefinitiveRouteRejections(t *testing.T) {
 				assert.Equal(t, http.StatusAccepted, response.StatusCode)
 				parsed, taskErr := adaptor.ParseResponse(ctx, response, info)
 				require.Nil(t, taskErr)
-				assert.Contains(t, string(parsed.PluginState), `"lecapiSubmitRoute":"`+tc.attempts[len(tc.attempts)-1]+`"`)
+				var pluginState map[string]any
+				require.NoError(t, common.Unmarshal(parsed.PluginState, &pluginState))
+				assert.Equal(t, tc.attempts[len(tc.attempts)-1], pluginState["lecapiSubmitRoute"])
+				if tc.gatewayTaskID != "" {
+					assert.Nil(t, parsed.Immediate)
+					assert.Equal(t, tc.gatewayTaskID, parsed.UpstreamTaskID)
+					assert.Equal(t, tc.gatewayTaskID == "task_public", parsed.LecAPIPoll.CreateGatewayError)
+					assert.Greater(t, parsed.LecAPIPoll.RecheckAt, time.Now().UnixMilli())
+					assert.NotEmpty(t, parsed.LecAPIRetryPayload)
+				}
+				if tc.name == "higher success rate first" {
+					assert.NotEmpty(t, pluginState["lecapiRetryCandidates"], "compatible fallback routes must survive the submission barrier")
+				}
+			} else if tc.name == "last compatible route rejection" {
+				parsed, taskErr := adaptor.ParseResponse(ctx, response, info)
+				require.Nil(t, taskErr)
+				require.NotNil(t, parsed.Immediate)
+				var metric model.PerfMetric
+				require.NoError(t, model.DB.Where("model_name = ? AND `group` = ?", model.LecAPIRouteMetricPrefix+"lec-hc-seedance-2-5-3010", "32").First(&metric).Error)
+				assert.Equal(t, int64(1), metric.RequestCount, "submit refusal and immediate failure must not double count")
+				assert.Zero(t, metric.SuccessCount)
 			} else {
 				data, err := io.ReadAll(response.Body)
 				require.NoError(t, err)
@@ -1364,6 +1389,192 @@ func TestLecAPIPoolOnlyRetriesDefinitiveRouteRejections(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestLecAPIPoolRetriesTerminalPollFailureOnRemainingRoute(t *testing.T) {
+	plugin := loadLecAPIPlugin(t)
+	t.Setenv("SQL_DSN", "")
+	previousDB, previousPath, previousMaster := model.DB, common.SQLitePath, common.IsMasterNode
+	previousMain, previousLog := common.MainDatabaseType(), common.LogDatabaseType()
+	common.SQLitePath = filepath.Join(t.TempDir(), "lecapi-delayed-retry.db")
+	common.IsMasterNode = false
+	require.NoError(t, model.InitDB())
+	sqlDB, err := model.DB.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
+	t.Cleanup(func() {
+		model.DB, common.SQLitePath, common.IsMasterNode = previousDB, previousPath, previousMaster
+		common.SetDatabaseTypes(previousMain, previousLog)
+		require.NoError(t, sqlDB.Close())
+	})
+	require.NoError(t, model.DB.AutoMigrate(&model.PerfMetric{}, &model.Task{}))
+	service.InitHttpClient()
+	client := service.GetHttpClient()
+	previousTransport := client.Transport
+	t.Cleanup(func() { client.Transport = previousTransport })
+
+	const channelID = 79
+	for _, route := range []string{"lec-mf-seedance-2-5-30ref", "lec-hc-seedance-2-5-3010", "lec-ty-seedance-2-5-1050-flxd"} {
+		require.NoError(t, model.DB.Where("model_name = ? AND `group` = ?", model.LecAPIRouteMetricPrefix+route, "79").Delete(&model.PerfMetric{}).Error)
+	}
+	require.NoError(t, model.RecordLecAPIRouteOutcome(channelID, "lec-hc-seedance-2-5-3010", false))
+	require.NoError(t, model.RecordLecAPIRouteOutcome(channelID, "lec-ty-seedance-2-5-1050-flxd", true))
+	largeImage := "data:image/png;base64," + strings.Repeat("AAAA", 400_000)
+	retainedBodies, err := common.Marshal(map[string]any{
+		"shared": map[string]any{"prompt": "boat", "duration": 5, "images": []string{largeImage}},
+		"routes": map[string]any{
+			"lec-hc-seedance-2-5-3010":      map[string]any{"model": "lec-hc-seedance-2-5-3010", "resolution": "720p"},
+			"lec-ty-seedance-2-5-1050-flxd": map[string]any{"model": "lec-ty-seedance-2-5-1050-flxd", "resolution": "720p"},
+		},
+	})
+	require.NoError(t, err)
+	var requestedRoutes []string
+	client.Transport = lecAPIFixtureTransport(func(request *http.Request) (*http.Response, error) {
+		var body map[string]any
+		require.NoError(t, common.DecodeJson(request.Body, &body))
+		route, _ := body["model"].(string)
+		requestedRoutes = append(requestedRoutes, route)
+		image, ok := body["images"].([]any)
+		require.True(t, ok)
+		require.Len(t, image, 1)
+		assert.True(t, image[0] == largeImage, "retained reference must be replayed byte for byte")
+		assert.Equal(t, "720p", body["resolution"])
+		assert.Equal(t, http.MethodPost, request.Method)
+		assert.Equal(t, "https://lec.example/v1/videos", request.URL.String())
+		assert.Equal(t, "Bearer stub", request.Header.Get("Authorization"))
+		if route == "lec-ty-seedance-2-5-1050-flxd" {
+			return &http.Response{StatusCode: http.StatusTooManyRequests, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"error":{"code":"rate_limit_exceeded"}}`)), Request: request}, nil
+		}
+		return &http.Response{StatusCode: http.StatusAccepted, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"id":"replacement-task","status":"queued"}`)), Request: request}, nil
+	})
+
+	info := &relaycommon.RelayInfo{OriginModelName: "seedance-2-5-02", ChannelMeta: &relaycommon.ChannelMeta{
+		ChannelId: channelID, ApiKey: "stub", ChannelBaseUrl: "https://lec.example",
+	}}
+	adaptor := taskplugin.New(plugin)
+	adaptor.Init(info)
+	task := &model.Task{
+		TaskID: "task_public", Platform: "lecapi", Status: model.TaskStatusInProgress, ChannelId: channelID, SubmitTime: time.Now().Unix(),
+		Properties: model.Properties{OriginModelName: "seedance-2-5-02", UpstreamModelName: "seedance-2-5-02"},
+		PrivateData: model.TaskPrivateData{
+			UpstreamTaskID:     "failed-task",
+			LecAPIRetryPayload: retainedBodies,
+			Execution:          &model.TaskExecutionSnapshot{TaskPlugin: &model.TaskPluginSnapshot{Key: "lecapi"}},
+			PluginState:        []byte(`{"kind":"video","queryable":true,"lecapiSubmitRoute":"lec-mf-seedance-2-5-30ref","lecapiRetryURL":"https://lec.example/v1/videos","lecapiRetryCandidates":[{"route":"lec-hc-seedance-2-5-3010","body":{"model":"lec-hc-seedance-2-5-3010"}},{"route":"lec-ty-seedance-2-5-1050-flxd","body":{"model":"lec-ty-seedance-2-5-1050-flxd"}}]}`),
+		},
+	}
+	require.NoError(t, model.DB.Create(task).Error)
+	// A fresh poll reads the retained material after the original request is gone.
+	require.NoError(t, model.DB.First(task, task.ID).Error)
+	ready, alreadyInFlight := adaptor.PrepareTaskFailureRetry(task, false)
+	require.True(t, ready)
+	assert.False(t, alreadyInFlight)
+	task.Status = model.TaskStatusSubmitted
+	claimed, err := task.UpdateWithStatus(model.TaskStatusInProgress)
+	require.NoError(t, err)
+	require.True(t, claimed)
+	result := relaycommon.FailTaskInfo("upstream generation failed")
+	retried, err := adaptor.RetryTaskAfterFailure(context.Background(), task, result)
+	require.NoError(t, err)
+	require.True(t, retried)
+	assert.Equal(t, []string{"lec-ty-seedance-2-5-1050-flxd", "lec-hc-seedance-2-5-3010"}, requestedRoutes)
+	assert.Equal(t, "replacement-task", task.GetUpstreamTaskID())
+	assert.EqualValues(t, model.TaskStatusSubmitted, task.Status)
+
+	var state map[string]any
+	require.NoError(t, common.Unmarshal(task.PrivateData.PluginState, &state))
+	assert.Equal(t, "lec-hc-seedance-2-5-3010", state["lecapiSubmitRoute"])
+	assert.Empty(t, state["lecapiRetryCandidates"])
+	var metric model.PerfMetric
+	require.NoError(t, model.DB.Where("model_name = ? AND `group` = ?", model.LecAPIRouteMetricPrefix+"lec-mf-seedance-2-5-30ref", "79").First(&metric).Error)
+	assert.Equal(t, int64(1), metric.RequestCount)
+	assert.Zero(t, metric.SuccessCount)
+	var rejected model.PerfMetric
+	require.NoError(t, model.DB.Where("model_name = ? AND `group` = ?", model.LecAPIRouteMetricPrefix+"lec-ty-seedance-2-5-1050-flxd", "79").First(&rejected).Error)
+	assert.Equal(t, int64(2), rejected.RequestCount)
+	assert.Equal(t, int64(1), rejected.SuccessCount)
+
+	t.Run("restart resumes only a route that was never dispatched", func(t *testing.T) {
+		retryAdaptor := taskplugin.New(plugin)
+		retryAdaptor.Init(info)
+		ambiguousTask := &model.Task{
+			TaskID: "task_ambiguous", Platform: "lecapi", Status: model.TaskStatusInProgress, ChannelId: channelID,
+			Properties: task.Properties,
+			PrivateData: model.TaskPrivateData{
+				UpstreamTaskID: "failed-task",
+				Execution:      task.PrivateData.Execution,
+				PluginState:    []byte(`{"kind":"video","queryable":true,"lecapiSubmitRoute":"lec-mf-seedance-2-5-30ref","lecapiRetryURL":"https://lec.example/v1/videos","lecapiRetryCandidates":[{"route":"lec-hc-seedance-2-5-3010","body":{"model":"lec-hc-seedance-2-5-3010","prompt":"boat","resolution":"720p","duration":5}},{"route":"lec-ty-seedance-2-5-1050-flxd","body":{"model":"lec-ty-seedance-2-5-1050-flxd","prompt":"boat","resolution":"720p","duration":5}}]}`),
+			},
+		}
+		require.NoError(t, model.DB.Create(ambiguousTask).Error)
+		ready, alreadyInFlight := retryAdaptor.PrepareTaskFailureRetry(ambiguousTask, false)
+		require.True(t, ready)
+		assert.False(t, alreadyInFlight)
+		ambiguousTask.Status = model.TaskStatusSubmitted
+		ambiguousTask.PrivateData.LecAPIPoll = model.LecAPIPollState{
+			Revision:      ambiguousTask.PrivateData.LecAPIPoll.Revision,
+			RetryInFlight: true, RetryUntil: time.Now().Add(-time.Minute).UnixMilli(),
+		}
+		claimed, err := ambiguousTask.UpdateWithStatus(model.TaskStatusInProgress)
+		require.NoError(t, err)
+		require.True(t, claimed)
+
+		var routes []string
+		client.Transport = lecAPIFixtureTransport(func(req *http.Request) (*http.Response, error) {
+			var requestBody map[string]any
+			require.NoError(t, common.DecodeJson(req.Body, &requestBody))
+			route, ok := requestBody["model"].(string)
+			require.True(t, ok)
+			routes = append(routes, route)
+			var dispatched model.Task
+			require.NoError(t, model.DB.First(&dispatched, ambiguousTask.ID).Error)
+			require.True(t, dispatched.PrivateData.LecAPIPoll.RetryDispatched, "dispatch must be durable before POST")
+			deadline, ok := req.Context().Deadline()
+			require.True(t, ok)
+			assert.GreaterOrEqual(t, dispatched.PrivateData.LecAPIPoll.RetryUntil, deadline.Add(model.LecAPIGatewayRecheckDelay).UnixMilli())
+			if len(routes) == 1 {
+				return nil, fmt.Errorf("connection reset after write")
+			}
+			return &http.Response{StatusCode: http.StatusAccepted, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"id":"replacement-after-restart","status":"queued"}`)), Request: req}, nil
+		})
+		for range 2 {
+			var reloaded model.Task
+			require.NoError(t, model.DB.First(&reloaded, ambiguousTask.ID).Error)
+			ambiguousTask = &reloaded
+			retryAdaptor = taskplugin.New(plugin)
+			retryAdaptor.Init(info)
+			ready, alreadyInFlight := retryAdaptor.PrepareTaskFailureRetry(ambiguousTask, true)
+			require.True(t, ready)
+			require.False(t, alreadyInFlight)
+			ambiguousTask.PrivateData.LecAPIPoll = model.LecAPIPollState{
+				Revision:      ambiguousTask.PrivateData.LecAPIPoll.Revision,
+				RetryInFlight: true, RetryUntil: time.Now().Add(time.Minute).UnixMilli(),
+			}
+			claimed, err := ambiguousTask.UpdateWithStatus(model.TaskStatusSubmitted)
+			require.NoError(t, err)
+			require.True(t, claimed)
+
+			result := relaycommon.FailTaskInfo("upstream generation failed")
+			retried, err := retryAdaptor.RetryTaskAfterFailure(context.Background(), ambiguousTask, result)
+			require.True(t, retried)
+			if len(routes) == 1 {
+				require.Error(t, err)
+				ready, alreadyInFlight := retryAdaptor.PrepareTaskFailureRetry(ambiguousTask, false)
+				assert.False(t, ready)
+				assert.True(t, alreadyInFlight)
+				ambiguousTask.PrivateData.LecAPIPoll.RetryUntil = time.Now().Add(-time.Minute).UnixMilli()
+			} else {
+				require.NoError(t, err)
+			}
+			updated, err := ambiguousTask.UpdateWithStatus(model.TaskStatusSubmitted)
+			require.NoError(t, err)
+			require.True(t, updated)
+		}
+		assert.Equal(t, []string{"lec-ty-seedance-2-5-1050-flxd", "lec-hc-seedance-2-5-3010"}, routes)
+		assert.Equal(t, "task_ambiguous", ambiguousTask.TaskID)
+		assert.Equal(t, "replacement-after-restart", ambiguousTask.GetUpstreamTaskID())
+		assert.False(t, ambiguousTask.PrivateData.LecAPIPoll.RetryInFlight)
+	})
 }
 
 func TestLecAPIHostReservesAndSettlesDefaultPricesWithoutSavedConfiguration(t *testing.T) {

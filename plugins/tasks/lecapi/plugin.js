@@ -3323,7 +3323,14 @@ export function parseSubmitResponse(ctx, response) {
   const profile = modelProfile(ctx);
   const images = imageEntries(response.body, profile.kind === "image");
   const state = { kind: profile.kind, queryable: profile.kind === "video" || ASYNC_IMAGE_MODELS.includes(profile.vendorModel) };
-  if (profile.routes?.includes(ctx.lecapiSubmitRoute)) state.lecapiSubmitRoute = ctx.lecapiSubmitRoute;
+  if (profile.routes?.includes(ctx.lecapiSubmitRoute)) {
+    state.lecapiSubmitRoute = ctx.lecapiSubmitRoute;
+    if (typeof ctx.lecapiRetryURL === "string" && Array.isArray(ctx.lecapiRetryCandidates)) {
+      state.lecapiRetryURL = ctx.lecapiRetryURL;
+      state.lecapiRetryCandidates = ctx.lecapiRetryCandidates;
+      if (ctx.lecapiRetryInFlight) state.lecapiRetryInFlight = ctx.lecapiRetryInFlight;
+    }
+  }
   const rawStatus = response.body.object === "lecapi.task" ? response.body.status : body.status;
   if (["failed", "failure", "cancelled", "canceled"].includes(String(rawStatus || "").toLowerCase())) {
     const taskId = typeof id === "string" && id.trim() ? id : ctx.publicTaskId || utils.uuid();

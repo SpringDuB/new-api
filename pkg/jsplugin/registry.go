@@ -256,9 +256,13 @@ func ValidCustomUsageValue(value string) bool {
 }
 
 type LoadedPlugin struct {
-	Meta   Meta
-	Engine *Engine
+	Meta    Meta
+	Engine  *Engine
+	factory bool
 }
+
+// IsFactory reports whether this exact plugin was registered as built in.
+func (p *LoadedPlugin) IsFactory() bool { return p.factory }
 
 // UsesSubmitEventDelta reports whether SSE submissions go through
 // parseSubmitEventDelta: the plugin declares submit-sse-delta@1, or exports
@@ -350,6 +354,7 @@ func (r *Registry) register(source string, options Options, factory bool) (*Load
 	factoryPlugins := clonePluginMap(r.factory)
 	overridePlugins := clonePluginMap(r.override)
 	if factory {
+		plugin.factory = true
 		factoryPlugins[plugin.Meta.Key] = plugin
 	} else {
 		overridePlugins[plugin.Meta.Key] = plugin
