@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { Link } from '@tanstack/react-router'
-import { MoreHorizontal } from 'lucide-react'
+import { MoreHorizontal, Wallet } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { ConfigDrawer } from '@/components/config-drawer'
@@ -35,8 +35,11 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { SystemUpdateAction } from '@/features/system-update/system-update-action'
+import { useWalletUser } from '@/features/wallet/hooks/use-wallet-user'
 import { useNotifications } from '@/hooks/use-notifications'
 import { useTopNavLinks } from '@/hooks/use-top-nav-links'
+import { formatQuota } from '@/lib/format'
+import { useSystemConfigStore } from '@/stores/system-config-store'
 
 import { defaultTopNavLinks } from '../config/top-nav.config'
 import type { TopNavLink } from '../types'
@@ -138,6 +141,7 @@ export function AppHeader({
 
         {rightContent ?? (
           <div className='stolas-masthead-tools flex shrink-0 items-center gap-1'>
+            <WorkspaceBalance />
             {showTopNav && (
               <DropdownMenu>
                 <DropdownMenuTrigger
@@ -210,5 +214,30 @@ export function AppHeader({
         )}
       </div>
     </header>
+  )
+}
+
+function WorkspaceBalance() {
+  const { t } = useTranslation()
+  const { data: user } = useWalletUser(true)
+  // The shared quota formatter reads the current currency configuration.
+  useSystemConfigStore((state) => state.config.currency)
+  if (!user) return null
+
+  const balance = formatQuota(user.quota)
+  const label = t('Current Balance')
+  return (
+    <div
+      role='group'
+      aria-label={label}
+      title={`${label}: ${balance}`}
+      className='border-border me-1 flex max-w-28 min-w-0 items-center gap-1.5 border-e pe-2 text-xs tabular-nums sm:max-w-40'
+    >
+      <Wallet
+        aria-hidden='true'
+        className='text-muted-foreground size-4 shrink-0'
+      />
+      <span className='truncate font-medium'>{balance}</span>
+    </div>
   )
 }

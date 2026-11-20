@@ -65,9 +65,16 @@ async function renderWorkspace(
     adminModules?: object
     userModules?: object
     canvasEnabled?: boolean
+    walletQuota?: number
   } = {}
 ) {
-  vi.spyOn(api, 'get').mockResolvedValue({ data: { success: true, data: [] } })
+  vi.spyOn(api, 'get').mockImplementation(async (url) => ({
+    data: {
+      success: true,
+      data:
+        url === '/api/user/self' ? { id: 1, quota: options.walletQuota } : [],
+    },
+  }))
   client = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity } },
   })
@@ -112,6 +119,26 @@ async function renderWorkspace(
 }
 
 describe('Stolas workspace navigation', () => {
+  it.each([390, 1440])(
+    'shows the wallet balance before the Explore menu at %ipx',
+    async (width) => {
+      vi.stubGlobal('innerWidth', width)
+      await renderWorkspace('/keys', { walletQuota: 1250000 })
+      const header = screen.getByRole('banner')
+      const balance = await within(header).findByRole('group', {
+        name: 'Current Balance',
+      })
+      expect(await within(balance).findByText('$2.5')).toBeVisible()
+      const explore = within(header).getByRole('button', {
+        name: 'Explore Stolas',
+      })
+      expect(
+        balance.compareDocumentPosition(explore) &
+          Node.DOCUMENT_POSITION_FOLLOWING
+      ).toBeTruthy()
+    }
+  )
+
   it('keeps destinations in one top navigation and marks the current API page in its menu', async () => {
     await renderWorkspace('/keys')
     expect(
