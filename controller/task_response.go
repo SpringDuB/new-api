@@ -35,6 +35,7 @@ func buildDashboardTaskQueryResponse(c *gin.Context, task *model.Task) (*model.T
 	var err error
 	queryPath := ""
 	status := http.StatusOK
+	ossRequired := service.TaskArtifactOSSRequired()
 	// Host /v1/videos retrieval hands native submissions back to their own
 	// matching query route. Preserve that choice in the console as well.
 	nativeVideo := false
@@ -50,20 +51,39 @@ func buildDashboardTaskQueryResponse(c *gin.Context, task *model.Task) (*model.T
 		if nativeVideo {
 			break
 		}
+		queryPath = "/v1/videos/" + task.TaskID
+		if ossRequired {
+			var response service.PublicVideoTask
+			response, err = service.BuildPublicVideoTask(c.Request.Context(), task)
+			if err == nil {
+				body, err = common.Marshal(response)
+			}
+			break
+		}
 		converter, ok := relay.GetTaskAdaptor(task.Platform).(relaychannel.OpenAIVideoConverter)
 		if !ok {
 			return nil, "", nil
 		}
-		queryPath = "/v1/videos/" + task.TaskID
 		body, err = converter.ConvertToOpenAIVideo(task)
 	case "/v1/video/generations":
 		queryPath = "/v1/video/generations/" + task.TaskID
-		body, err = common.Marshal(dto.TaskResponse[any]{Code: "success", Data: relay.TaskModel2Dto(task)})
+		if !ossRequired {
+			body = task.Data
+			break
+		}
+		var response service.PublicVideoTask
+		response, err = service.BuildPublicVideoTask(c.Request.Context(), task)
 		if err == nil {
-			var value any
-			value, err = service.ApplyTaskVideoDelivery(c.Request.Context(), task, common.RawMessage(body))
+			response.TaskID = response.ID
+			body, err = common.Marshal(dto.TaskResponse[any]{Code: "success", Data: response})
+		}
+	case "/v1/images/generations", "/v1/images/edits":
+		if ossRequired && model.IsImageTaskAction(task.Action) {
+			queryPath = "/v1/tasks/" + task.TaskID + "/artifacts"
+			var response service.PublicImageTask
+			response, err = service.BuildPublicImageTask(c.Request.Context(), task)
 			if err == nil {
-				body = value.(common.RawMessage)
+				body, err = common.Marshal(response)
 			}
 		}
 	case "/v1/responses":

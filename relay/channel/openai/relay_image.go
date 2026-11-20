@@ -257,6 +257,7 @@ func extractOpenAIImageStreamErrorMessage(data []byte) string {
 }
 
 func openaiImageJSONAsStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
+	c.Set(relaycommon.ImageJSONAsStreamKey, true)
 	defer service.CloseResponseBodyGracefully(resp)
 
 	responseBody, err := io.ReadAll(resp.Body)

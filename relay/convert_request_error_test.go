@@ -27,7 +27,8 @@ import (
 )
 
 type imageReservation struct {
-	held, limit int
+	held, limit       int
+	settled, refunded bool
 }
 
 func (s *imageReservation) Reserve(quota int) error {
@@ -38,8 +39,8 @@ func (s *imageReservation) Reserve(quota int) error {
 	return nil
 }
 func (s *imageReservation) GetPreConsumedQuota() int { return s.held }
-func (*imageReservation) Settle(int) error           { return nil }
-func (*imageReservation) Refund(*gin.Context)        {}
+func (s *imageReservation) Settle(int) error         { s.settled = true; return nil }
+func (s *imageReservation) Refund(*gin.Context)      { s.refunded = true }
 func (*imageReservation) NeedsRefund() bool          { return false }
 
 func (s *imageReservation) ReserveBeforeSubmit(quota int) error { return s.Reserve(quota) }
@@ -49,6 +50,7 @@ func TestImageRequestReservesFinalQuantityBeforeUpstream(t *testing.T) {
 	for _, tc := range []struct {
 		name, body                                    string
 		tiered, passThrough, insufficient, retryReset bool
+		deliveryFailure                               bool
 		override                                      any
 		count, status                                 int
 	}{
@@ -59,6 +61,7 @@ func TestImageRequestReservesFinalQuantityBeforeUpstream(t *testing.T) {
 		{name: "oversized override rejected", body: `{"model":"gpt-image-2","n":1}`, override: 129, status: http.StatusBadRequest},
 		{name: "insufficient reservation blocks upstream", body: `{"model":"gpt-image-2","n":1}`, override: 4, count: 4, insufficient: true, status: http.StatusForbidden},
 		{name: "retry drops the previous attempt's quantity", body: `{"model":"gpt-image-2","n":1}`, count: 1, retryReset: true},
+		{name: "failed delivery refunds without settling", body: `{"model":"gpt-image-2","n":1}`, count: 1, deliveryFailure: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			received := make(chan []byte, 1)
@@ -68,6 +71,10 @@ func TestImageRequestReservesFinalQuantityBeforeUpstream(t *testing.T) {
 					received <- body
 				}
 				w.Header().Set("Content-Type", "application/json")
+				if tc.deliveryFailure {
+					_, _ = io.WriteString(w, `{"data":[{"b64_json":"aW1hZ2U="}]}`)
+					return
+				}
 				w.WriteHeader(http.StatusBadGateway)
 				_, _ = io.WriteString(w, `{"error":{"message":"fixture upstream failure","type":"upstream_error"}}`)
 			}))
@@ -102,8 +109,21 @@ func TestImageRequestReservesFinalQuantityBeforeUpstream(t *testing.T) {
 				info.PriceData.AddOtherRatio("n", 4)
 				info.BillingImageCount = common.GetPointer(3)
 			}
-			apiErr := ImageHelper(c, info)
+			var prepareDelivery func() *types.NewAPIError
+			var deliveryError *types.NewAPIError
+			if tc.deliveryFailure {
+				deliveryError = types.NewOpenAIError(errors.New("fixture upload rejected"), types.ErrorCodeBadResponse, http.StatusBadGateway)
+				prepareDelivery = func() *types.NewAPIError { return deliveryError }
+			}
+			apiErr := ImageHelper(c, info, prepareDelivery)
 			require.NotNil(t, apiErr)
+			if tc.deliveryFailure {
+				require.Same(t, deliveryError, apiErr)
+				RefundFailedRequestBilling(c, info, apiErr)
+				assert.False(t, reservation.settled)
+				assert.True(t, reservation.refunded)
+				return
+			}
 			if tc.status != 0 {
 				assert.Equal(t, tc.status, apiErr.StatusCode)
 				assert.Empty(t, received, "no upstream submission before quantity validation and reservation")
@@ -308,7 +328,7 @@ func TestImageHelperKeepsAdaptorClassifiedConvertError(t *testing.T) {
 		PriceData: hosttypes.PriceData{UsePrice: true, ModelPrice: 0.04, GroupRatioInfo: hosttypes.GroupRatioInfo{GroupRatio: 1}},
 	}
 
-	apiErr := ImageHelper(c, info)
+	apiErr := ImageHelper(c, info, nil)
 
 	require.NotNil(t, apiErr)
 	assert.Equal(t, http.StatusBadRequest, apiErr.StatusCode)

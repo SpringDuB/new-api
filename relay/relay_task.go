@@ -502,8 +502,43 @@ func videoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *d
 		return
 	}
 
-	isOpenAIVideoAPI := strings.HasPrefix(c.Request.RequestURI, "/v1/videos/")
-	if !isOpenAIVideoAPI && originTask.Status == model.TaskStatusSuccess && service.GetTaskArtifactStore().Enabled() {
+	isOpenAIVideoAPI := strings.HasPrefix(c.Request.URL.Path, "/v1/videos/")
+	isVideo := isOpenAIVideoAPI || strings.HasPrefix(c.Request.URL.Path, "/v1/video/generations/") || service.IsVideoTask(originTask.Action)
+	if isVideo && !service.TaskArtifactOSSRequired() {
+		if originTask.Status != model.TaskStatusSuccess && originTask.Status != model.TaskStatusFailure {
+			tryRealtimeFetch(originTask, true)
+		}
+		if len(originTask.Data) > 0 {
+			c.Header("Cache-Control", "private, no-store")
+			return originTask.Data, nil
+		}
+		respBody, err = common.Marshal(originTask.ToOpenAIVideo())
+		if err != nil {
+			return nil, service.TaskErrorWrapperLocal(err, "marshal_response_failed", http.StatusInternalServerError)
+		}
+		return respBody, nil
+	}
+	if isVideo {
+		if originTask.Status != model.TaskStatusSuccess && originTask.Status != model.TaskStatusFailure {
+			tryRealtimeFetch(originTask, true)
+		}
+		response, err := service.BuildPublicVideoTask(c.Request.Context(), originTask)
+		if err != nil {
+			return nil, service.TaskErrorWrapperLocal(errors.New(i18n.T(c, i18n.MsgRelayVideoDeliveryFailed)), "video_delivery_failed", http.StatusBadGateway)
+		}
+		c.Header("Cache-Control", "private, no-store")
+		if isOpenAIVideoAPI {
+			respBody, err = common.Marshal(response)
+		} else {
+			response.TaskID = response.ID
+			respBody, err = common.Marshal(dto.TaskResponse[any]{Code: "success", Data: response})
+		}
+		if err != nil {
+			return nil, service.TaskErrorWrapperLocal(errors.New("failed to construct video response"), "marshal_response_failed", http.StatusInternalServerError)
+		}
+		return respBody, nil
+	}
+	if originTask.Status == model.TaskStatusSuccess && service.GetTaskArtifactStore().Enabled() {
 		defer func() {
 			if taskResp != nil || len(respBody) == 0 {
 				return
@@ -519,32 +554,8 @@ func videoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *d
 	}
 
 	// Gemini/Vertex 支持实时查询：用户 fetch 时直接从上游拉取最新状态
-	if realtimeResp := tryRealtimeFetch(originTask, isOpenAIVideoAPI); len(realtimeResp) > 0 {
+	if realtimeResp := tryRealtimeFetch(originTask, false); len(realtimeResp) > 0 {
 		respBody = realtimeResp
-		return
-	}
-
-	// OpenAI Video API 格式: 走各 adaptor 的 ConvertToOpenAIVideo
-	if isOpenAIVideoAPI {
-		adaptor := GetTaskAdaptor(originTask.Platform)
-		if adaptor == nil {
-			taskResp = service.TaskErrorWrapperLocal(fmt.Errorf("invalid channel id: %d", originTask.ChannelId), "invalid_channel_id", http.StatusBadRequest)
-			return
-		}
-		if converter, ok := adaptor.(channel.OpenAIVideoConverter); ok {
-			openAIVideoData, err := converter.ConvertToOpenAIVideo(originTask)
-			if err != nil {
-				if errors.Is(err, service.ErrTaskVideoDelivery) {
-					taskResp = service.TaskErrorWrapperLocal(errors.New(i18n.T(c, i18n.MsgRelayVideoDeliveryFailed)), "video_delivery_failed", http.StatusBadGateway)
-					return
-				}
-				taskResp = service.TaskErrorWrapper(err, "convert_to_openai_video_failed", http.StatusInternalServerError)
-				return
-			}
-			respBody = openAIVideoData
-			return
-		}
-		taskResp = service.TaskErrorWrapperLocal(fmt.Errorf("not_implemented:%s", originTask.Platform), "not_implemented", http.StatusNotImplemented)
 		return
 	}
 

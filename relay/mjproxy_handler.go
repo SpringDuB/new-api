@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -21,7 +21,6 @@ import (
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
-	"github.com/QuantumNous/new-api/setting/system_setting"
 
 	"github.com/gin-gonic/gin"
 )
@@ -35,67 +34,29 @@ func RelayMidjourneyImage(c *gin.Context) {
 		})
 		return
 	}
-	var httpClient *http.Client
-	var proxy string
-	if channel, err := model.CacheGetChannel(midjourneyTask.ChannelId); err == nil {
-		channelSetting := channel.GetSetting()
-		proxy = channelSetting.Proxy
-		if proxy != "" {
-			if httpClient, err = service.GetHttpClientWithProxySettings(proxy, channelSetting); err != nil {
-				c.JSON(400, gin.H{
-					"error": "proxy_url_invalid",
-				})
-				return
-			}
+	if !service.TaskArtifactOSSRequired() {
+		target, err := url.Parse(midjourneyTask.ImageUrl)
+		if err != nil || target.Host == "" || target.User != nil || target.Scheme != "http" && target.Scheme != "https" {
+			c.JSON(http.StatusBadGateway, gin.H{"error": "image_delivery_failed"})
+			return
 		}
-	}
-	if httpClient == nil {
-		httpClient = service.GetSSRFProtectedHTTPClient()
-	}
-	var validateErr error
-	if proxy == "" {
-		validateErr = service.ValidateSSRFProtectedFetchURL(midjourneyTask.ImageUrl)
-	} else {
-		// 渠道代理路径的连接由代理侧建立，无法做拨号时逐 IP 校验，
-		// 因此保留请求前的一次性 SSRF 校验。
-		fetchSetting := system_setting.GetFetchSetting()
-		validateErr = common.ValidateURLWithFetchSetting(midjourneyTask.ImageUrl, fetchSetting.EnableSSRFProtection, fetchSetting.AllowPrivateIp, fetchSetting.DomainFilterMode, fetchSetting.IpFilterMode, fetchSetting.DomainList, fetchSetting.IpList, fetchSetting.AllowedPorts, fetchSetting.ApplyIPFilterForDomain)
-	}
-	if validateErr != nil {
-		c.JSON(http.StatusForbidden, gin.H{
-			"error": fmt.Sprintf("request blocked: %v", validateErr),
-		})
+		c.Header("Cache-Control", "private, no-store")
+		c.Redirect(http.StatusTemporaryRedirect, target.String())
 		return
 	}
-	resp, err := httpClient.Get(midjourneyTask.ImageUrl)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "http_get_image_failed",
-		})
+	if midjourneyTask.Status != "SUCCESS" || midjourneyTask.ImageUrl == "" || service.ResolveTaskImageDelivery == nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "image_delivery_failed"})
 		return
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		responseBody, _ := io.ReadAll(resp.Body)
-		c.JSON(resp.StatusCode, gin.H{
-			"error": string(responseBody),
-		})
+	urls, err := service.ResolveTaskImageDelivery(c.Request.Context(), model.MidjourneyImageLog(*midjourneyTask))
+	if err != nil || urls["image"] == "" {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "image_delivery_failed"})
 		return
 	}
-	// 从Content-Type头获取MIME类型
-	contentType := resp.Header.Get("Content-Type")
-	if contentType == "" {
-		// 如果无法确定内容类型，则默认为jpeg
-		contentType = "image/jpeg"
-	}
-	// 设置响应的内容类型
-	c.Writer.Header().Set("Content-Type", contentType)
-	// 将图片流式传输到响应体
-	_, err = io.Copy(c.Writer, resp.Body)
-	if err != nil {
-		log.Println(common.LogText("Failed to stream image: %v", err))
-	}
-	return
+	c.Header("Cache-Control", "private, no-store")
+	c.Header("Referrer-Policy", "no-referrer")
+	c.Header("Location", urls["image"])
+	c.Status(http.StatusTemporaryRedirect)
 }
 
 func RelayMidjourneyNotify(c *gin.Context) *dto.MidjourneyResponse {
@@ -141,7 +102,7 @@ func RelayMidjourneyNotify(c *gin.Context) *dto.MidjourneyResponse {
 	return nil
 }
 
-func coverMidjourneyTaskDto(c *gin.Context, originTask *model.Midjourney) (midjourneyTask dto.MidjourneyDto) {
+func coverMidjourneyTaskDto(c *gin.Context, originTask *model.Midjourney) (midjourneyTask dto.MidjourneyDto, deliveryErr error) {
 	midjourneyTask.MjId = originTask.MjId
 	midjourneyTask.Progress = originTask.Progress
 	midjourneyTask.PromptEn = originTask.PromptEn
@@ -149,22 +110,11 @@ func coverMidjourneyTaskDto(c *gin.Context, originTask *model.Midjourney) (midjo
 	midjourneyTask.SubmitTime = originTask.SubmitTime
 	midjourneyTask.StartTime = originTask.StartTime
 	midjourneyTask.FinishTime = originTask.FinishTime
-	midjourneyTask.ImageUrl = ""
-	if originTask.ImageUrl != "" && setting.MjForwardUrlEnabled {
-		midjourneyTask.ImageUrl = system_setting.ServerAddress + "/mj/image/" + originTask.MjId
-		if originTask.Status != "SUCCESS" {
-			midjourneyTask.ImageUrl += "?rand=" + strconv.FormatInt(time.Now().UnixNano(), 10)
-		}
-	} else {
-		midjourneyTask.ImageUrl = originTask.ImageUrl
-	}
-	if originTask.VideoUrl != "" {
-		midjourneyTask.VideoUrl = originTask.VideoUrl
-	}
 	midjourneyTask.Status = originTask.Status
-	midjourneyTask.FailReason = originTask.FailReason
+	if originTask.FailReason != "" {
+		midjourneyTask.FailReason = "Media generation failed"
+	}
 	midjourneyTask.Action = originTask.Action
-	midjourneyTask.Description = originTask.Description
 	midjourneyTask.Prompt = originTask.Prompt
 	if originTask.Buttons != "" {
 		var buttons []dto.ActionButton
@@ -173,21 +123,56 @@ func coverMidjourneyTaskDto(c *gin.Context, originTask *model.Midjourney) (midjo
 			midjourneyTask.Buttons = buttons
 		}
 	}
+	if !service.TaskArtifactOSSRequired() {
+		midjourneyTask.ImageUrl = originTask.ImageUrl
+		midjourneyTask.VideoUrl = originTask.VideoUrl
+		midjourneyTask.FailReason = originTask.FailReason
+		if originTask.VideoUrls != "" {
+			_ = common.UnmarshalJsonStr(originTask.VideoUrls, &midjourneyTask.VideoUrls)
+		}
+		return midjourneyTask, nil
+	}
+	if originTask.Status != "SUCCESS" {
+		return midjourneyTask, nil
+	}
+	artifactTask := model.MidjourneyImageLog(*originTask)
+	ctx := c.Request.Context()
+	if originTask.ImageUrl != "" {
+		if service.ResolveTaskImageDelivery == nil {
+			return midjourneyTask, service.ErrTaskArtifactStoreDisabled
+		}
+		urls, err := service.ResolveTaskImageDelivery(ctx, artifactTask)
+		if err != nil || urls["image"] == "" {
+			return midjourneyTask, fmt.Errorf("image delivery failed")
+		}
+		midjourneyTask.ImageUrl = urls["image"]
+	}
+	var videos []dto.ImgUrls
 	if originTask.VideoUrls != "" {
-		var videoUrls []dto.ImgUrls
-		err := common.Unmarshal([]byte(originTask.VideoUrls), &videoUrls)
-		if err == nil {
-			midjourneyTask.VideoUrls = videoUrls
+		if err := common.UnmarshalJsonStr(originTask.VideoUrls, &videos); err != nil || len(videos) > 64 {
+			return midjourneyTask, service.ErrTaskVideoDelivery
 		}
 	}
-	if originTask.Properties != "" {
-		var properties dto.Properties
-		err := common.Unmarshal([]byte(originTask.Properties), &properties)
-		if err == nil {
-			midjourneyTask.Properties = &properties
+	for index, video := range append([]dto.ImgUrls{{Url: originTask.VideoUrl}}, videos...) {
+		if video.Url == "" {
+			continue
+		}
+		videoTask := *artifactTask
+		videoTask.Action = constant.TaskActionTextToVideo
+		videoTask.TaskID += "_video_" + strconv.Itoa(index)
+		videoTask.PrivateData.ResultURL = video.Url
+		videoTask.PrivateData.ImageArtifacts = nil
+		result, err := service.BuildPublicVideoTask(ctx, &videoTask)
+		if err != nil {
+			return midjourneyTask, err
+		}
+		if index == 0 {
+			midjourneyTask.VideoUrl = result.URL
+		} else {
+			midjourneyTask.VideoUrls = append(midjourneyTask.VideoUrls, dto.ImgUrls{Url: result.URL})
 		}
 	}
-	return
+	return midjourneyTask, nil
 }
 
 func RelaySwapFace(c *gin.Context, info *relaycommon.RelayInfo) *dto.MidjourneyResponse {
@@ -356,7 +341,10 @@ func RelayMidjourneyTask(c *gin.Context, relayMode int) *dto.MidjourneyResponse 
 				Description: "task_no_found",
 			}
 		}
-		midjourneyTask := coverMidjourneyTaskDto(c, originTask)
+		midjourneyTask, err := coverMidjourneyTaskDto(c, originTask)
+		if err != nil {
+			return &dto.MidjourneyResponse{Code: 4, Description: "media_delivery_failed"}
+		}
 		respBody, err = common.Marshal(midjourneyTask)
 		if err != nil {
 			return &dto.MidjourneyResponse{
@@ -379,7 +367,10 @@ func RelayMidjourneyTask(c *gin.Context, relayMode int) *dto.MidjourneyResponse 
 		if len(condition.IDs) != 0 {
 			originTasks := model.GetByMJIds(userId, condition.IDs)
 			for _, originTask := range originTasks {
-				midjourneyTask := coverMidjourneyTaskDto(c, originTask)
+				midjourneyTask, err := coverMidjourneyTaskDto(c, originTask)
+				if err != nil {
+					return &dto.MidjourneyResponse{Code: 4, Description: "media_delivery_failed"}
+				}
 				tasks = append(tasks, midjourneyTask)
 			}
 		}
@@ -395,6 +386,7 @@ func RelayMidjourneyTask(c *gin.Context, relayMode int) *dto.MidjourneyResponse 
 		}
 	}
 
+	c.Header("Cache-Control", "private, no-store")
 	c.Writer.Header().Set("Content-Type", "application/json")
 
 	_, err = io.Copy(c.Writer, bytes.NewBuffer(respBody))
@@ -551,7 +543,7 @@ func RelayMidjourneySubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dt
 	}
 
 	service.RequestPolicy(c).BeginAttempt(&model.Channel{Id: c.GetInt("channel_id")}, relayInfo.UsingGroup)
-	midjResponseWithStatus, responseBody, err := service.DoMidjourneyHttpRequest(c, time.Second*60, fullRequestURL)
+	midjResponseWithStatus, upstreamBody, err := service.DoMidjourneyHttpRequest(c, time.Second*60, fullRequestURL)
 	accepted := service.RecordMidjourneyPolicyResponse(c, midjResponseWithStatus, err)
 	if err != nil {
 		return &midjResponseWithStatus.Response
@@ -619,11 +611,6 @@ func RelayMidjourneySubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dt
 				}
 			}
 		}
-		//修改返回值
-		if midjRequest.Action != constant.MjActionInPaint && midjRequest.Action != constant.MjActionCustomZoom {
-			newBody := strings.Replace(string(responseBody), `"code":21`, `"code":1`, -1)
-			responseBody = []byte(newBody)
-		}
 	}
 	if midjResponse.Code == 1 && midjRequest.Action == "UPLOAD" {
 		midjourneyTask.Progress = "100%"
@@ -677,33 +664,29 @@ func RelayMidjourneySubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dt
 		model.UpdateChannelUsedQuota(billingChannelId, midjourneyTask.Quota)
 	}
 
-	if midjResponse.Code == 22 { //22-排队中，说明任务已存在
-		//修改返回值
-		newBody := strings.Replace(string(responseBody), `"code":22`, `"code":1`, -1)
-		responseBody = []byte(newBody)
+	if !service.TaskArtifactOSSRequired() && len(upstreamBody) > 0 {
+		c.Data(midjResponseWithStatus.StatusCode, "application/json", upstreamBody)
+		return nil
 	}
-	//resp.Body = io.NopCloser(bytes.NewBuffer(responseBody))
-	bodyReader := io.NopCloser(bytes.NewBuffer(responseBody))
-
-	//for k, v := range resp.Header {
-	//	c.Writer.Header().Set(k, v[0])
-	//}
-	c.Writer.WriteHeader(midjResponseWithStatus.StatusCode)
-
-	_, err = io.Copy(c.Writer, bodyReader)
-	if err != nil {
-		return &dto.MidjourneyResponse{
-			Code:        4,
-			Description: "copy_response_body_failed",
+	public := dto.MidjourneyResponse{Code: midjResponse.Code}
+	if accepted {
+		public.Result = midjourneyTask.MjId
+		if public.Code == 22 || public.Code == 21 && midjRequest.Action != constant.MjActionInPaint && midjRequest.Action != constant.MjActionCustomZoom {
+			public.Code = 1
 		}
-	}
-	err = bodyReader.Close()
-	if err != nil {
-		return &dto.MidjourneyResponse{
-			Code:        4,
-			Description: "close_response_body_failed",
+		if midjourneyTask.Status == "SUCCESS" {
+			result, err := coverMidjourneyTaskDto(c, midjourneyTask)
+			if err != nil {
+				c.JSON(http.StatusBadGateway, dto.MidjourneyResponse{Code: 4, Description: "media_delivery_failed"})
+				return nil
+			}
+			public.Properties = gin.H{"status": result.Status, "imageUrl": result.ImageUrl, "videoUrl": result.VideoUrl, "videoUrls": result.VideoUrls}
 		}
+	} else {
+		public.Description = "Media generation failed"
 	}
+	c.Header("Cache-Control", "private, no-store")
+	c.JSON(midjResponseWithStatus.StatusCode, public)
 	return nil
 }
 

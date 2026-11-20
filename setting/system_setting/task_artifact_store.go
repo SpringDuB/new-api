@@ -84,11 +84,15 @@ func LoadTaskArtifactStoreConfig() TaskArtifactStoreConfig {
 	stored := common.OptionMap[TaskArtifactStoreOptionKey]
 	common.OptionMapRWMutex.RUnlock()
 	if stored != "" {
-		if common.UnmarshalJsonStr(stored, &config) != nil {
-			config.Mode = TaskArtifactStoreModeUpstream
+		override := config
+		if common.UnmarshalJsonStr(stored, &override) == nil {
+			config = override
 		}
 	}
 	if err := ValidateTaskArtifactStoreConfig(config); err != nil {
+		if config.Mode == TaskArtifactStoreModeOSS {
+			return config // A misconfigured OSS deployment must not expose its upstream.
+		}
 		common.SysError(common.LogText("invalid task artifact store configuration: %s; using upstream mode", err.Error()))
 		config.Mode = TaskArtifactStoreModeUpstream
 		return config

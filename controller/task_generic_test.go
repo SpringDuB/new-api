@@ -33,11 +33,137 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const testArtifactPNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jC9sAAAAASUVORK5CYII="
+
+func configureImageDeliveryTestOSS(t *testing.T) string {
+	t.Helper()
+	return configureMediaDeliveryTestOSS(t, "image/png")
+}
+
+func configureMediaDeliveryTestOSS(t *testing.T, contentType string) string {
+	t.Helper()
+	var objects sync.Map
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodHead:
+			if content, ok := objects.Load(r.URL.Path); ok {
+				w.Header().Set("Content-Length", fmt.Sprint(len(content.([]byte))))
+				w.Header().Set("Content-Type", contentType)
+			} else {
+				w.WriteHeader(http.StatusNotFound)
+			}
+		case http.MethodPut:
+			content, err := io.ReadAll(r.Body)
+			assert.NoError(t, err)
+			assert.Equal(t, contentType, r.Header.Get("Content-Type"))
+			assert.Equal(t, "private", r.Header.Get("x-oss-object-acl"))
+			objects.Store(r.URL.Path, content)
+		default:
+			t.Errorf("unexpected OSS method %s", r.Method)
+		}
+	}))
+	t.Cleanup(server.Close)
+	transport := http.DefaultTransport
+	http.DefaultTransport = server.Client().Transport
+	t.Cleanup(func() { http.DefaultTransport = transport })
+	t.Setenv("TASK_ARTIFACT_STORE_MODE", "oss")
+	t.Setenv("TASK_ARTIFACT_STORE_OSS_ENDPOINT", server.URL)
+	t.Setenv("TASK_ARTIFACT_STORE_OSS_BUCKET", "media-delivery")
+	t.Setenv("TASK_ARTIFACT_STORE_OSS_REGION", "cn-hangzhou")
+	t.Setenv("TASK_ARTIFACT_STORE_OSS_ACCESS_KEY", "test-access")
+	t.Setenv("TASK_ARTIFACT_STORE_OSS_SECRET_KEY", "test-secret")
+	return server.URL
+}
+
+func TestImageDeliveryDoesNotForwardUpstreamStream(t *testing.T) {
+	ossURL := configureImageDeliveryTestOSS(t)
+	for _, tc := range []struct{ inlineBase64, invalid bool }{{false, false}, {true, false}, {true, true}} {
+		recorder := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(recorder)
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", nil)
+		writer := &imageDeliveryWriter{ResponseWriter: c.Writer, header: make(http.Header), status: http.StatusOK, size: -1}
+		writer.capture.ResponseWriter = writer
+		writer.Header().Set("Content-Type", "text/event-stream")
+		writer.Header().Set("X-Upstream-Canary", "private-provider")
+		writer.Header().Set("Location", "https://upstream.invalid/download")
+		_, err := writer.WriteString("data: {\"type\":\"image_generation.partial_image\",\"partial_image_b64\":\"private-preview\"}\n\n" +
+			"data: {\"type\":\"image_generation.completed\",\"b64_json\":\"" + testArtifactPNG + "\",\"revised_prompt\":\"private-provider\"}\n\n")
+		require.NoError(t, err)
+		if tc.invalid {
+			_, err = writer.WriteString("data: {\"type\":\"image_generation.completed\",\"b64_json\":\"not-base64\"}\n\n")
+			require.NoError(t, err)
+		}
+		writer.Flush()
+		require.False(t, c.Writer.Written())
+		task := &model.Task{TaskID: model.GenerateTaskID(), UserId: 1}
+		err = writeStoredImages(c, task, service.GetTaskArtifactStore(), nil, writer.capture.events, imageDeliveryFormat{stream: true, inlineBase64: tc.inlineBase64})
+		if tc.invalid {
+			require.ErrorIs(t, err, errImageDelivery)
+			assert.False(t, c.Writer.Written(), "a failed second image cannot publish the first")
+			continue
+		}
+		require.NoError(t, err)
+		assert.Empty(t, recorder.Header().Get("X-Upstream-Canary"))
+		assert.Empty(t, recorder.Header().Get("Location"))
+		assert.Contains(t, recorder.Body.String(), "event: image_generation.completed\n")
+		assert.Contains(t, recorder.Body.String(), "data: [DONE]")
+		assert.NotContains(t, recorder.Body.String(), "private-")
+		if tc.inlineBase64 {
+			assert.Contains(t, recorder.Body.String(), `"b64_json":"`+testArtifactPNG+`"`)
+			assert.NotContains(t, recorder.Body.String(), `"url"`)
+		} else {
+			assert.Contains(t, recorder.Body.String(), ossURL)
+			assert.Contains(t, recorder.Body.String(), "x-oss-signature=")
+			assert.NotContains(t, recorder.Body.String(), "b64_json")
+		}
+	}
+	t.Run("identical completed events are separate images", func(t *testing.T) {
+		recorder := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(recorder)
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", nil)
+		event := common.RawMessage(`{"type":"image_generation.completed","b64_json":"` + testArtifactPNG + `"}`)
+		task := &model.Task{TaskID: model.GenerateTaskID(), UserId: 1}
+		require.NoError(t, writeStoredImages(c, task, service.GetTaskArtifactStore(), nil, []common.RawMessage{event, event}, imageDeliveryFormat{stream: true}))
+		assert.Equal(t, 2, strings.Count(recorder.Body.String(), "event: image_generation.completed\n"))
+	})
+}
+
+func TestLegacyImageTaskReadsUseStoredMedia(t *testing.T) {
+	task := setupGenericTaskTest(t)
+	ossURL := configureImageDeliveryTestOSS(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.Midjourney{}))
+	legacy := &model.Midjourney{MjId: "legacy-image", UserId: task.UserId, ChannelId: task.ChannelId, Status: "SUCCESS", ImageUrl: "data:image/png;base64," + testArtifactPNG}
+	require.NoError(t, model.DB.Create(legacy).Error)
+	query := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(query)
+	c.Set("id", task.UserId)
+	c.Params = gin.Params{{Key: "id", Value: legacy.MjId}}
+	c.Request = httptest.NewRequest(http.MethodGet, "/mj/task/legacy-image/fetch", nil)
+	require.Nil(t, relay.RelayMidjourneyTask(c, relayconstant.RelayModeMidjourneyTaskFetch))
+	assert.Contains(t, query.Body.String(), ossURL)
+	assert.Contains(t, query.Body.String(), "x-oss-signature=")
+	assert.NotContains(t, query.Body.String(), testArtifactPNG)
+
+	content := httptest.NewRecorder()
+	c, _ = gin.CreateTestContext(content)
+	c.Params = gin.Params{{Key: "id", Value: legacy.MjId}}
+	c.Request = httptest.NewRequest(http.MethodGet, "/mj/image/legacy-image", nil)
+	relay.RelayMidjourneyImage(c)
+	c.Writer.WriteHeaderNow()
+	assert.Equal(t, http.StatusTemporaryRedirect, content.Code)
+	assert.Contains(t, content.Header().Get("Location"), ossURL)
+	assert.Contains(t, content.Header().Get("Location"), "x-oss-signature=")
+	assert.Empty(t, content.Body.String())
+}
+
 func TestTaskArtifactOSSArchivePreservesMediaAndServesSignedLinks(t *testing.T) {
 	task := setupGenericTaskTest(t)
 	allowPrivateTaskMediaTest(t)
+	png, err := base64.StdEncoding.DecodeString(testArtifactPNG)
+	require.NoError(t, err)
 	objects := map[string][]byte{}
 	var puts atomic.Int32
+	var rejectUpload atomic.Bool
 	var objectsMu sync.Mutex
 	ossServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		objectsMu.Lock()
@@ -51,7 +177,10 @@ func TestTaskArtifactOSSArchivePreservesMediaAndServesSignedLinks(t *testing.T) 
 				w.WriteHeader(404)
 			}
 		case http.MethodPut:
-
+			if rejectUpload.Load() {
+				w.WriteHeader(http.StatusForbidden)
+				return
+			}
 			value, err := io.ReadAll(r.Body)
 			require.NoError(t, err)
 			assert.Contains(t, r.Header.Get("Authorization"), "OSS4-HMAC-SHA256")
@@ -97,6 +226,11 @@ func TestTaskArtifactOSSArchivePreservesMediaAndServesSignedLinks(t *testing.T) 
 		assert.Empty(t, r.Header.Get("Authorization"))
 		assert.Empty(t, r.Header.Get("Cookie"))
 		assert.Empty(t, r.Header.Get("Range"))
+		if strings.Contains(r.URL.Path, "image") {
+			w.Header().Set("Content-Type", "image/png")
+			_, _ = w.Write(png)
+			return
+		}
 		w.Header().Set("Content-Type", "video/mp4")
 		_, _ = io.WriteString(w, "archived-media")
 	}))
@@ -129,7 +263,11 @@ export function buildContentRequest(ctx){if(ctx.data.object==="operation")return
 		ref, err := archiveTaskArtifact(t.Context(), task, artifact, service.GetTaskArtifactStore())
 		require.NoError(t, err)
 		require.NotNil(t, ref)
-		assert.Equal(t, int64(14), ref.Size)
+		if artifact.Type == "image" {
+			assert.Equal(t, int64(len(png)), ref.Size)
+		} else {
+			assert.Equal(t, int64(14), ref.Size)
+		}
 		_, err = archiveTaskArtifact(t.Context(), task, artifact, service.GetTaskArtifactStore())
 		require.NoError(t, err)
 	}
@@ -186,7 +324,7 @@ export function buildContentRequest(ctx){if(ctx.data.object==="operation")return
 	immediate.TaskID += "_sync"
 	immediate.PrivateData.ResultDiscarded = true
 	immediate.PrivateData.ArtifactArchive = nil
-	immediate.SetData(map[string]any{"object": "image", "data": []any{map[string]any{"b64_json": "aW1hZ2UtYnl0ZXM="}}})
+	immediate.SetData(map[string]any{"object": "image", "data": []any{map[string]any{"b64_json": testArtifactPNG}}})
 	require.NoError(t, model.DB.Omit("data").Create(&immediate).Error)
 	service.ScheduleTaskArtifactArchive(&immediate)
 	awaitTaskArtifactArchive(t, immediate.ID, model.TaskArchiveCompleted)
@@ -195,7 +333,7 @@ export function buildContentRequest(ctx){if(ctx.data.object==="operation")return
 	require.NoError(t, err)
 	image := view.Data.(map[string]any)["data"].([]any)[0].(map[string]any)
 	assert.NotContains(t, image, "url")
-	assert.Equal(t, "aW1hZ2UtYnl0ZXM=", image["b64_json"])
+	assert.Equal(t, testArtifactPNG, image["b64_json"])
 	var discarded model.Task
 	require.NoError(t, model.DB.First(&discarded, immediate.ID).Error)
 	assert.Empty(t, discarded.Data)
@@ -230,18 +368,34 @@ export function buildContentRequest(ctx){if(ctx.data.object==="operation")return
 	imageContext.Set("id", task.UserId)
 	common.SetContextKey(imageContext, constant.ContextKeyChannelId, task.ChannelId)
 	finishImageLog := beginImageLogCapture(imageContext)
-	imageContext.Data(http.StatusOK, "application/json", []byte(`{"error":null,"data":[{"url":"`+origin.URL+`/ordinary-image"},{"b64_json":"aW1hZ2UtYnl0ZXM="}]}`))
+	imageDeliveryTask := &model.Task{TaskID: model.GenerateTaskID(), Platform: "image", UserId: task.UserId, ChannelId: task.ChannelId}
+	upstreamImageBody := []byte(`{"error":null,"vendor":"upstream-private","data":[{"url":"` + origin.URL + `/ordinary-image?signature=vendor-private"},{"b64_json":"` + testArtifactPNG + `"}]}`)
+	inline := imageDeliveryFormat{inlineBase64: true}
+	require.NoError(t, writeStoredImages(imageContext, imageDeliveryTask, service.GetTaskArtifactStore(), upstreamImageBody, nil, inline))
+	assert.NotContains(t, imageResponse.Body.String(), origin.URL)
+	assert.NotContains(t, imageResponse.Body.String(), "vendor")
+	assert.NotContains(t, imageResponse.Body.String(), `"url"`)
+	var inlineResponse storedImageResponse
+	require.NoError(t, common.Unmarshal(imageResponse.Body.Bytes(), &inlineResponse))
+	require.Len(t, inlineResponse.Data, 1)
+	assert.EqualValues(t, 5, puts.Load(), "two representations of one image produce one object")
 	finishImageLog()
 	var imageLog model.Task
 	require.NoError(t, model.DB.Where("platform = ?", "image").First(&imageLog).Error)
 	imageLog = awaitTaskArtifactArchive(t, imageLog.ID, model.TaskArchiveCompleted)
-	assert.EqualValues(t, 6, puts.Load())
-	require.Len(t, imageLog.PrivateData.ImageArtifacts, 2)
+	assert.EqualValues(t, 5, puts.Load())
+	require.Len(t, imageLog.PrivateData.ImageArtifacts, 1)
+	for i, artifact := range imageLog.PrivateData.ArtifactArchive.Artifacts {
+		objectsMu.Lock()
+		stored := objects["/"+config.OSSBucket+"/"+artifact.ObjectKey]
+		objectsMu.Unlock()
+		assert.Equal(t, testArtifactPNG, inlineResponse.Data[i].B64JSON)
+		assert.Equal(t, png, stored)
+	}
 	assert.True(t, imageLog.PrivateData.ImageArtifacts[0].Stored)
-	assert.True(t, imageLog.PrivateData.ImageArtifacts[1].Stored)
 	privateJSON, err := common.Marshal(imageLog.PrivateData)
 	require.NoError(t, err)
-	assert.NotContains(t, string(privateJSON), "aW1hZ2UtYnl0ZXM=")
+	assert.NotContains(t, string(privateJSON), testArtifactPNG)
 	assert.NotContains(t, string(privateJSON), "downstream-secret")
 	assert.NotContains(t, string(privateJSON), "x-oss-signature")
 	for _, method := range []string{http.MethodGet, http.MethodHead} {
@@ -250,7 +404,7 @@ export function buildContentRequest(ctx){if(ctx.data.object==="operation")return
 		mediaContext.Request = httptest.NewRequest(method, "/content?archive=1", nil)
 		mediaContext.Request.Header.Set("Range", "bytes=0-3")
 		mediaContext.Set("id", task.UserId)
-		mediaContext.Params = gin.Params{{Key: "key", Value: imageLog.TaskID}, {Key: "artifact_key", Value: "image-1"}}
+		mediaContext.Params = gin.Params{{Key: "key", Value: imageLog.TaskID}, {Key: "artifact_key", Value: "delivery-image-1"}}
 		TaskArtifactContent(mediaContext)
 		require.Equal(t, http.StatusTemporaryRedirect, mediaRecorder.Code)
 		request, err := http.NewRequestWithContext(t.Context(), method, mediaRecorder.Header().Get("Location"), nil)
@@ -263,14 +417,26 @@ export function buildContentRequest(ctx){if(ctx.data.object==="operation")return
 		require.NoError(t, err)
 		if method == http.MethodGet {
 			assert.Equal(t, http.StatusPartialContent, response.StatusCode)
-			assert.Equal(t, "arch", string(mediaBytes))
+			assert.Equal(t, png[:4], mediaBytes)
 		} else {
 			assert.Equal(t, http.StatusOK, response.StatusCode)
 			assert.Empty(t, mediaBytes)
 		}
 	}
-	assert.EqualValues(t, 6, puts.Load(), "preview never regenerates or uploads a duplicate")
+	assert.EqualValues(t, 5, puts.Load(), "preview never regenerates or uploads a duplicate")
 	assert.Equal(t, 0, imageLog.Quota, "archival does not charge quota")
+	t.Run("rejected upload never returns base64", func(t *testing.T) {
+		rejectUpload.Store(true)
+		defer rejectUpload.Store(false)
+		recorder := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(recorder)
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", nil)
+		attempt := *imageDeliveryTask
+		attempt.TaskID = model.GenerateTaskID()
+		require.ErrorIs(t, writeStoredImages(c, &attempt, service.GetTaskArtifactStore(), upstreamImageBody, nil, inline), errImageDelivery)
+		assert.False(t, c.Writer.Written())
+		assert.Empty(t, recorder.Body.String())
+	})
 
 	// Old completed archives acquire their manifest before the original
 	// plugin, channel or current write location is changed.
@@ -287,7 +453,7 @@ export function buildContentRequest(ctx){if(ctx.data.object==="operation")return
 	backfillContext, backfillResponse := imageLogReadContext("/api/task/"+task.TaskID+"/artifacts", task.TaskID, task.UserId, common.RoleCommonUser)
 	GetDashboardTaskArtifacts(backfillContext)
 	require.Equal(t, http.StatusOK, backfillResponse.Code)
-	assert.EqualValues(t, 6, puts.Load(), "legacy manifest backfill never uploads again")
+	assert.EqualValues(t, 5, puts.Load(), "legacy manifest backfill never uploads again")
 	require.NoError(t, model.DB.First(&archived, task.ID).Error)
 	require.Len(t, archived.PrivateData.ArtifactArchive.Artifacts, 2)
 	manifestJSON, err := common.Marshal(archived.PrivateData.ArtifactArchive)
@@ -370,10 +536,10 @@ export function buildContentRequest(ctx){if(ctx.data.object==="operation")return
 	service.ScheduleTaskArtifactArchive(&newTask)
 	require.NoError(t, model.DB.First(&newTask, newTask.ID).Error)
 	assert.Nil(t, newTask.PrivateData.ArtifactArchive, "disabled writes never schedule new archives")
-	assert.EqualValues(t, 6, puts.Load())
+	assert.EqualValues(t, 5, puts.Load())
 }
 
-func TestTaskVideoDeliverySelectsDirectOrStoredURLs(t *testing.T) {
+func TestTaskVideoDeliveryAlwaysUsesStoredURLs(t *testing.T) {
 	task := setupGenericTaskTest(t)
 	require.NoError(t, i18n.Init())
 	allowPrivateTaskMediaTest(t)
@@ -563,10 +729,7 @@ export const protocols={openai_video:{decodeRequest(){return {}},render(ctx,task
 			assert.Equal(t, "untouched", data["metadata"])
 			assert.Equal(t, link, data["nested"].([]any)[0].(map[string]any)["video_url"])
 			assert.Equal(t, original, []byte(current.Data), "upstream data stays available for refreshes")
-			if name == "direct" {
-				assert.Equal(t, current.GetResultURL(), link)
-				assert.Equal(t, before, puts.Load())
-			} else {
+			{
 				assert.Contains(t, link, ossServer.URL+"/delivery/tasks/")
 				assert.Contains(t, link, "x-oss-signature=")
 				assert.NotContains(t, link, "origin-secret")
@@ -592,9 +755,6 @@ export const protocols={openai_video:{decodeRequest(){return {}},render(ctx,task
 				assert.Equal(t, sourceURL+"&variant=thumbnail", cachedView.Data.(map[string]any)["variant"], "non-signature resource parameters stay significant")
 			}
 			expectedPuts := before + expectedUploads
-			if name == "direct" {
-				expectedPuts = before
-			}
 			assert.Equal(t, expectedPuts, puts.Load(), "delivery retries reuse existing objects")
 			if name == "multiple" {
 				t.Run("ambiguous signatures preserve distinct resources", func(t *testing.T) {
@@ -652,19 +812,15 @@ export const protocols={openai_video:{decodeRequest(){return {}},render(ctx,task
 			}
 			require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &envelope))
 			for _, actual := range []string{renderedVideo["url"].(string), artifacts["video"].(map[string]any)["url"].(string), envelope.Data.ResultURL, envelope.Data.Data.URL} {
-				if name == "direct" {
-					assert.Equal(t, link, actual)
-				} else {
-					assert.True(t, strings.HasPrefix(actual, strings.SplitN(link, "?", 2)[0]+"?"))
-					assert.Contains(t, actual, "x-oss-signature=")
-				}
+				assert.True(t, strings.HasPrefix(actual, strings.SplitN(link, "?", 2)[0]+"?"))
+				assert.Contains(t, actual, "x-oss-signature=")
 			}
 			if name == "direct" {
 				current.PrivateData.ArtifactArchive = &model.TaskArtifactArchive{Status: model.TaskArchiveRunning}
 				require.NoError(t, service.ArchiveTaskArtifacts(t.Context(), &current, service.GetTaskArtifactStore()))
-				assert.Equal(t, before, puts.Load(), "background archival also skips directly accessible videos")
+				assert.Equal(t, expectedPuts, puts.Load(), "background archival reuses the stored video")
 				require.Len(t, current.PrivateData.ArtifactArchive.Artifacts, 1)
-				assert.Empty(t, current.PrivateData.ArtifactArchive.Artifacts[0].Backend)
+				assert.Equal(t, "oss", current.PrivateData.ArtifactArchive.Artifacts[0].Backend)
 			}
 			if name == "retry" {
 				var repaired model.Task
@@ -958,6 +1114,8 @@ func TestTaskArtifactStoreSettingsPersistWithoutReturningCredentials(t *testing.
 }
 
 func TestTaskMediaFailuresKeepSafeInternalDiagnostics(t *testing.T) {
+	require.NoError(t, i18n.Init())
+	configureMediaDeliveryTestOSS(t, "video/mp4")
 	task := setupGenericTaskTest(t)
 	allowPrivateTaskMediaTest(t)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusForbidden) }))
@@ -1416,13 +1574,12 @@ func TestTaskArtifactAccessRejectsAmbiguousHistoricalTaskID(t *testing.T) {
 	assert.NotContains(t, recorder.Body.String(), "upstream.invalid")
 }
 
-func TestLegacyVideoArtifactContentUsesGetResultURL(t *testing.T) {
+func TestLegacyVideoArtifactContentSignsStoredResult(t *testing.T) {
 	task := setupGenericTaskTest(t)
+	ossURL := configureMediaDeliveryTestOSS(t, "video/mp4")
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, "bytes=0-3", r.Header.Get("Range"))
+		assert.Empty(t, r.Header.Get("Range"))
 		w.Header().Set("Content-Type", "video/mp4")
-		w.Header().Set("Content-Range", "bytes 0-3/4")
-		w.WriteHeader(http.StatusPartialContent)
 		_, _ = w.Write([]byte("data"))
 	}))
 	defer upstream.Close()
@@ -1449,22 +1606,20 @@ func TestLegacyVideoArtifactContentUsesGetResultURL(t *testing.T) {
 
 	TaskArtifactContent(c)
 
-	assert.Equal(t, http.StatusPartialContent, recorder.Code)
-	assert.Equal(t, "data", recorder.Body.String())
-	assert.Equal(t, "bytes 0-3/4", recorder.Header().Get("Content-Range"))
+	assert.Equal(t, http.StatusTemporaryRedirect, recorder.Code)
+	assert.Contains(t, recorder.Header().Get("Location"), ossURL)
+	assert.Contains(t, recorder.Header().Get("Location"), "x-oss-signature=")
+	assert.Empty(t, recorder.Body.String())
 }
 
-func TestDisabledArtifactStorePreservesPluginUpstreamContent(t *testing.T) {
+func TestMisconfiguredArtifactStoreNeverFallsBackToPluginVideo(t *testing.T) {
+	require.NoError(t, i18n.Init())
+	t.Setenv("TASK_ARTIFACT_STORE_MODE", "oss")
+	t.Setenv("TASK_ARTIFACT_STORE_OSS_ENDPOINT", "")
 	task := setupGenericTaskTest(t)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, "provider-key", r.Header.Get("x-goog-api-key"))
-		assert.Equal(t, "provider-key", r.Header.Get("X-API-Key"), "channel header overrides reach credentialed downloads")
-		assert.NotEqual(t, "ignored.example", r.Host)
-		assert.Equal(t, "bytes=0-13", r.Header.Get("Range"))
-		w.Header().Set("Content-Type", "video/mp4")
-		w.Header().Set("Content-Range", "bytes 0-13/14")
-		w.WriteHeader(http.StatusPartialContent)
-		_, _ = w.Write([]byte("artifact-bytes"))
+		t.Error("unavailable OSS must not trigger an upstream download")
+		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	defer upstream.Close()
 	allowPrivateTaskMediaTest(t)
@@ -1492,26 +1647,24 @@ func TestDisabledArtifactStorePreservesPluginUpstreamContent(t *testing.T) {
 
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
-	c.Set(middleware.TaskArtifactAccessContextKey, true)
-	c.Params = gin.Params{
-		{Key: "key", Value: task.TaskID},
-		{Key: "artifact_key", Value: "video"},
-	}
-	c.Request = httptest.NewRequest(http.MethodGet, "/v1/tasks/"+task.TaskID+"/artifacts/video/content", nil)
+	c.Set("id", task.UserId)
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/videos/"+task.TaskID+"/content", nil)
+	c.Params = gin.Params{{Key: "task_id", Value: task.TaskID}}
 	c.Request.Header.Set("Range", "bytes=0-13")
 
-	TaskArtifactContent(c)
+	VideoProxy(c)
 
-	assert.Equal(t, http.StatusPartialContent, recorder.Code)
-	assert.Equal(t, "artifact-bytes", recorder.Body.String())
-	assert.Equal(t, "video/mp4", recorder.Header().Get("Content-Type"))
-	assert.Equal(t, "bytes 0-13/14", recorder.Header().Get("Content-Range"))
+	assert.Equal(t, http.StatusBadGateway, recorder.Code)
+	assert.Empty(t, recorder.Header().Get("Location"))
+	assert.NotContains(t, recorder.Body.String(), upstream.URL)
 }
 
 // hailuo looks the MiniMax download link up with utils.fetch; the signed OSS
 // link then gets a plain GET without the channel key, even for HEAD clients.
 func TestTaskArtifactContentFollowsHailuoRetrieveLink(t *testing.T) {
+	require.NoError(t, i18n.Init())
 	task := setupGenericTaskTest(t)
+	ossURL := configureMediaDeliveryTestOSS(t, "video/mp4")
 	var mu sync.Mutex
 	var ossRequests []string
 	var upstream *httptest.Server
@@ -1573,22 +1726,23 @@ func TestTaskArtifactContentFollowsHailuoRetrieveLink(t *testing.T) {
 	}
 
 	ranged := request(http.MethodGet, "file-1")
-	assert.Equal(t, http.StatusPartialContent, ranged.Code)
-	assert.Equal(t, "mp4!", ranged.Body.String())
-	assert.Equal(t, "bytes 0-3/10", ranged.Header().Get("Content-Range"))
+	assert.Equal(t, http.StatusTemporaryRedirect, ranged.Code)
+	assert.Contains(t, ranged.Header().Get("Location"), ossURL)
+	assert.Contains(t, ranged.Header().Get("Location"), "x-oss-signature=")
 
 	head := request(http.MethodHead, "file-1")
-	assert.Equal(t, http.StatusOK, head.Code)
+	assert.Equal(t, http.StatusTemporaryRedirect, head.Code)
 	assert.Empty(t, head.Body.String())
-	assert.Equal(t, "video/mp4", head.Header().Get("Content-Type"))
+	assert.Contains(t, head.Header().Get("Location"), ossURL)
 
+	task.TaskID += "_failed"
 	failed := request(http.MethodGet, "login-fail")
-	assert.Equal(t, http.StatusInternalServerError, failed.Code)
-	assert.Contains(t, failed.Body.String(), "artifact_plugin_error")
+	assert.Equal(t, http.StatusBadGateway, failed.Code)
+	assert.NotContains(t, failed.Body.String(), "login fail")
 
 	mu.Lock()
 	defer mu.Unlock()
-	assert.Equal(t, []string{"GET range=bytes=0-3 authorization=", "GET range= authorization="}, ossRequests)
+	assert.Equal(t, []string{"GET range= authorization="}, ossRequests)
 }
 
 func TestProjectedTaskArtifactValidationRejectsAmbiguousIdentity(t *testing.T) {

@@ -127,7 +127,14 @@ func (s *ossArtifactStore) objectKey(task *model.Task, artifactKey string) (stri
 	if task == nil || task.TaskID == "" || task.UserId <= 0 || artifactKey == "" || len(artifactKey) > 128 || strings.ContainsAny(artifactKey, "/\\\x00\r\n") || artifactKey == "." || artifactKey == ".." {
 		return "", errors.New("invalid stored artifact identity")
 	}
-	identity := sha256.Sum256([]byte(fmt.Sprintf("%d:%d:%s", task.UserId, task.ID, task.TaskID)))
+	id := task.ID
+	// Synchronous image bytes are committed before the audit row is inserted.
+	// Use the gateway-generated task ID for those objects, both before and
+	// after insert. Legacy keys continue using the original identity.
+	if task.Platform == "image" && strings.HasPrefix(artifactKey, "delivery-image-") {
+		id = 0
+	}
+	identity := sha256.Sum256([]byte(fmt.Sprintf("%d:%d:%s", task.UserId, id, task.TaskID)))
 	return path.Join(s.config.OSSPrefix, fmt.Sprintf("%x", identity), artifactKey), nil
 }
 

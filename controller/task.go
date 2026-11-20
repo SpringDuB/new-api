@@ -51,12 +51,20 @@ func GetTask(c *gin.Context) {
 		createdAt = task.SubmitTime
 	}
 	failReason := task.FailReason
+	platform := task.Platform
+	if service.IsGeneratedMediaTask(task.Action) {
+		platform = "media"
+		failReason = ""
+		if task.Status == model.TaskStatusFailure {
+			failReason = "Media generation failed"
+		}
+	}
 	if task.Status == model.TaskStatusSuccess && taskFailReasonIsLegacyResultURL(task.FailReason) {
 		failReason = ""
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"task_id":     task.TaskID,
-		"platform":    task.Platform,
+		"platform":    platform,
 		"status":      task.Status,
 		"progress":    task.Progress,
 		"fail_reason": failReason,
@@ -139,10 +147,16 @@ func writeTaskArtifacts(c *gin.Context, task *model.Task, dashboard bool) {
 	}
 	items := make([]taskArtifactResponse, 0, len(artifacts))
 	var deliveries map[string]service.TaskVideoDelivery
-	if !dashboard {
+	var images map[string]string
+	if !dashboard && service.TaskArtifactOSSRequired() {
 		deliveries, err = resolveTaskVideoDelivery(c.Request.Context(), task)
 		if err != nil {
 			writeTaskMediaProxyError(c, err)
+			return
+		}
+		images, err = resolveTaskImageDelivery(c.Request.Context(), task)
+		if err != nil {
+			writeTaskArtifactError(c, http.StatusBadGateway, "image_delivery_failed", "Image delivery failed")
 			return
 		}
 	}
@@ -150,6 +164,8 @@ func writeTaskArtifacts(c *gin.Context, task *model.Task, dashboard bool) {
 		var contentURL string
 		if delivery, ok := deliveries[artifact.Key]; ok {
 			contentURL = delivery.URL
+		} else if url, ok := images[artifact.Key]; ok {
+			contentURL = url
 		} else {
 			var buildErr error
 			contentURL, buildErr = service.BuildTaskArtifactContentURL(task.TaskID, artifact.Key)
@@ -182,12 +198,16 @@ func writeTaskArtifacts(c *gin.Context, task *model.Task, dashboard bool) {
 		response["legacy_audio_clips"] = legacySunoAudioClips(task.Data)
 	}
 	if legacyVideoAvailable(task) {
-		legacyContentURL, buildErr := service.BuildTaskArtifactContentURL(task.TaskID, "video")
-		if buildErr != nil {
-			writeTaskArtifactError(c, http.StatusInternalServerError, "artifact_url_error", "Failed to build artifact content URL")
-			return
+		if !dashboard && service.TaskArtifactOSSRequired() {
+			response["legacy_content_url"] = deliveries["video"].URL
+		} else {
+			legacyContentURL, buildErr := service.BuildTaskArtifactContentURL(task.TaskID, "video")
+			if buildErr != nil {
+				writeTaskArtifactError(c, http.StatusInternalServerError, "artifact_url_error", "Failed to build artifact content URL")
+				return
+			}
+			response["legacy_content_url"] = legacyContentURL
 		}
-		response["legacy_content_url"] = legacyContentURL
 	}
 	if dashboard {
 		response["archive_status"] = archiveStatus
@@ -339,16 +359,7 @@ func legacyVideoAvailable(task *model.Task) bool {
 		strings.TrimSpace(task.GetResultURL()) == "" {
 		return false
 	}
-	switch constant.NormalizeTaskAction(task.Action) {
-	case constant.TaskActionImageToVideo,
-		constant.TaskActionTextToVideo,
-		constant.TaskActionFirstTailToVideo,
-		constant.TaskActionReferenceToVideo,
-		constant.TaskActionRemix:
-		return true
-	default:
-		return false
-	}
+	return service.IsVideoTask(task.Action)
 }
 
 func getTaskForArtifactRequest(c *gin.Context, taskID string) (*model.Task, bool, error) {
@@ -468,6 +479,13 @@ func TaskArtifactContent(c *gin.Context) {
 			writeTaskArtifactError(c, http.StatusNotFound, "artifact_not_found", "Task or artifact not found")
 			return
 		}
+		if !service.TaskArtifactOSSRequired() {
+			descriptor := &relaychannel.TaskContentRequest{URL: task.GetResultURL(), Method: c.Request.Method, Credentialless: true}
+			if err := proxyTaskMedia(c, task, descriptor); err != nil {
+				writeTaskMediaProxyError(c, err)
+			}
+			return
+		}
 		deliveries, err := resolveTaskVideoDelivery(c.Request.Context(), task)
 		if err != nil {
 			writeTaskMediaProxyError(c, err)
@@ -479,14 +497,7 @@ func TaskArtifactContent(c *gin.Context) {
 			}
 			return
 		}
-		descriptor := &relaychannel.TaskContentRequest{
-			URL:            task.GetResultURL(),
-			Method:         c.Request.Method,
-			Credentialless: true,
-		}
-		if err := proxyTaskMedia(c, task, descriptor); err != nil {
-			writeTaskMediaProxyError(c, err)
-		}
+		writeTaskMediaProxyError(c, service.ErrTaskVideoDelivery)
 		return
 	}
 	artifacts, err := projectTaskArtifacts(task)
@@ -498,24 +509,20 @@ func TaskArtifactContent(c *gin.Context) {
 		writeTaskArtifactProjectionError(c, err)
 		return
 	}
-	found := false
-	var video *relaychannel.TaskArtifact
+	var selected *relaychannel.TaskArtifact
 	for _, artifact := range artifacts {
 		if artifact.Key == artifactKey {
-			found = true
-			if artifact.Type == "video" {
-				video = &artifact
-			}
+			selected = &artifact
 			break
 		}
 	}
-	if !found {
+	if selected == nil {
 		logger.LogTaskArtifactFailure(c.Request.Context(), task.TaskID, "projection", http.StatusNotFound)
 		writeTaskArtifactError(c, http.StatusNotFound, "artifact_not_found", "Task or artifact not found")
 		return
 	}
-	if video != nil && service.GetTaskArtifactStore().Enabled() {
-		delivery, err := taskVideoDelivery(c.Request.Context(), task, *video, service.GetTaskArtifactStore())
+	if selected.Type == "video" && service.TaskArtifactOSSRequired() {
+		delivery, err := taskVideoDelivery(c.Request.Context(), task, *selected, service.GetTaskArtifactStore())
 		if err != nil {
 			writeTaskMediaProxyError(c, err)
 			return
@@ -525,13 +532,22 @@ func TaskArtifactContent(c *gin.Context) {
 		}
 		return
 	}
-	for _, image := range task.PrivateData.ImageArtifacts {
-		if image.Key == artifactKey {
-			descriptor := &relaychannel.TaskContentRequest{URL: image.SourceURL, Method: c.Request.Method, Credentialless: true}
-			if err := proxyTaskMedia(c, task, descriptor); err != nil {
-				writeTaskMediaProxyError(c, err)
+	if selected.Type == "image" {
+		if service.TaskArtifactOSSRequired() {
+			store, ref, err := storedTaskImage(c.Request.Context(), task, *selected)
+			if err != nil || store.Serve(c, task, ref) != nil {
+				writeTaskArtifactError(c, http.StatusBadGateway, "image_delivery_failed", "Image delivery failed")
 			}
 			return
+		}
+		for _, image := range task.PrivateData.ImageArtifacts {
+			if image.Key == artifactKey && image.SourceURL != "" {
+				descriptor := &relaychannel.TaskContentRequest{URL: image.SourceURL, Method: c.Request.Method, Credentialless: true}
+				if err := proxyTaskMedia(c, task, descriptor); err != nil {
+					writeTaskMediaProxyError(c, err)
+				}
+				return
+			}
 		}
 	}
 	adaptor, err := initTaskArtifactAdaptor(task)
@@ -632,6 +648,18 @@ func tasksToDto(tasks []*model.Task, fillUser bool, viewerRole int) []*dto.TaskD
 			item.ResultURL = ""
 			if taskFailReasonIsLegacyResultURL(task.FailReason) {
 				item.FailReason = ""
+			}
+		}
+		if viewerRole < common.RoleAdminUser && service.IsGeneratedMediaTask(task.Action) {
+			item.Platform = "media"
+			properties := task.Properties
+			properties.UpstreamModelName = ""
+			item.Properties = properties
+			item.Data = nil
+			item.ResultURL = ""
+			item.FailReason = ""
+			if task.Status == model.TaskStatusFailure {
+				item.FailReason = "Media generation failed"
 			}
 		}
 		if viewerRole >= common.RoleAdminUser {

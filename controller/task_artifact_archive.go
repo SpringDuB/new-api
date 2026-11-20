@@ -4,20 +4,19 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	relaychannel "github.com/QuantumNous/new-api/relay/channel"
 	"github.com/QuantumNous/new-api/service"
-	"github.com/gin-gonic/gin"
 	"golang.org/x/sync/singleflight"
 )
 
 var taskArtifactArchives singleflight.Group
 
 func init() {
+	service.ResolveTaskImageDelivery = resolveTaskImageDelivery
 	service.ArchiveTaskArtifacts = func(ctx context.Context, task *model.Task, store service.TaskArtifactStore) error {
 		artifacts, err := taskStorageArtifacts(task)
 		if err != nil {
@@ -44,13 +43,9 @@ func init() {
 			} else {
 				ref, err = archiveTaskArtifact(ctx, task, artifact, store)
 			}
-			if err != nil || ref == nil && artifact.Type != "video" {
+			if err != nil || ref == nil {
 				logger.LogTaskArtifactFailure(ctx, task.TaskID, "storage", 0)
 				failures = append(failures, errors.New("artifact archival failed"))
-				continue
-			}
-			if ref == nil {
-				archive.Artifacts[i].Direct = true
 				continue
 			}
 			archive.Artifacts[i] = taskArchivedArtifact(artifact, ref)
@@ -62,6 +57,49 @@ func init() {
 		}
 		return errors.Join(failures...)
 	}
+}
+
+func resolveTaskImageDelivery(ctx context.Context, task *model.Task) (map[string]string, error) {
+	artifacts, err := taskStorageArtifacts(task)
+	if err != nil {
+		return nil, errImageDelivery
+	}
+	urls := make(map[string]string)
+	for _, artifact := range artifacts {
+		if artifact.Type != "image" {
+			continue
+		}
+		store, ref, err := storedTaskImage(ctx, task, artifact)
+		if err != nil {
+			return nil, errImageDelivery
+		}
+		signer, ok := store.(service.TaskArtifactURLProvider)
+		if !ok {
+			return nil, errImageDelivery
+		}
+		url, err := signer.SignedURL(ctx, task, ref, http.MethodGet)
+		if err != nil || url == "" {
+			return nil, errImageDelivery
+		}
+		urls[artifact.Key] = url
+	}
+	return urls, nil
+}
+
+func storedTaskImage(ctx context.Context, task *model.Task, artifact relaychannel.TaskArtifact) (service.TaskArtifactStore, *service.StoredArtifactRef, error) {
+	store, err := service.GetTaskArtifactReadStore(task, artifact.Key)
+	if err == nil {
+		ref, lookupErr := store.Resolve(task, artifact.Key)
+		if lookupErr == nil && ref != nil {
+			return store, ref, nil
+		}
+	}
+	store = service.GetTaskArtifactStore()
+	ref, err := archiveTaskArtifact(ctx, task, artifact, store)
+	if err != nil || ref == nil {
+		return nil, nil, errImageDelivery
+	}
+	return store, ref, nil
 }
 
 func taskArchivedArtifact(artifact relaychannel.TaskArtifact, ref *service.StoredArtifactRef) model.TaskArchivedArtifact {
@@ -171,18 +209,7 @@ func archiveTaskArtifact(ctx context.Context, task *model.Task, artifact relaych
 				return nil, err
 			}
 		}
-		request, err := http.NewRequestWithContext(bounded, http.MethodGet, "http://task-archive.invalid/", nil)
-		if err != nil {
-			return nil, err
-		}
-		c := &gin.Context{Request: request}
-		var ref *service.StoredArtifactRef
-		err = consumeTaskMedia(c, task, descriptor, func(content io.Reader, _ *http.Response) error {
-			var persistErr error
-			ref, persistErr = store.Persist(bounded, task, artifact, content)
-			return persistErr
-		})
-		return ref, err
+		return persistTaskMedia(bounded, task, artifact, store, descriptor)
 	})
 	if err != nil {
 		return nil, err

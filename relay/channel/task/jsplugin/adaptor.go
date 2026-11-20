@@ -574,16 +574,19 @@ func (a *TaskAdaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, bod
 	// idle timeout, so the upstream request is bounded by the submission
 	// deadline of the host protocols (TASK_PLUGIN_PROTOCOL_TIMEOUT_SECONDS).
 	var release context.CancelFunc
-	if a.submit != nil && a.submit.ResponseType == "sse" && relaysSubmitEvents(c) {
-		detached := c.Request.WithContext(context.WithoutCancel(c.Request.Context()))
+	if _, native := c.Get(pluginruntime.ContextKeyPinnedRoute); native && a.submit != nil && a.submit.ResponseType == "sse" {
+		original := c.Request
+		if relaysSubmitEvents(c, info) {
+			original = original.WithContext(context.WithoutCancel(original.Context()))
+		}
 		timeout := time.Duration(constant.TaskPluginProtocolTimeoutSeconds) * time.Second
 		if timeout <= 0 {
 			timeout = 10 * time.Minute
 		}
 		var upstream context.Context
-		upstream, release = context.WithTimeout(detached.Context(), timeout)
-		c.Request = detached.WithContext(upstream)
-		defer func() { c.Request = detached }()
+		upstream, release = context.WithTimeout(original.Context(), timeout)
+		c.Request = original.WithContext(upstream)
+		defer func() { c.Request = original }()
 	}
 	if a.submit != nil && strings.TrimSpace(a.submit.Method) != "" {
 		originalMethod := c.Request.Method
@@ -616,9 +619,9 @@ func (b deadlineBody) Close() error {
 
 // relaysSubmitEvents reports whether the submission came through a native
 // route, whose client receives an SSE reply event by event.
-func relaysSubmitEvents(c *gin.Context) bool {
+func relaysSubmitEvents(c *gin.Context, info *relaycommon.RelayInfo) bool {
 	_, native := c.Get(pluginruntime.ContextKeyPinnedRoute)
-	return native
+	return native && !service.IsGeneratedMediaTask(info.Action)
 }
 
 // submitReplyLimit bounds the submit reply and each of its SSE events. A
@@ -667,7 +670,7 @@ func (a *TaskAdaptor) ParseResponse(c *gin.Context, resp *http.Response, info *r
 		// upstream may already have performed billable work.
 		defer resp.Body.Close()
 		var client *gin.Context
-		if relaysSubmitEvents(c) {
+		if relaysSubmitEvents(c, info) {
 			client = c
 		}
 		var stopped bool
@@ -1371,8 +1374,22 @@ func RendererArtifacts(ctx context.Context, plugin *pluginruntime.LoadedPlugin, 
 		return nil, fmt.Errorf("task artifact projection is unavailable")
 	}
 	var deliveries map[string]service.TaskVideoDelivery
-	if service.ResolveTaskVideoDelivery != nil && service.GetTaskArtifactStore().Enabled() {
+	var images map[string]string
+	ossRequired := service.TaskArtifactOSSRequired()
+	if ossRequired && slices.ContainsFunc(artifacts, func(artifact channel.TaskArtifact) bool { return artifact.Type == "video" }) {
+		if service.ResolveTaskVideoDelivery == nil {
+			return nil, service.ErrTaskVideoDelivery
+		}
 		deliveries, err = service.ResolveTaskVideoDelivery(ctx, task)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if ossRequired && slices.ContainsFunc(artifacts, func(artifact channel.TaskArtifact) bool { return artifact.Type == "image" }) {
+		if service.ResolveTaskImageDelivery == nil {
+			return nil, service.ErrTaskImageDelivery
+		}
+		images, err = service.ResolveTaskImageDelivery(ctx, task)
 		if err != nil {
 			return nil, err
 		}
@@ -1381,6 +1398,12 @@ func RendererArtifacts(ctx context.Context, plugin *pluginruntime.LoadedPlugin, 
 		var artifactURL string
 		if delivery, ok := deliveries[artifact.Key]; ok {
 			artifactURL = delivery.URL
+		} else if signed := images[artifact.Key]; signed != "" {
+			artifactURL = signed
+		} else if ossRequired && artifact.Type == "video" {
+			return nil, service.ErrTaskVideoDelivery
+		} else if ossRequired && artifact.Type == "image" {
+			return nil, service.ErrTaskImageDelivery
 		} else {
 			var urlErr error
 			artifactURL, urlErr = contentURL(task.TaskID, artifact.Key)

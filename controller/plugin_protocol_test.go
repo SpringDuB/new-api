@@ -3,7 +3,6 @@ package controller
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -1662,52 +1661,67 @@ func imageProtocolTestOutcome(info *relaycommon.RelayInfo, status model.TaskStat
 	return &taskSubmissionOutcome{Result: &relay.TaskSubmitResult{}, Task: task, RelayInfo: info}
 }
 
-// The OpenAI Images protocol answers synchronously: an immediate result is
-// rendered by the plugin, `created` is host-filled, and response_format
-// b64_json inlines each URL while keeping the URL.
-func TestServeTaskPluginImageProtocolRendersImmediateResultAndInlinesBase64(t *testing.T) {
+func TestServeTaskPluginImageProtocolReturnsStoredImages(t *testing.T) {
+	ossURL := configureImageDeliveryTestOSS(t)
 	for _, tc := range []struct {
 		name, responseFormat string
-		downloadErr          error
-		wantB64              []any
+		source               string
+		wantStatus           int
+		multipart            bool
+		storageDisabled      bool
 	}{
-		{"url", "", nil, []any{nil, nil}},
-		{"b64_json", "b64_json", nil, []any{"QUFB", "QUFB"}},
-		{"b64_json download failure keeps the URL", "b64_json", errors.New("blocked"), []any{nil, nil}},
+		{"url", "", "data:image/png;base64," + testArtifactPNG, http.StatusOK, false, false},
+		{"b64_json", "b64_json", "data:image/png;base64," + testArtifactPNG, http.StatusOK, false, false},
+		{"multipart b64_json", "b64_json", "data:image/png;base64," + testArtifactPNG, http.StatusOK, true, false},
+		{"invalid content", "b64_json", "data:text/plain;base64,dmVuZG9yLXNlY3JldA==", http.StatusBadGateway, false, false},
+		{"storage disabled", "", "https://upstream.example/image.png", http.StatusOK, false, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			pinned := imageProtocolTestEndpoint(t)
 			c, recorder := newImageProtocolTestContext(tc.responseFormat)
-			deps := pluginProtocolTestDeps()
-			downloads := 0
-			deps.downloadImage = func(url string) (string, string, error) {
-				downloads++
-				if tc.downloadErr != nil {
-					return "", "", tc.downloadErr
-				}
-				return "image/png", "QUFB", nil
+			if tc.multipart {
+				value, _ := c.Get(pluginruntime.ContextKeyProtocolRequest)
+				request := value.(pluginruntime.ProtocolRequestContext)
+				request.Operation = "edit"
+				request.Body = map[string]any{"kind": "multipart", "fields": map[string][]string{"response_format": {tc.responseFormat}}}
+				c.Set(pluginruntime.ContextKeyProtocolRequest, request)
 			}
+			if tc.storageDisabled {
+				t.Setenv("TASK_ARTIFACT_STORE_MODE", "upstream")
+			}
+			deps := pluginProtocolTestDeps()
 			deps.submit = func(_ *gin.Context, info *relaycommon.RelayInfo) (*taskSubmissionOutcome, *dto.TaskError) {
-				return imageProtocolTestOutcome(info, model.TaskStatusSuccess, "https://cdn.example/1.png", "https://cdn.example/2.png"), nil
+				return imageProtocolTestOutcome(info, model.TaskStatusSuccess, tc.source, tc.source), nil
 			}
 			serveTaskPluginImageProtocol(c, pinned, deps)
-			require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+			require.Equal(t, tc.wantStatus, recorder.Code, recorder.Body.String())
+			if tc.storageDisabled {
+				assert.Contains(t, recorder.Body.String(), tc.source)
+				assert.NotContains(t, recorder.Body.String(), "x-oss-signature")
+				return
+			}
+			assert.NotContains(t, recorder.Body.String(), tc.source)
+			assert.NotContains(t, recorder.Body.String(), "vendor")
+			if tc.wantStatus != http.StatusOK {
+				assert.NotContains(t, recorder.Body.String(), "x-oss-signature")
+				assert.NotContains(t, recorder.Body.String(), "b64_json")
+				return
+			}
 			var response map[string]any
 			require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
 			assert.Equal(t, float64(1_710_000_000), response["created"])
-			assert.Equal(t, "test", response["vendor"], "plugin fields are preserved")
 			data, ok := response["data"].([]any)
 			require.True(t, ok)
 			require.Len(t, data, 2)
-			for index, entry := range data {
+			for _, entry := range data {
 				item := entry.(map[string]any)
-				assert.Equal(t, fmt.Sprintf("https://cdn.example/%d.png", index+1), item["url"])
-				assert.Equal(t, tc.wantB64[index], item["b64_json"])
-			}
-			if tc.responseFormat == "b64_json" {
-				assert.Equal(t, 2, downloads)
-			} else {
-				assert.Zero(t, downloads)
+				if tc.responseFormat == "b64_json" {
+					assert.Equal(t, map[string]any{"b64_json": testArtifactPNG}, item)
+					continue
+				}
+				assert.Contains(t, item["url"], ossURL)
+				assert.Contains(t, item["url"], "x-oss-signature=")
+				assert.NotContains(t, item, "b64_json")
 			}
 		})
 	}
@@ -1717,6 +1731,7 @@ func TestServeTaskPluginImageProtocolRendersImmediateResultAndInlinesBase64(t *t
 // terminal; a failure and the protocol timeout become OpenAI error envelopes
 // while the durable task stays with the background poller.
 func TestServeTaskPluginImageProtocolWaitsForAsynchronousTask(t *testing.T) {
+	ossURL := configureImageDeliveryTestOSS(t)
 	for _, tc := range []struct {
 		name        string
 		terminal    model.TaskStatus
@@ -1725,7 +1740,7 @@ func TestServeTaskPluginImageProtocolWaitsForAsynchronousTask(t *testing.T) {
 		wantMessage string
 	}{
 		{"success", model.TaskStatusSuccess, http.StatusOK, "", ""},
-		{"failure", model.TaskStatusFailure, http.StatusBadRequest, "image_generation_failed", "DataInspectionFailed"},
+		{"failure", model.TaskStatusFailure, http.StatusBadRequest, "image_generation_failed", "Image generation failed"},
 		{"timeout", "", http.StatusGatewayTimeout, "task_timeout", "still running"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1746,7 +1761,7 @@ func TestServeTaskPluginImageProtocolWaitsForAsynchronousTask(t *testing.T) {
 				}
 				task.Status = tc.terminal
 				task.FailReason = "DataInspectionFailed: see https://private.example.com/jobs/1"
-				task.SetData(map[string]any{"images": []string{"https://cdn.example/polled.png"}})
+				task.SetData(map[string]any{"images": []string{"data:image/png;base64," + testArtifactPNG}})
 				return nil
 			}
 			deps.submit = func(_ *gin.Context, info *relaycommon.RelayInfo) (*taskSubmissionOutcome, *dto.TaskError) {
@@ -1758,7 +1773,8 @@ func TestServeTaskPluginImageProtocolWaitsForAsynchronousTask(t *testing.T) {
 			require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
 			if tc.wantStatus == http.StatusOK {
 				assert.GreaterOrEqual(t, polls, 3)
-				assert.Equal(t, []any{map[string]any{"url": "https://cdn.example/polled.png"}}, response["data"])
+				assert.Contains(t, recorder.Body.String(), ossURL)
+				assert.Contains(t, recorder.Body.String(), "x-oss-signature=")
 				return
 			}
 			errorBody := response["error"].(map[string]any)
@@ -1769,8 +1785,7 @@ func TestServeTaskPluginImageProtocolWaitsForAsynchronousTask(t *testing.T) {
 	}
 }
 
-// Submission failures use the OpenAI error envelope and surface a DashScope
-// {code, message} failure body as a readable vendor message.
+// Submission failures use the OpenAI error envelope without vendor details.
 func TestServeTaskPluginImageProtocolSubmissionErrorUsesOpenAIEnvelope(t *testing.T) {
 	pinned := imageProtocolTestEndpoint(t)
 	c, recorder := newImageProtocolTestContext("")
@@ -1783,9 +1798,9 @@ func TestServeTaskPluginImageProtocolSubmissionErrorUsesOpenAIEnvelope(t *testin
 	var response map[string]any
 	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
 	errorBody := response["error"].(map[string]any)
-	assert.Equal(t, "InvalidParameter", errorBody["code"])
+	assert.Equal(t, "image_generation_failed", errorBody["code"])
 	assert.Equal(t, "invalid_request_error", errorBody["type"])
-	assert.Contains(t, errorBody["message"], "n must be 1")
+	assert.Contains(t, errorBody["message"], "Image generation failed")
 	assert.NotContains(t, errorBody["message"], "request_id")
 }
 

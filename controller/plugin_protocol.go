@@ -41,12 +41,9 @@ type pluginProtocolBridgeDeps struct {
 	admissionTimeout   time.Duration
 	getByTaskId        func(int, string) (*model.Task, bool, error)
 	resolvePlugin      func(constant.TaskPlatform) (*pluginruntime.LoadedPlugin, *pluginruntime.RoutingGeneration, bool)
-	// imagePollInterval, pollTask and downloadImage serve the synchronous
-	// OpenAI Images protocol: an asynchronous upstream image task is polled
-	// inside the request, and b64_json responses download each image URL.
+	// An asynchronous upstream image task is polled inside the request.
 	imagePollInterval time.Duration
 	pollTask          func(context.Context, *model.Task) error
-	downloadImage     func(url string) (mimeType string, base64Data string, err error)
 }
 
 // taskPluginImagePollInterval paces the in-request polling of asynchronous
@@ -90,7 +87,6 @@ func defaultPluginProtocolBridgeDeps() pluginProtocolBridgeDeps {
 		resolvePlugin:      resolveTaskPluginForProtocolRetrieve,
 		imagePollInterval:  taskPluginImagePollInterval,
 		pollTask:           pollTaskPluginImageTask,
-		downloadImage:      service.GetImageFromUrl,
 	}
 }
 
@@ -146,9 +142,6 @@ func (d pluginProtocolBridgeDeps) withDefaults() pluginProtocolBridgeDeps {
 	}
 	if d.pollTask == nil {
 		d.pollTask = defaults.pollTask
-	}
-	if d.downloadImage == nil {
-		d.downloadImage = defaults.downloadImage
 	}
 	return d
 }
@@ -505,7 +498,7 @@ func streamTaskPluginProtocol(
 				loadElapsed.Milliseconds(),
 			)
 		}
-		view, viewErr := service.BuildTaskPluginDeliveryView(observationContext, task)
+		view, viewErr := taskPluginResponsesView(task)
 		if viewErr != nil {
 			logger.LogError(c, common.LogText("build task protocol view failed: %s", viewErr.Error()))
 			writeTaskPluginProtocolFailure(c, machine, lastStatus)
@@ -851,7 +844,7 @@ func renderTaskPluginProtocolFinalResponse(
 	machine *relay.PluginResponsesMachine,
 	deps pluginProtocolBridgeDeps,
 ) (map[string]any, time.Duration, error) {
-	view, err := service.BuildTaskPluginDeliveryView(ctx, task)
+	view, err := taskPluginResponsesView(task)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -882,6 +875,11 @@ func renderTaskPluginProtocolFinalResponse(
 	if err != nil {
 		return nil, hookElapsed, err
 	}
+	if service.TaskArtifactOSSRequired() && service.IsGeneratedMediaTask(task.Action) {
+		if fields, ok := payload.(map[string]any); ok {
+			delete(fields, "metadata")
+		}
+	}
 	response, err := machine.FinalResponse(payload, string(task.Status))
 	if err != nil {
 		return nil, hookElapsed, err
@@ -897,7 +895,7 @@ func renderTaskPluginProtocolEventsResponse(
 	machine *relay.PluginResponsesMachine,
 	deps pluginProtocolBridgeDeps,
 ) (map[string]any, time.Duration, error) {
-	view, err := service.BuildTaskPluginDeliveryView(ctx, task)
+	view, err := taskPluginResponsesView(task)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -1168,6 +1166,17 @@ func taskPluginProtocolJSONValue(view dto.TaskView) (any, error) {
 		return nil, err
 	}
 	return pluginruntime.RawJSON(encoded), nil
+}
+
+func taskPluginResponsesView(task *model.Task) (dto.TaskView, error) {
+	if service.TaskArtifactOSSRequired() && service.IsGeneratedMediaTask(task.Action) {
+		public := *task
+		public.Data = nil
+		public.Platform = "media"
+		public.FailReason = ""
+		return service.BuildTaskPluginView(&public)
+	}
+	return service.BuildTaskPluginView(task)
 }
 
 func taskPluginProtocolRendererContext(

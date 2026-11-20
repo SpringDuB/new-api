@@ -5,13 +5,15 @@ import (
 	"context"
 	"errors"
 	"io"
-	"net/http"
+	"slices"
 	"sync"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
+	relaydto "github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/bytedance/gopkg/util/gopool"
@@ -43,6 +45,7 @@ type TaskArtifactStore interface {
 var ErrTaskArtifactStoreDisabled = errors.New("task artifact store is disabled")
 
 var ErrTaskVideoDelivery = errors.New("video delivery failed")
+var ErrTaskImageDelivery = errors.New("image delivery failed")
 
 type disabledArtifactStore struct{}
 
@@ -83,13 +86,108 @@ type TaskVideoDelivery struct {
 }
 
 func (d TaskVideoDelivery) Serve(c *gin.Context, task *model.Task) error {
-	if d.Ref != nil {
-		return d.Store.Serve(c, task, d.Ref)
+	if d.Ref == nil {
+		return ErrTaskVideoDelivery
 	}
-	c.Header("Cache-Control", "private, no-store")
-	c.Header("Referrer-Policy", "no-referrer")
-	c.Redirect(http.StatusTemporaryRedirect, d.URL)
-	return nil
+	return d.Store.Serve(c, task, d.Ref)
+}
+
+func PrimaryTaskVideoKey(deliveries map[string]TaskVideoDelivery) string {
+	if _, ok := deliveries["video"]; ok {
+		return "video"
+	}
+	key := ""
+	for candidate := range deliveries {
+		if key == "" || candidate < key {
+			key = candidate
+		}
+	}
+	return key
+}
+
+func IsGeneratedMediaTask(action string) bool {
+	return model.IsImageTaskAction(action) || IsVideoTask(action)
+}
+
+func IsVideoTask(action string) bool {
+	switch constant.NormalizeTaskAction(action) {
+	case constant.TaskActionImageToVideo, constant.TaskActionTextToVideo, constant.TaskActionFirstTailToVideo,
+		constant.TaskActionReferenceToVideo, constant.TaskActionRemix, "video_generation":
+		return true
+	default:
+		return false
+	}
+}
+
+type PublicVideoTask struct {
+	*relaydto.OpenAIVideo
+	URL    string            `json:"url,omitempty"`
+	Videos map[string]string `json:"videos,omitempty"`
+}
+
+func BuildPublicVideoTask(ctx context.Context, task *model.Task) (PublicVideoTask, error) {
+	response := PublicVideoTask{OpenAIVideo: task.ToOpenAIVideo()}
+	if task.Status == model.TaskStatusFailure {
+		response.Error = &relaydto.OpenAIVideoError{Code: "video_generation_failed", Message: "Video generation failed"}
+	}
+	if task.Status != model.TaskStatusSuccess {
+		return response, nil
+	}
+	if ResolveTaskVideoDelivery == nil {
+		return response, ErrTaskVideoDelivery
+	}
+	deliveries, err := ResolveTaskVideoDelivery(ctx, task)
+	primary := PrimaryTaskVideoKey(deliveries)
+	if err != nil || primary == "" {
+		return response, ErrTaskVideoDelivery
+	}
+	response.URL = deliveries[primary].URL
+	if len(deliveries) > 1 {
+		response.Videos = make(map[string]string, len(deliveries))
+		for key, delivery := range deliveries {
+			response.Videos[key] = delivery.URL
+		}
+	}
+	return response, nil
+}
+
+// ResolveTaskImageDelivery returns stored URLs keyed by the task's projected
+// image artifacts. The download stays inside the host, as with video delivery.
+var ResolveTaskImageDelivery func(context.Context, *model.Task) (map[string]string, error)
+
+type PublicImageTask struct {
+	ID     string         `json:"id"`
+	TaskID string         `json:"task_id"`
+	Status string         `json:"status"`
+	Model  string         `json:"model"`
+	Data   []TaskImageURL `json:"data,omitempty"`
+}
+
+type TaskImageURL struct {
+	URL string `json:"url"`
+}
+
+func BuildPublicImageTask(ctx context.Context, task *model.Task) (PublicImageTask, error) {
+	response := PublicImageTask{ID: task.TaskID, TaskID: task.TaskID, Status: string(task.Status), Model: task.Properties.OriginModelName}
+	if task.Status != model.TaskStatusSuccess {
+		return response, nil
+	}
+	if ResolveTaskImageDelivery == nil {
+		return response, ErrTaskImageDelivery
+	}
+	urls, err := ResolveTaskImageDelivery(ctx, task)
+	if err != nil || len(urls) == 0 {
+		return response, ErrTaskImageDelivery
+	}
+	keys := make([]string, 0, len(urls))
+	for key := range urls {
+		keys = append(keys, key)
+	}
+	slices.Sort(keys)
+	for _, key := range keys {
+		response.Data = append(response.Data, TaskImageURL{URL: urls[key]})
+	}
+	return response, nil
 }
 
 var taskArtifactArchiveSlots = make(chan struct{}, 2)
@@ -247,6 +345,11 @@ func init() {
 	_ = system_setting.LoadTaskArtifactStoreConfig()
 }
 
+// TaskArtifactOSSRequired remains true when OSS is selected but unavailable.
+func TaskArtifactOSSRequired() bool {
+	return system_setting.LoadTaskArtifactStoreConfig().Mode == system_setting.TaskArtifactStoreModeOSS
+}
+
 // GetTaskArtifactStore applies the current administrator storage configuration.
 func GetTaskArtifactStore() TaskArtifactStore {
 	config := system_setting.LoadTaskArtifactStoreConfig()
@@ -257,7 +360,7 @@ func GetTaskArtifactStore() TaskArtifactStore {
 	}
 	taskArtifactStoreConfig = config
 	taskArtifactStore = &disabledArtifactStore{}
-	if config.Mode == system_setting.TaskArtifactStoreModeOSS {
+	if config.Mode == system_setting.TaskArtifactStoreModeOSS && system_setting.ValidateTaskArtifactStoreConfig(config) == nil {
 		if store, err := newOSSArtifactStore(config, nil); err == nil {
 			taskArtifactStore = store
 		}

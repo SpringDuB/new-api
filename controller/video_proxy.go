@@ -85,21 +85,37 @@ func VideoProxy(c *gin.Context) {
 			fmt.Sprintf("Task is not completed yet, current status: %s", task.Status))
 		return
 	}
+	if !service.TaskArtifactOSSRequired() {
+		descriptor := &relaychannel.TaskContentRequest{URL: task.GetResultURL(), Method: c.Request.Method, Credentialless: true}
+		if taskHasPluginExecution(task) {
+			artifacts, projectionErr := projectTaskArtifacts(task)
+			if projectionErr == nil {
+				for _, artifact := range artifacts {
+					if artifact.Type != "video" {
+						continue
+					}
+					if adaptor, err := initTaskArtifactAdaptor(task); err == nil {
+						if provider, ok := adaptor.(relaychannel.TaskContentRequestProvider); ok {
+							if upstream, err := provider.BuildContentRequest(c.Request.Context(), task, artifact.Key, relaychannel.TaskArtifactClientRequest{Method: c.Request.Method, Headers: taskArtifactClientHeaders(c.Request.Header)}); err == nil && upstream != nil {
+								descriptor = upstream
+							}
+						}
+					}
+					break
+				}
+			}
+		}
+		if err := proxyTaskMedia(c, task, descriptor); err != nil {
+			writeTaskMediaProxyError(c, err)
+		}
+		return
+	}
 	deliveries, err := resolveTaskVideoDelivery(c.Request.Context(), task)
 	if err != nil {
 		writeTaskMediaProxyError(c, err)
 		return
 	}
-	primaryKey := ""
-	for key := range deliveries {
-		if key == "video" {
-			primaryKey = key
-			break
-		}
-		if primaryKey == "" || key < primaryKey {
-			primaryKey = key
-		}
-	}
+	primaryKey := service.PrimaryTaskVideoKey(deliveries)
 	if delivery, ok := deliveries[primaryKey]; ok {
 		if err := delivery.Serve(c, task); err != nil {
 			writeTaskMediaProxyError(c, err)
@@ -107,50 +123,7 @@ func VideoProxy(c *gin.Context) {
 		return
 	}
 
-	var descriptor *relaychannel.TaskContentRequest
-	if taskHasPluginExecution(task) {
-		artifacts, projectionErr := projectTaskArtifacts(task)
-		if projectionErr == nil {
-			for _, artifact := range artifacts {
-				if artifact.Type != "video" {
-					continue
-				}
-				adaptor, adaptorErr := initTaskArtifactAdaptor(task)
-				if adaptorErr == nil {
-					if provider, ok := adaptor.(relaychannel.TaskContentRequestProvider); ok {
-						descriptor, adaptorErr = provider.BuildContentRequest(c.Request.Context(), task, artifact.Key, relaychannel.TaskArtifactClientRequest{
-							Method:  c.Request.Method,
-							Headers: taskArtifactClientHeaders(c.Request.Header),
-						})
-					}
-				}
-				if adaptorErr != nil {
-					descriptor = nil
-				}
-				break
-			}
-		} else {
-			logger.LogWarn(c.Request.Context(), common.LogText("Failed to project plugin video for task %s", taskID))
-		}
-	}
-	if descriptor == nil {
-		resultURL := task.GetResultURL()
-		if isTaskMediaFallbackLoop(resultURL, task.TaskID) {
-			writeTaskMediaProxyError(c, &taskMediaProxyError{
-				status: http.StatusGone, code: "artifact_gone",
-				message: "Artifact content is no longer available",
-			})
-			return
-		}
-		descriptor = &relaychannel.TaskContentRequest{
-			URL:            resultURL,
-			Method:         c.Request.Method,
-			Credentialless: true,
-		}
-	}
-	if err := proxyTaskMedia(c, task, descriptor); err != nil {
-		writeTaskMediaProxyError(c, err)
-	}
+	writeTaskMediaProxyError(c, service.ErrTaskVideoDelivery)
 }
 
 func proxyTaskMedia(c *gin.Context, task *model.Task, descriptor *relaychannel.TaskContentRequest) error {

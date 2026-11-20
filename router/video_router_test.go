@@ -7,6 +7,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/plugins"
@@ -15,8 +16,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestGetOpenAIVideoRouteRendersJimengTask(t *testing.T) {
+func TestOpenAIVideoRouteReturnsUpstreamWithStorageOff(t *testing.T) {
+	require.NoError(t, i18n.Init())
 	gin.SetMode(gin.TestMode)
+	t.Setenv("TASK_ARTIFACT_STORE_MODE", "upstream")
 
 	previousDB := model.DB
 	previousDatabaseType := common.MainDatabaseType()
@@ -105,23 +108,7 @@ func TestGetOpenAIVideoRouteRendersJimengTask(t *testing.T) {
 	engine.ServeHTTP(recorder, request)
 
 	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
-	var response struct {
-		ID          string `json:"id"`
-		Object      string `json:"object"`
-		Status      string `json:"status"`
-		Progress    int    `json:"progress"`
-		CreatedAt   int64  `json:"created_at"`
-		CompletedAt int64  `json:"completed_at"`
-	}
-	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
-	assert.Equal(t, "task_jimeng_public", response.ID)
-	assert.Equal(t, "video", response.Object)
-	assert.Equal(t, "completed", response.Status)
-	assert.Equal(t, 100, response.Progress)
-	assert.Equal(t, int64(1710000000), response.CreatedAt)
-	assert.Equal(t, int64(1710000060), response.CompletedAt)
-	assert.NotContains(t, recorder.Body.String(), "cdn.example")
-	assert.NotContains(t, recorder.Body.String(), "jimeng-private-1")
+	assert.JSONEq(t, string(task.Data), recorder.Body.String())
 
 	for _, testCase := range []struct {
 		name          string
@@ -131,7 +118,7 @@ func TestGetOpenAIVideoRouteRendersJimengTask(t *testing.T) {
 	}{
 		{name: "missing credential rejected", wantStatus: http.StatusUnauthorized},
 		{name: "access rejected", query: "?access=not-a-video-credential", wantStatus: http.StatusUnauthorized},
-		{name: "bearer accepted", authorization: "Bearer sk-jimengfetch", wantStatus: http.StatusOK},
+		{name: "bearer accepted without storage", authorization: "Bearer sk-jimengfetch", wantStatus: http.StatusOK},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			request := httptest.NewRequest(
@@ -145,6 +132,8 @@ func TestGetOpenAIVideoRouteRendersJimengTask(t *testing.T) {
 			recorder := httptest.NewRecorder()
 			engine.ServeHTTP(recorder, request)
 			assert.Equal(t, testCase.wantStatus, recorder.Code, recorder.Body.String())
+			assert.Empty(t, recorder.Header().Get("Location"))
+			assert.NotContains(t, recorder.Body.String(), "data:video")
 			if testCase.wantStatus == http.StatusOK {
 				assert.Equal(t, "data", recorder.Body.String())
 			}
@@ -152,8 +141,10 @@ func TestGetOpenAIVideoRouteRendersJimengTask(t *testing.T) {
 	}
 }
 
-func TestGetOpenAIVideoRouteHandsNativeXAITaskToPluginQuery(t *testing.T) {
+func TestVideoQueryNeverReturnsProviderSnapshot(t *testing.T) {
+	require.NoError(t, i18n.Init())
 	setupRelayRouterTestDB(t)
+	t.Setenv("TASK_ARTIFACT_STORE_MODE", "oss") // Enabled with invalid configuration: no upstream fallback.
 	require.NoError(t, model.DB.AutoMigrate(&model.Channel{}, &model.Task{}))
 	require.NoError(t, model.DB.Create(&model.User{Id: 92, Username: "xai-fetch-user", Status: common.UserStatusEnabled, Group: "default", Quota: 100}).Error)
 	require.NoError(t, model.DB.Create(&model.Token{UserId: 92, Key: "xaifetch", Status: common.TokenStatusEnabled, ExpiredTime: -1, UnlimitedQuota: true}).Error)
@@ -162,6 +153,7 @@ func TestGetOpenAIVideoRouteHandsNativeXAITaskToPluginQuery(t *testing.T) {
 			CreatedAt:  1710000000,
 			UpdatedAt:  1710000060,
 			TaskID:     taskID,
+			Action:     constant.TaskActionTextToVideo,
 			Platform:   constant.TaskPlatform("xai"),
 			UserId:     92,
 			Group:      "default",
@@ -199,30 +191,17 @@ func TestGetOpenAIVideoRouteHandsNativeXAITaskToPluginQuery(t *testing.T) {
 	defaultPluginDispatcher.registry = registry
 	t.Cleanup(func() { defaultPluginDispatcher.registry = previousRegistry })
 
-	for _, testCase := range []struct {
-		taskID     string
-		wantStatus string
-		wantObject any
-	}{
-		// Submitted on the xAI route: xAI's own query response.
-		{taskID: "task_xai_native", wantStatus: "done"},
-		// The same under /xai.
-		{taskID: "task_xai_pinned", wantStatus: "done"},
-		// Submitted through POST /v1/videos: the OpenAI video object.
-		{taskID: "task_xai_openai", wantStatus: "completed", wantObject: "video"},
-	} {
-		t.Run(testCase.taskID, func(t *testing.T) {
-			request := httptest.NewRequest(http.MethodGet, "/v1/videos/"+testCase.taskID, nil)
+	for _, taskID := range []string{"task_xai_native", "task_xai_pinned", "task_xai_openai"} {
+		t.Run(taskID, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodGet, "/v1/videos/"+taskID, nil)
 			request.Header.Set("Authorization", "Bearer sk-xaifetch")
 			recorder := httptest.NewRecorder()
 			engine.ServeHTTP(recorder, request)
 
-			require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
-			var response map[string]any
-			require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
-			assert.Equal(t, testCase.wantStatus, response["status"])
-			assert.Equal(t, testCase.wantObject, response["object"])
+			assert.GreaterOrEqual(t, recorder.Code, 500, recorder.Body.String())
+			assert.Empty(t, recorder.Header().Get("Location"))
 			assert.NotContains(t, recorder.Body.String(), "xai-private-1")
+			assert.NotContains(t, recorder.Body.String(), "cdn.example")
 		})
 	}
 }

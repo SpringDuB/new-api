@@ -7,6 +7,8 @@ import (
 	"time"
 )
 
+const ImageJSONAsStreamKey = "image_json_as_stream"
+
 type StreamEndReason string
 
 const (

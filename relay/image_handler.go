@@ -21,8 +21,9 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types.NewAPIError) {
+func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo, prepareDelivery func() *types.NewAPIError) (newAPIError *types.NewAPIError) {
 	info.InitChannelMeta(c)
+	c.Set(relaycommon.ImageJSONAsStreamKey, false)
 	info.BillingImageCount = nil
 	info.ImageRequestCount = 0
 
@@ -157,6 +158,11 @@ func ImageHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *type
 		// reset status code 重置状态码
 		service.ResetStatusCode(newAPIError, statusCodeMappingStr)
 		return newAPIError
+	}
+	if prepareDelivery != nil {
+		if deliveryErr := prepareDelivery(); deliveryErr != nil {
+			return deliveryErr
+		}
 	}
 
 	// The log content shows the settled count: the count the handler derived

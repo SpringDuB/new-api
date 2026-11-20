@@ -103,14 +103,7 @@ func serveTaskPluginImageProtocol(c *gin.Context, pinned pluginruntime.PinnedEnd
 		}
 	}
 	if task.Status == model.TaskStatusFailure {
-		reason := strings.TrimSpace(task.FailReason)
-		if reason == "" {
-			reason = "image generation failed"
-		}
-		// The fail reason comes from the upstream, so mask the channel address in it.
-		taskErr = service.TaskErrorWrapper(errors.New(reason), "image_generation_failed", http.StatusBadRequest, common.UpstreamAddresses(c)...)
-		taskErr.LocalError = true
-		respondTaskPluginImageError(c, taskErr)
+		respondPluginProtocolError(c, http.StatusBadRequest, "image_generation_failed", "Image generation failed")
 		return
 	}
 	view, err := service.BuildTaskPluginView(task)
@@ -132,7 +125,7 @@ func serveTaskPluginImageProtocol(c *gin.Context, pinned pluginruntime.PinnedEnd
 		return
 	}
 	response, ok := payload.(map[string]any)
-	data, hasData := response["data"].([]any)
+	_, hasData := response["data"].([]any)
 	if !ok || !hasData {
 		logger.LogError(c, common.LogText("task protocol image render hook must return an object with a data array"))
 		respondPluginProtocolError(c, http.StatusInternalServerError, "task_protocol_error", "Task protocol request failed")
@@ -145,27 +138,34 @@ func serveTaskPluginImageProtocol(c *gin.Context, pinned pluginruntime.PinnedEnd
 		}
 		response["created"] = createdAt
 	}
-	// response_format is host-owned: the plugin renders upstream URLs and the
-	// host inlines each image when the client asked for Base64.
-	if taskPluginImageResponseFormat(protocolRequest) == "b64_json" {
-		for _, entry := range data {
-			item, isObject := entry.(map[string]any)
-			if !isObject {
-				continue
-			}
-			url, _ := item["url"].(string)
-			if existing, _ := item["b64_json"].(string); strings.TrimSpace(url) == "" || existing != "" {
-				continue
-			}
-			_, encoded, downloadErr := deps.downloadImage(url)
-			if downloadErr != nil {
-				logger.LogWarn(c, common.LogText("task protocol image download failed; returning the upstream URL instead of b64_json: %s", common.MaskSensitiveInfo(downloadErr.Error(), common.UpstreamAddresses(c)...)))
-				continue
-			}
-			item["b64_json"] = encoded
+	if !service.TaskArtifactOSSRequired() {
+		c.JSON(http.StatusOK, response)
+		return
+	}
+	body, err := common.Marshal(response)
+	format := imageDeliveryFormat{inlineBase64: taskPluginWantsInlineImage(protocolRequest)}
+	if err != nil || writeStoredImages(c, task, service.GetTaskArtifactStore(), body, nil, format) != nil {
+		if task.ResultRetrievable() {
+			c.Header("X-New-Api-Task-Id", task.TaskID)
+		}
+		respondPluginProtocolError(c, http.StatusBadGateway, "image_delivery_failed", "Image delivery failed")
+	}
+}
+
+func taskPluginWantsInlineImage(request pluginruntime.ProtocolRequestContext) bool {
+	body, _ := request.Body.(map[string]any)
+	var format string
+	switch body["kind"] {
+	case string(pluginruntime.BodyJSON):
+		value, _ := body["value"].(map[string]any)
+		format, _ = value["response_format"].(string)
+	case string(pluginruntime.BodyMultipart), string(pluginruntime.BodyForm):
+		fields, _ := body["fields"].(map[string][]string)
+		if values := fields["response_format"]; len(values) > 0 {
+			format = values[0]
 		}
 	}
-	c.JSON(http.StatusOK, response)
+	return strings.EqualFold(strings.TrimSpace(format), "b64_json")
 }
 
 // waitTaskPluginImageTask polls an asynchronous image task inside the client
@@ -208,28 +208,7 @@ func pollTaskPluginImageTask(ctx context.Context, task *model.Task) error {
 	return service.UpdateVideoTasks(ctx, task.Platform, map[int][]string{task.ChannelId: {upstreamID}}, map[string]*model.Task{upstreamID: task})
 }
 
-func taskPluginImageResponseFormat(request pluginruntime.ProtocolRequestContext) string {
-	body, ok := request.Body.(map[string]any)
-	if !ok {
-		return ""
-	}
-	switch body["kind"] {
-	case string(pluginruntime.BodyJSON):
-		value, _ := body["value"].(map[string]any)
-		format, _ := value["response_format"].(string)
-		return strings.TrimSpace(format)
-	case string(pluginruntime.BodyMultipart), string(pluginruntime.BodyForm):
-		fields, _ := body["fields"].(map[string][]string)
-		if values := fields["response_format"]; len(values) > 0 {
-			return strings.TrimSpace(values[0])
-		}
-	}
-	return ""
-}
-
-// respondTaskPluginImageError writes an OpenAI error envelope for the Images
-// API. DashScope failure bodies arrive as JSON {code, message}; their message
-// is surfaced so a client sees the vendor reason instead of raw JSON.
+// respondTaskPluginImageError never serializes upstream error details.
 func respondTaskPluginImageError(c *gin.Context, taskErr *dto.TaskError) {
 	service.RecordRequestPolicyTermination(c, taskSubmissionAPIError(taskErr))
 	status := http.StatusInternalServerError
@@ -238,15 +217,9 @@ func respondTaskPluginImageError(c *gin.Context, taskErr *dto.TaskError) {
 	}
 	code := taskErr.Code
 	message := taskErr.Message
-	var upstream struct {
-		Code    string `json:"code"`
-		Message string `json:"message"`
-	}
-	if common.UnmarshalJsonStr(message, &upstream) == nil && strings.TrimSpace(upstream.Message) != "" {
-		message = upstream.Message
-		if strings.TrimSpace(upstream.Code) != "" {
-			code = upstream.Code
-		}
+	if !taskErr.LocalError {
+		code = "image_generation_failed"
+		message = "Image generation failed"
 	}
 	errorType := "new_api_error"
 	if status < http.StatusInternalServerError {

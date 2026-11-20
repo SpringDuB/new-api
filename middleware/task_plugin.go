@@ -1452,7 +1452,9 @@ func renderTaskPluginQuery(
 		// A presenter with nothing to deliver for the task, such as a file
 		// it has no artifact for, answers like a missing task.
 		status := http.StatusInternalServerError
-		if taskPluginHookDetail(err) == "artifact_not_found" {
+		if errors.Is(err, service.ErrTaskVideoDelivery) || errors.Is(err, service.ErrTaskImageDelivery) {
+			status = http.StatusBadGateway
+		} else if taskPluginHookDetail(err) == "artifact_not_found" {
 			status = http.StatusNotFound
 		}
 		abortTaskPluginRouteError(c, status)
@@ -1468,6 +1470,9 @@ func renderTaskPluginQuery(
 		time.Since(renderStarted).Milliseconds(),
 	)
 	c.Abort()
+	if slices.ContainsFunc(ordered, func(task *model.Task) bool { return service.IsGeneratedMediaTask(task.Action) }) {
+		c.Header("Cache-Control", "private, no-store")
+	}
 	if replyErr := WriteNativeReply(c, http.StatusOK, result); replyErr != nil {
 		logger.LogWarn(c, common.LogText("task_plugin subsystem=query event=render_failed generation=%d plugin=%q renderer=%q err=%q", generation, pinned.Plugin.Meta.Key, renderer, replyErr.Error()))
 		abortTaskPluginRouteError(c, http.StatusInternalServerError)
@@ -1477,6 +1482,29 @@ func renderTaskPluginQuery(
 // BuildTaskPluginQueryResult uses the native query presenter for already
 // authorized tasks. The dashboard and public query route share this boundary.
 func BuildTaskPluginQueryResult(ctx context.Context, plugin *pluginruntime.LoadedPlugin, requestContext pluginruntime.RouteRequestContext, tasks []*model.Task, renderer string, multiple bool) (any, error) {
+	if service.TaskArtifactOSSRequired() && slices.ContainsFunc(tasks, func(task *model.Task) bool { return service.IsGeneratedMediaTask(task.Action) }) {
+		results := make([]any, 0, len(tasks))
+		for _, task := range tasks {
+			var result any
+			var err error
+			switch {
+			case service.IsVideoTask(task.Action):
+				result, err = service.BuildPublicVideoTask(ctx, task)
+			case model.IsImageTaskAction(task.Action):
+				result, err = service.BuildPublicImageTask(ctx, task)
+			default:
+				result = gin.H{"task_id": task.TaskID, "status": task.Status}
+			}
+			if err != nil {
+				return nil, err
+			}
+			results = append(results, result)
+		}
+		if multiple {
+			return results, nil
+		}
+		return results[0], nil
+	}
 	views := make([]dto.TaskView, 0, len(tasks))
 	for _, task := range tasks {
 		view, err := service.BuildTaskPluginDeliveryView(ctx, task)

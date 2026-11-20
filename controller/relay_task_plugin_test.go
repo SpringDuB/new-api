@@ -144,6 +144,7 @@ func TestPresentTaskSubmissionFallbackUsesPersistedPublicID(t *testing.T) {
 func TestPresentTaskSubmissionUsesHostOpenAIVideoCreateReceipt(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", nil)
 	c.Set(pluginruntime.ContextKeyPinnedEndpoint, pluginruntime.PinnedEndpoint{
 		Protocol:  "openai_video",
 		Operation: pluginruntime.HostProtocolOperation{Name: "create"},

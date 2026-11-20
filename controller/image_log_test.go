@@ -443,6 +443,24 @@ export const protocols={openai_video:{decodeRequest(){return {}},render(ctx,task
 	})
 }
 
+func TestDashboardVideoResponseSuppressesHistoricalUpstreamDataWithOSS(t *testing.T) {
+	task := setupGenericTaskTest(t)
+	configureMediaDeliveryTestOSS(t, "video/mp4")
+	task.Action = constant.TaskActionTextToVideo
+	task.Status = model.TaskStatusSubmitted
+	task.PrivateData.Execution = &model.TaskExecutionSnapshot{RequestPath: "/v1/video/generations"}
+	task.PrivateData.Response = &model.TaskResponseSnapshot{Body: []byte(`{"url":"https://provider.example/response.mp4"}`)}
+	task.PrivateData.SubmissionResponse = &model.TaskResponseSnapshot{Body: []byte(`{"vendor":"provider-canary"}`)}
+	task.SetData(map[string]any{"url": "https://provider.example/result.mp4"})
+	require.NoError(t, model.DB.Save(task).Error)
+	c, recorder := imageLogReadContext("/api/task/"+task.TaskID+"/response", task.TaskID, task.UserId, common.RoleCommonUser)
+	GetDashboardTaskResponse(c)
+	require.Equal(t, http.StatusOK, recorder.Code)
+	assert.Contains(t, recorder.Body.String(), `"status":"queued"`)
+	assert.NotContains(t, recorder.Body.String(), "provider.example")
+	assert.NotContains(t, recorder.Body.String(), "provider-canary")
+}
+
 func TestDashboardTaskResponseNeverSubstitutesUpstreamForMissingPlatformResponse(t *testing.T) {
 	task := setupGenericTaskTest(t)
 	task.SetData(map[string]any{"raw": "upstream-canary"})

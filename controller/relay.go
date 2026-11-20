@@ -36,7 +36,7 @@ func relayHandler(c *gin.Context, info *relaycommon.RelayInfo) *types.NewAPIErro
 	var err *types.NewAPIError
 	switch info.RelayMode {
 	case relayconstant.RelayModeImagesGenerations, relayconstant.RelayModeImagesEdits:
-		err = relay.ImageHelper(c, info)
+		err = relayStoredImages(c, info)
 	case relayconstant.RelayModeAudioSpeech:
 		fallthrough
 	case relayconstant.RelayModeAudioTranslation:
@@ -98,6 +98,10 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		if newAPIError != nil {
 			service.RecordRequestPolicyTermination(c, newAPIError)
 			logger.LogError(c, common.LogText("relay error: %s", common.LocalLogPreview(newAPIError.Error())))
+			if c.GetBool(privateImageRelayContextKey) {
+				newAPIError = types.NewOpenAIError(errImageDelivery, types.ErrorCodeBadResponse, newAPIError.StatusCode)
+				c.Header("Cache-Control", "private, no-store")
+			}
 			newAPIError.SetMessage(common.MessageWithRequestId(newAPIError.Error(), requestId))
 			upstreamURLs := common.UpstreamAddresses(c)
 			if relayFormat != types.RelayFormatOpenAIRealtime && c.Writer.Written() &&
@@ -807,6 +811,32 @@ func presentTaskSubmission(c *gin.Context, outcome *taskSubmissionOutcome) {
 	if ratiosJSON, err := common.Marshal(otherRatios); err == nil {
 		c.Header("X-New-Api-Other-Ratios", string(ratiosJSON))
 	}
+	pinnedValue, _ := c.Get(pluginruntime.ContextKeyPinnedEndpoint)
+	pinned, _ := pinnedValue.(pluginruntime.PinnedEndpoint)
+	openAIVideoCreate := pinned.Protocol == "openai_video" && pinned.Operation.Name == "create"
+	if service.TaskArtifactOSSRequired() && (openAIVideoCreate || service.IsVideoTask(outcome.Task.Action)) {
+		response, err := service.BuildPublicVideoTask(c.Request.Context(), outcome.Task)
+		if err != nil {
+			videoProxyError(c, http.StatusBadGateway, "video_delivery_failed", i18n.T(c, i18n.MsgRelayVideoDeliveryFailed))
+			return
+		}
+		if !openAIVideoCreate {
+			response.TaskID = response.ID
+		}
+		c.Header("Cache-Control", "private, no-store")
+		c.JSON(http.StatusOK, response)
+		return
+	}
+	if service.TaskArtifactOSSRequired() && model.IsImageTaskAction(outcome.Task.Action) {
+		response, err := service.BuildPublicImageTask(c.Request.Context(), outcome.Task)
+		if err != nil {
+			respondPluginProtocolError(c, http.StatusBadGateway, "image_delivery_failed", "Image delivery failed")
+			return
+		}
+		c.Header("Cache-Control", "private, no-store")
+		c.JSON(http.StatusOK, response)
+		return
+	}
 	if pinnedValue, exists := c.Get(pluginruntime.ContextKeyPinnedRoute); exists {
 		if pinned, ok := pinnedValue.(pluginruntime.PinnedRoute); ok && pinned.Plugin != nil && pinned.Route.Render != "" {
 			view, err := service.BuildTaskPluginDeliveryView(c.Request.Context(), outcome.Task)
@@ -837,12 +867,9 @@ func presentTaskSubmission(c *gin.Context, outcome *taskSubmissionOutcome) {
 			}
 		}
 	}
-	if pinnedValue, exists := c.Get(pluginruntime.ContextKeyPinnedEndpoint); exists {
-		if pinned, ok := pinnedValue.(pluginruntime.PinnedEndpoint); ok && pinned.Protocol == "openai_video" && pinned.Operation.Name == "create" {
-			diagnostics.present(outcome.Task, "openai_video_create")
-			c.JSON(http.StatusOK, outcome.Task.ToOpenAIVideo())
-			return
-		}
+	if openAIVideoCreate {
+		c.JSON(http.StatusOK, outcome.Task.ToOpenAIVideo())
+		return
 	}
 	createdAt := outcome.Task.CreatedAt
 	if createdAt == 0 {
@@ -864,6 +891,14 @@ func respondTaskSubmissionError(c *gin.Context, taskErr *taskdto.TaskError) {
 	// The client of a relayed event stream already has the vendor's events,
 	// including any error event; nothing can follow them.
 	if c.Writer.Written() {
+		return
+	}
+	if service.IsGeneratedMediaTask(c.GetString("task_action")) {
+		status := taskErr.StatusCode
+		if status < 400 || status > 599 {
+			status = http.StatusBadGateway
+		}
+		respondPluginProtocolError(c, status, "media_generation_failed", "Media generation failed")
 		return
 	}
 	if middleware.RespondTaskPluginError(c, taskErr) {

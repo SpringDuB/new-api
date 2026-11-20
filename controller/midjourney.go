@@ -317,10 +317,19 @@ func GetUserMidjourney(c *gin.Context) {
 	items := model.GetAllUserTask(userId, pageInfo.GetStartIdx(), pageInfo.GetPageSize(), queryParams)
 	total := model.CountAllUserTask(userId, queryParams)
 
-	if setting.MjForwardUrlEnabled {
-		for i, midjourney := range items {
-			midjourney.ImageUrl = system_setting.ServerAddress + "/mj/image/" + midjourney.MjId
-			items[i] = midjourney
+	for _, task := range items {
+		if task.Status == "SUCCESS" && task.ImageUrl != "" {
+			task.ImageUrl = system_setting.ServerAddress + "/mj/image/" + task.MjId
+		} else {
+			task.ImageUrl = ""
+		}
+		task.VideoUrl = ""
+		task.VideoUrls = ""
+		task.ChannelId = 0
+		task.Properties = ""
+		task.Description = ""
+		if task.FailReason != "" {
+			task.FailReason = "Media generation failed"
 		}
 	}
 	pageInfo.SetTotal(int(total))

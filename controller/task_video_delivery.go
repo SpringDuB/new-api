@@ -16,7 +16,6 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	relaychannel "github.com/QuantumNous/new-api/relay/channel"
 	"github.com/QuantumNous/new-api/service"
-	"github.com/gin-gonic/gin"
 	"golang.org/x/sync/singleflight"
 )
 
@@ -31,14 +30,14 @@ func init() {
 func resolveTaskVideoDelivery(ctx context.Context, task *model.Task) (map[string]service.TaskVideoDelivery, error) {
 	deliveries := make(map[string]service.TaskVideoDelivery)
 	store := service.GetTaskArtifactStore()
-	if task == nil || task.Status != model.TaskStatusSuccess || !store.Enabled() {
+	if task == nil || task.Status != model.TaskStatusSuccess {
 		return deliveries, nil
 	}
-	artifacts, err := projectTaskArtifacts(task)
+	artifacts, err := taskStorageArtifacts(task)
 	if err != nil {
 		return nil, service.ErrTaskVideoDelivery
 	}
-	if legacyVideoAvailable(task) {
+	if !taskHasPluginExecution(task) && (legacyVideoAvailable(task) || task.GetResultURL() != "" && len(artifacts) == 0 && !model.IsImageTaskAction(task.Action)) {
 		artifacts = []relaychannel.TaskArtifact{{Key: "video", Type: "video", MimeType: "video/mp4"}}
 	}
 	primaryKey := ""
@@ -113,7 +112,6 @@ func recordTaskVideoDelivery(ctx context.Context, task *model.Task, artifact rel
 		return nil
 	}
 	stored := taskArchivedArtifact(artifact, delivery.Ref)
-	stored.Direct = delivery.Ref == nil
 	if previous := task.PrivateData.ArtifactArchive; previous != nil && previous.Status == model.TaskArchiveCompleted && slices.Contains(previous.Artifacts, stored) {
 		return nil
 	}
@@ -156,7 +154,13 @@ func fetchTaskVideoDelivery(ctx context.Context, task *model.Task, artifact rela
 		}
 	}
 	ref, lookupErr := reader.Resolve(task, artifact.Key)
+	if lookupErr != nil {
+		return delivery, lookupErr
+	}
 	if ref == nil {
+		if !store.Enabled() {
+			return delivery, service.ErrTaskArtifactStoreDisabled
+		}
 		release, err := service.AcquireTaskArtifactTransfer(ctx)
 		if err != nil {
 			return delivery, err
@@ -180,54 +184,8 @@ func fetchTaskVideoDelivery(ctx context.Context, task *model.Task, artifact rela
 		delivery.SourceURLs = []string{descriptor.URL}
 	}
 	if err == nil && descriptor != nil && ref == nil {
-		request, requestErr := http.NewRequestWithContext(ctx, http.MethodGet, "http://task-delivery.invalid/", nil)
-		if requestErr != nil {
-			return delivery, requestErr
-		}
-		c := &gin.Context{Request: request}
-		// Probe with GET rather than HEAD: signed download endpoints frequently
-		// implement only GET. Closing a direct reply avoids downloading it twice.
-		if len(descriptor.ContentPath) == 0 && (strings.HasPrefix(descriptor.URL, "http://") || strings.HasPrefix(descriptor.URL, "https://")) {
-			anonymous := &relaychannel.TaskContentRequest{URL: descriptor.URL, Method: http.MethodGet, Credentialless: true}
-			accepted := false
-			err = consumeTaskMedia(c, task, anonymous, func(content io.Reader, response *http.Response) error {
-				content, err = validatedTaskVideoContent(content, response)
-				if err != nil {
-					return err
-				}
-				accepted = true
-				if response.Request.Response == nil {
-					delivery.URL = descriptor.URL
-					return nil
-				}
-				if lookupErr != nil {
-					return lookupErr
-				}
-				reader = store
-				ref, err = store.Persist(ctx, task, artifact, content)
-				return err
-			})
-			if err == nil && delivery.URL != "" {
-				return delivery, nil
-			}
-			if err != nil && (accepted || descriptor.Credentialless) && ref == nil {
-				return delivery, err
-			}
-		}
-		if ref == nil {
-			if lookupErr != nil {
-				return delivery, lookupErr
-			}
-			err = consumeTaskMedia(c, task, descriptor, func(content io.Reader, response *http.Response) error {
-				content, err = validatedTaskVideoContent(content, response)
-				if err != nil {
-					return err
-				}
-				reader = store
-				ref, err = store.Persist(ctx, task, artifact, content)
-				return err
-			})
-		}
+		reader = store
+		ref, err = persistTaskMedia(ctx, task, artifact, reader, descriptor)
 	}
 	if ref == nil {
 		if err == nil {

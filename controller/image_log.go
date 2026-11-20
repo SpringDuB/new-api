@@ -201,6 +201,8 @@ func beginImageLogCapture(c *gin.Context) func() {
 		}
 		infoValue, _ := c.Get(imageLogRelayInfoContextKey)
 		info, _ := infoValue.(*relaycommon.RelayInfo)
+		manifestValue, _ := c.Get(imageDeliveryManifestContextKey)
+		manifest, delivered := manifestValue.(imageDeliveryManifest)
 		if task == nil {
 			userID := c.GetInt("id")
 			if userID <= 0 {
@@ -211,6 +213,10 @@ func beginImageLogCapture(c *gin.Context) func() {
 				Action:    "image_generation", Status: model.TaskStatusSuccess, Progress: "100%",
 				SubmitTime: started, StartTime: started, FinishTime: time.Now().Unix(),
 				Properties: model.Properties{OriginModelName: common.GetContextKeyString(c, constant.ContextKeyOriginalModel)}}
+			if delivered {
+				task.TaskID = manifest.taskID
+				task.PrivateData.ArtifactArchive = &manifest.archive
+			}
 			if strings.Contains(c.Request.URL.Path, "/edits") {
 				task.Action = "image_edit"
 			}
@@ -246,7 +252,12 @@ func beginImageLogCapture(c *gin.Context) func() {
 		}
 		// Retained plugin tasks keep their refresh/query/content hooks. The
 		// host owns ordinary relays and separately archived inline results.
-		if !taskHasPluginExecution(task) || task.PrivateData.ResultDiscarded {
+		if delivered && manifest.taskID == task.TaskID {
+			task.PrivateData.ImageArtifacts = make([]model.TaskImageArtifact, 0, len(manifest.archive.Artifacts))
+			for _, artifact := range manifest.archive.Artifacts {
+				task.PrivateData.ImageArtifacts = append(task.PrivateData.ImageArtifacts, model.TaskImageArtifact{Key: artifact.Key, MimeType: artifact.MimeType, Stored: true})
+			}
+		} else if !taskHasPluginExecution(task) || task.PrivateData.ResultDiscarded {
 			if task.PrivateData.ResultDiscarded && taskHasPluginExecution(task) {
 				if projected, err := taskStorageArtifacts(task); err == nil {
 					index := 0
@@ -281,6 +292,14 @@ func beginImageLogCapture(c *gin.Context) func() {
 		defer stopWrite()
 		if err := model.UpdateTaskImageLog(writeCtx, task); err != nil {
 			logger.LogTaskArtifactFailure(ctx, task.TaskID, "image_log", 0)
+			return
+		}
+		if delivered && manifest.taskID == task.TaskID {
+			if task.PrivateData.ArtifactArchive == nil {
+				if _, err := model.UpdateTaskArtifactArchive(writeCtx, task, manifest.archive); err != nil {
+					logger.LogTaskArtifactFailure(ctx, task.TaskID, "image_log", 0)
+				}
+			}
 			return
 		}
 		for i := range task.PrivateData.ImageArtifacts {
@@ -333,6 +352,11 @@ func GetDashboardTaskResponse(c *gin.Context) {
 		return
 	}
 	snapshot := task.PrivateData.Response
+	submission := task.PrivateData.SubmissionResponse
+	if service.TaskArtifactOSSRequired() && (service.IsGeneratedMediaTask(task.Action) || task.Platform == "image") {
+		// Historical captures can predate the current storage mode.
+		snapshot, submission = nil, nil
+	}
 	source := "client_response"
 	queryPath := ""
 	generatedAt := int64(0)
@@ -369,7 +393,7 @@ func GetDashboardTaskResponse(c *gin.Context) {
 	}
 	response := gin.H{"recorded": snapshot != nil, "snapshot": snapshot, "source": source, "max_bytes": service.MaxTaskClientRequestSnapshotBytes, "retention": "task_lifetime"}
 	if source != "upstream_result" {
-		response["submission_snapshot"] = task.PrivateData.SubmissionResponse
+		response["submission_snapshot"] = submission
 		response["query_path"] = queryPath
 		response["generated_at"] = generatedAt
 		response["unavailable"] = unavailable

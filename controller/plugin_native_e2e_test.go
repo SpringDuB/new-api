@@ -81,6 +81,8 @@ func (b *nativeRouteBilling) Reserve(quota int) error {
 func (*nativeRouteBilling) ReserveBeforeSubmit(int) error { return nil }
 
 func TestKlingNativeRouteSubmitPollSettleAndQuery(t *testing.T) {
+	ossURL := configureMediaDeliveryTestOSS(t, "video/mp4")
+	allowPrivateTaskMediaTest(t)
 	gin.SetMode(gin.TestMode)
 	service.InitHttpClient()
 
@@ -92,6 +94,9 @@ func TestKlingNativeRouteSubmitPollSettleAndQuery(t *testing.T) {
 	previousRedisEnabled := common.RedisEnabled
 	database, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
+	sqlDB, err := database.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
 	require.NoError(t, database.AutoMigrate(&model.User{}, &model.Channel{}, &model.Task{}, &model.Log{}))
 	model.DB = database
 	model.LOG_DB = database
@@ -133,7 +138,10 @@ func TestKlingNativeRouteSubmitPollSettleAndQuery(t *testing.T) {
 			_, _ = io.WriteString(w, `{"code":0,"message":"","data":{"task_id":"kling-private-1","task_status":"submitted"}}`)
 		case r.Method == http.MethodGet && r.URL.Path == "/kling/v1/videos/text2video/kling-private-1":
 			queryCalls.Add(1)
-			_, _ = io.WriteString(w, `{"code":0,"message":"","data":{"task_id":"kling-private-1","task_status":"succeed","task_status_msg":"","task_result":{"videos":[{"id":"video-private","url":"https://cdn.example/video.mp4","duration":"5"}]},"final_unit_deduction":"1"}}`)
+			_, _ = io.WriteString(w, `{"code":0,"message":"","data":{"task_id":"kling-private-1","task_status":"succeed","task_status_msg":"","task_result":{"videos":[{"id":"video-private","url":"http://`+r.Host+`/video.mp4","duration":"5"}]},"final_unit_deduction":"1"}}`)
+		case r.URL.Path == "/video.mp4":
+			w.Header().Set("Content-Type", "video/mp4")
+			_, _ = io.WriteString(w, "video")
 		default:
 			http.NotFound(w, r)
 		}
@@ -236,6 +244,7 @@ func TestKlingNativeRouteSubmitPollSettleAndQuery(t *testing.T) {
 	var settledUser model.User
 	require.NoError(t, database.First(&settledUser, 7).Error)
 	assert.Equal(t, 999_999, settledUser.Quota)
+	awaitTaskArtifactArchive(t, persisted.ID, model.TaskArchiveCompleted)
 
 	queryBinding, found := generation.LookupDeclaredRoute(http.MethodGet, "/kling/v1/videos/text2video/:task_id")
 	require.True(t, found)
@@ -255,21 +264,21 @@ func TestKlingNativeRouteSubmitPollSettleAndQuery(t *testing.T) {
 
 	require.True(t, queryContext.IsAborted())
 	require.Equal(t, http.StatusOK, queryRecorder.Code)
-	assert.Contains(t, queryRecorder.Body.String(), `"task_id":"task_kling_public"`)
-	assert.Contains(t, queryRecorder.Body.String(), `"task_status":"succeed"`)
+	assert.Contains(t, queryRecorder.Body.String(), `"id":"task_kling_public"`)
+	assert.Contains(t, queryRecorder.Body.String(), `"status":"completed"`)
+	assert.Contains(t, queryRecorder.Body.String(), ossURL)
+	assert.Contains(t, queryRecorder.Body.String(), "x-oss-signature=")
 	assert.NotContains(t, queryRecorder.Body.String(), "kling-private-1")
 	assert.NotContains(t, queryRecorder.Body.String(), upstream.URL)
 }
 
-// Once Ark's first event has reached a native client the submission settles
-// and is never refunded. A stream Ark finished bills the images it delivered;
-// one that broke off, whose first event the plugin could not read, or that
-// kept sending keep-alive comments until the submission deadline bills the
-// reserved images. A finished stream stays billed and logged when the host
-// then fails to reserve its images or to store the task.
-func TestDoubaoRelayedImageStreamSettlement(t *testing.T) {
+// Image events are consumed privately; incomplete or non-durable submissions
+// cannot publish the vendor's data before the normal submission barrier.
+func TestDoubaoPrivateImageStreamSettlement(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	service.InitHttpClient()
+	ossURL := configureImageDeliveryTestOSS(t)
+	allowPrivateTaskMediaTest(t)
 
 	previousDB := model.DB
 	previousLogDB := model.LOG_DB
@@ -310,9 +319,13 @@ func TestDoubaoRelayedImageStreamSettlement(t *testing.T) {
 	})
 	require.NoError(t, database.Create(&model.User{Id: 7, Username: "relayed-stream-user", Group: "default", Quota: 1_000_000}).Error)
 
-	const image = `data: {"type":"image_generation.partial_succeeded","model":"` + seedream + `","created":1,"image_index":0,"url":"https://cdn.example/0.png","size":"2048x2048"}` + "\n\n"
 	const completed = `data: {"type":"image_generation.completed","model":"` + seedream + `","created":1,"usage":{"generated_images":1,"output_tokens":16384,"total_tokens":16384}}` + "\n\n"
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/0.png" {
+			_, _ = io.WriteString(w, "\x89PNG\r\n\x1a\nimage")
+			return
+		}
+		image := `data: {"type":"image_generation.partial_succeeded","model":"` + seedream + `","created":1,"image_index":0,"url":"http://` + r.Host + `/0.png","size":"2048x2048"}` + "\n\n"
 		var request struct {
 			Prompt string `json:"prompt"`
 		}
@@ -356,17 +369,15 @@ func TestDoubaoRelayedImageStreamSettlement(t *testing.T) {
 	require.Equal(t, "doubao", binding.Plugin.Meta.Key)
 
 	for _, tc := range []struct {
-		prompt, firstFrame string
-		wantQuota          int
+		prompt    string
+		wantQuota int
 	}{
-		{"finished", image, 10_000},
-		{"broken", image, 30_000},
-		{"unreadable", "data: {\"type\":\n\n", 30_000},
-		{"stalled", image, 30_000},
-		// Ark finished these streams, then the host could not reserve the
-		// billed images or store the task.
-		{"reserve_fails", image, 10_000},
-		{"insert_fails", image, 10_000},
+		{"finished", 10_000},
+		{"broken", 0},
+		{"unreadable", 0},
+		{"stalled", 0},
+		{"reserve_fails", 0},
+		{"insert_fails", 0},
 	} {
 		t.Run(tc.prompt, func(t *testing.T) {
 			require.NoError(t, database.Model(&model.User{}).Where("id = ?", 7).Update("quota", 1_000_000).Error)
@@ -397,27 +408,34 @@ func TestDoubaoRelayedImageStreamSettlement(t *testing.T) {
 			started := time.Now()
 			outcome, taskErr := executeTaskSubmissionWith(c, relayInfo, relay.RelayTaskSubmit)
 			assert.Less(t, time.Since(started), 10*time.Second, "the submission deadline bounds a relayed stream")
-			assert.Equal(t, []string{"reserve", "settle"}, billing.events, "a relayed stream is never refunded")
-			assert.True(t, strings.HasPrefix(recorder.Body.String(), tc.firstFrame), recorder.Body.String())
-			relayed := recorder.Body.String()
-			if tc.prompt == "insert_fails" {
+			assert.False(t, c.Writer.Written(), "no upstream event is forwarded")
+			if tc.wantQuota == 0 {
 				require.NotNil(t, taskErr)
-				assert.Equal(t, "task_insert_failed", taskErr.Code)
 				respondTaskSubmissionError(c, taskErr)
+				assert.Contains(t, billing.events, "refund")
+				assert.NotContains(t, recorder.Body.String(), "x-oss-signature=")
 			} else {
 				require.Nil(t, taskErr)
+				assert.Equal(t, []string{"reserve", "settle"}, billing.events)
 				assert.Equal(t, tc.wantQuota, outcome.Task.Quota)
 				assert.Equal(t, model.TaskStatus(model.TaskStatusSuccess), outcome.Task.Status)
 				presentTaskSubmission(c, outcome)
+				assert.Contains(t, recorder.Body.String(), ossURL)
+				assert.Contains(t, recorder.Body.String(), "x-oss-signature=")
 			}
-			assert.Equal(t, relayed, recorder.Body.String(), "nothing follows the relayed events")
+			assert.NotContains(t, recorder.Body.String(), upstream.URL)
+			assert.NotContains(t, recorder.Body.String(), "partial_succeeded")
 			var user model.User
 			require.NoError(t, database.First(&user, 7).Error)
 			assert.Equal(t, 1_000_000-tc.wantQuota, user.Quota, "the delivered images are charged")
 			var consumeLogs []model.Log
 			require.NoError(t, database.Where("type = ?", model.LogTypeConsume).Find(&consumeLogs).Error)
-			require.Len(t, consumeLogs, 1)
-			assert.Equal(t, tc.wantQuota, consumeLogs[0].Quota)
+			if tc.wantQuota > 0 {
+				require.Len(t, consumeLogs, 1)
+				assert.Equal(t, tc.wantQuota, consumeLogs[0].Quota)
+			} else {
+				assert.Empty(t, consumeLogs)
+			}
 		})
 	}
 }
