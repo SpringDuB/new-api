@@ -18,8 +18,11 @@ import (
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/oauth"
+	"github.com/QuantumNous/new-api/pkg/jsplugin"
+	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -62,6 +65,214 @@ func canvasDatabase(t *testing.T, kind, dsn string) *gorm.DB {
 	require.NoError(t, db.Raw(versionQuery).Scan(&version).Error)
 	t.Logf("%s engine: %s", kind, version)
 	return db
+}
+
+func TestCanvasModelCatalogDatabaseMatrix(t *testing.T) {
+	for _, dialect := range []struct{ kind, env string }{{"sqlite", ""}, {"mysql", "TEST_MYSQL_DSN"}, {"postgres", "TEST_POSTGRES_DSN"}} {
+		t.Run(dialect.kind, func(t *testing.T) {
+			if dialect.env != "" && os.Getenv(dialect.env) == "" {
+				t.Skip("set " + dialect.env + " to run this database")
+			}
+			db := modelManagementDB(t, dialect.kind, os.Getenv(dialect.env))
+			require.NoError(t, db.AutoMigrate(&model.Token{}))
+			model.InvalidatePricingCache()
+			t.Cleanup(model.InvalidatePricingCache)
+			withSelfUseModeDisabled(t)
+			const secret = "fixture-only-canvas-secret-at-least-32-characters"
+			t.Setenv("STOLAS_CANVAS_URL", "https://canvas.stolas.cc")
+			t.Setenv("STOLAS_CANVAS_CLIENT_SECRET", secret)
+			user := model.User{Username: "catalog-user", Group: "default", Status: common.UserStatusEnabled, AffCode: "catalog-user"}
+			require.NoError(t, db.Create(&user).Error)
+			var token *model.Token
+			require.NoError(t, db.Transaction(func(tx *gorm.DB) error {
+				_, initialized, err := model.EnsureCanvasDefaultTokenWithTx(tx, user.Id)
+				token = initialized
+				return err
+			}))
+			other := model.Token{UserId: user.Id, Key: "nondefaultkey", Status: common.TokenStatusEnabled, ExpiredTime: -1, UnlimitedQuota: true}
+			require.NoError(t, db.Create(&other).Error)
+			require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(`{"gpt-image-hidden":1,"gpt-image-1":1,"gpt-image-private":1,"catalog-video":1}`))
+			common.OptionMap[model.ModelSquareDisplayOption] = `{"order":["seedance-2-0-02","gpt-image-1"],"models":{"gpt-image-1":{"highlight":true,"tags":["image-extra"]},"seedance-2-0-02":{"badge":"推荐","color":"violet","tags":["video-extra"]}}}`
+			channels := []model.Channel{
+				{Name: "not-public-channel", Key: "not-public-upstream-key", Type: constant.ChannelTypeTaskPlugin, Group: "default", Models: "seedance-2-0-02", Status: common.ChannelStatusEnabled},
+				{Name: "backup", Key: "backup-key", Type: constant.ChannelTypeTaskPlugin, Group: "default", Models: "seedance-2-0-02", Status: common.ChannelStatusEnabled},
+				{Name: "other group", Key: "other-key", Type: constant.ChannelTypeOpenAI, Group: "private", Models: "gpt-image-private", Status: common.ChannelStatusEnabled},
+				{Name: "image", Key: "image-key", Type: constant.ChannelTypeOpenAI, Group: "default", Models: "gpt-image-1,gpt-image-unpriced,gpt-image-hidden,catalog-video,seedance-2-0-02", Status: common.ChannelStatusEnabled},
+			}
+			for i := range 2 {
+				channels[i].SetSetting(dto.ChannelSettings{TaskPluginKey: "lecapi"})
+			}
+			for i := range channels {
+				require.NoError(t, channels[i].Insert())
+			}
+			metadata := []model.Model{
+				{ModelName: "gpt-image-hidden", Status: 1},
+				{ModelName: "gpt-image-1", Status: 1, Description: "Image generation model", Tags: "image,official"},
+				{ModelName: "seedance-2-0-02", Status: 1, Description: "Video generation model; images: 最多 3", Tags: "video;cinematic"},
+			}
+			require.NoError(t, db.Create(&metadata).Error)
+			require.NoError(t, db.Model(&metadata[0]).Update("status", 0).Error)
+			engine := gin.New()
+			engine.GET("/api/canvas/model-catalog", middleware.DisableCache(), middleware.TokenAuth(), CanvasModelCatalog)
+			read := func(key, bridge string) *httptest.ResponseRecorder {
+				req := httptest.NewRequest(http.MethodGet, "/api/canvas/model-catalog", nil)
+				req.Header.Set("Authorization", "Bearer sk-"+key)
+				req.Header.Set("X-Stolas-Client-Secret", bridge)
+				res := httptest.NewRecorder()
+				engine.ServeHTTP(res, req)
+				return res
+			}
+			for _, denied := range []*httptest.ResponseRecorder{read(token.Key, ""), read("invalid", secret), read(other.Key, secret)} {
+				assert.Equal(t, http.StatusUnauthorized, denied.Code)
+				assert.Contains(t, denied.Header().Get("Cache-Control"), "no-store")
+				assert.NotContains(t, denied.Body.String(), "seedance-2-0-02")
+			}
+			catalog := func() []canvasCatalogModel {
+				res := read(token.Key, secret)
+				require.Equal(t, http.StatusOK, res.Code, res.Body.String())
+				assert.Contains(t, res.Header().Get("Cache-Control"), "no-store")
+				assert.NotContains(t, res.Body.String(), "not-public")
+				assert.NotContains(t, res.Body.String(), "billing_expr")
+				assert.NotContains(t, res.Body.String(), "plugin_key")
+				var payload struct{ Data []canvasCatalogModel }
+				require.NoError(t, common.Unmarshal(res.Body.Bytes(), &payload))
+				return payload.Data
+			}
+			entries := catalog()
+			require.Len(t, entries, 2)
+			image, video := entries[0], entries[1]
+			assert.Equal(t, "gpt-image-1", image.ID)
+			assert.True(t, image.Featured)
+			assert.Equal(t, "Image generation model", image.Description)
+			assert.Empty(t, image.Tags)
+			require.NotNil(t, image.Price)
+			assert.Equal(t, []canvasPriceRate{{Unit: "request", Min: 1, Max: 1}}, image.Price.Rates)
+			assert.Equal(t, "seedance-2-0-02", video.ID)
+			assert.Equal(t, "Seedance 2.0 · 720p 多参考", video.DisplayName)
+			assert.Equal(t, "Video generation model", video.Description)
+			assert.Equal(t, []canvasCatalogTag{{Text: "推荐", Color: "purple"}}, video.Tags)
+			assert.Equal(t, "seedance-2.0", video.Family)
+			assert.Equal(t, "ByteDance.Color", video.Icon)
+			assert.Equal(t, []string{"video"}, video.Capabilities)
+			assert.Positive(t, video.Parameters["images"].Max)
+			require.NotNil(t, video.Price)
+			assert.NotEmpty(t, video.Price.Rates)
+			require.NoError(t, db.Model(&model.Channel{}).Where("id = ?", channels[0].Id).Update("status", common.ChannelStatusManuallyDisabled).Error)
+			assert.Equal(t, []canvasCatalogModel{image, video}, catalog(), "a backup route keeps the same published ID")
+			require.NoError(t, db.Model(&model.Channel{}).Where("id = ?", channels[1].Id).Update("status", common.ChannelStatusManuallyDisabled).Error)
+			assert.Equal(t, []canvasCatalogModel{image}, catalog(), "the last disabled route withdraws the model, even with warm pricing metadata")
+			require.NoError(t, db.Model(token).Updates(map[string]any{"model_limits_enabled": true, "model_limits": "seedance-2-0-02"}).Error)
+			assert.Equal(t, []canvasCatalogModel{}, catalog(), "model limits can produce a successful empty result")
+			require.NoError(t, db.Model(token).Update("expired_time", time.Now().Add(-time.Minute).Unix()).Error)
+			assert.Equal(t, http.StatusUnauthorized, read(token.Key, secret).Code)
+		})
+	}
+}
+
+func TestCanvasModelCatalogPriceSummary(t *testing.T) {
+	group := modelListGroups{userGroup: "default", ownerGroups: []string{"default"}}
+	for _, tc := range []struct {
+		name, expression string
+		want             []canvasPriceRate
+		varies           bool
+	}{
+		{"fixed", `tier("x", fixed(0.12)) * image_count`, []canvasPriceRate{{Unit: "image", Min: 0.12, Max: 0.12}}, false},
+		{"second", `u("resolution") == "720p" ? tier("x", u("seconds") * 0.4) : tier("y", u("seconds") * 0.84)`, []canvasPriceRate{{Unit: "second", Min: 0.4, Max: 0.84}}, true},
+		{"token", `tier("x", u("tokens") * 26.625 / 1000000)`, []canvasPriceRate{{Unit: "video_tokens", Min: 26.625, Max: 26.625}}, false},
+		{"dynamic", `tier("x", u("seconds") * 0.4) * (hour("UTC") == 9 ? 2 : 1)`, nil, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			item := model.Pricing{EnableGroup: []string{"default"}, BillingExpr: tc.expression}
+			if tc.name != "fixed" {
+				item.BillingUsageSchema = map[string]jsplugin.UsageFieldSchema{"seconds": {Unit: "second"}, "tokens": {Unit: "token"}}
+			}
+			price := canvasPriceSummary(item, group, nil, nil)
+			require.NotNil(t, price)
+			assert.Equal(t, tc.want, price.Rates)
+			assert.Equal(t, tc.varies, price.Varies)
+		})
+	}
+}
+
+func TestCanvasModelCatalogCreditEstimateMetadata(t *testing.T) {
+	settings := operation_setting.GetGeneralSetting()
+	previous, previousRate := *settings, operation_setting.USDExchangeRate
+	t.Cleanup(func() {
+		*settings = previous
+		operation_setting.USDExchangeRate = previousRate
+	})
+	operation_setting.USDExchangeRate = 7.3
+	settings.CustomCurrencyExchangeRate = 2
+	groups := modelListGroups{userGroup: "default", ownerGroups: []string{"default"}}
+	item := model.Pricing{ModelName: "ap-muse-video-720-10s", ModelPrice: 0.6, QuotaType: 1, EnableGroup: []string{"default"}}
+	for _, display := range []string{operation_setting.QuotaDisplayTypeUSD, operation_setting.QuotaDisplayTypeCNY, operation_setting.QuotaDisplayTypeCustom, operation_setting.QuotaDisplayTypeTokens} {
+		settings.QuotaDisplayType = display
+		price := canvasPriceSummary(item, groups, nil, nil)
+		require.NotNil(t, price)
+		assert.Equal(t, []canvasPriceAmount{{Unit: "request", Amount: 0.6}}, price.Estimate, display)
+	}
+	assert.Equal(t, "Meta.Color", canvasModelIcon(canvasModelFamily(item.ModelName, "Muse Video · 720p", ""), "Video"))
+}
+
+func TestCanvasModelCatalogResolutionEstimate(t *testing.T) {
+	groups := modelListGroups{userGroup: "default", ownerGroups: []string{"default"}}
+	resolutions := []string{"480p", "720p"}
+	schema := map[string]jsplugin.UsageFieldSchema{
+		"resolution": {Enum: resolutions}, "video_input": {Enum: []string{"none", "video"}},
+		"seconds": {Unit: "second"}, "requests": {Unit: "count"},
+	}
+	for _, tc := range []struct {
+		name, expression string
+		want             map[string][]canvasPriceAmount
+	}{
+		{"per second", `u("resolution") == "480p" ? tier("x", u("seconds") * 0.30) : tier("y", u("seconds") * 0.42)`, map[string][]canvasPriceAmount{
+			"480p": {{Unit: "second", Amount: 0.30}}, "720p": {{Unit: "second", Amount: 0.42}},
+		}},
+		{"per request", `u("resolution") == "720p" ? tier("x", u("requests") * 6.6) : tier("y", u("requests") * 4.2)`, map[string][]canvasPriceAmount{
+			"480p": {{Unit: "request", Amount: 4.2}}, "720p": {{Unit: "request", Amount: 6.6}},
+		}},
+		{"ambiguous only at 720p", `u("resolution") == "720p" && u("video_input") == "video" ? tier("x", u("seconds") * 0.42) : tier("y", u("seconds") * 0.30)`, map[string][]canvasPriceAmount{
+			"480p": {{Unit: "second", Amount: 0.30}},
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			item := model.Pricing{EnableGroup: []string{"default"}, BillingExpr: tc.expression, BillingUsageSchema: schema}
+			price := canvasPriceSummary(item, groups, nil, resolutions)
+			require.NotNil(t, price)
+			assert.Empty(t, price.Estimate)
+			assert.Equal(t, tc.want, price.EstimatesByResolution)
+		})
+	}
+	t.Run("routes disagree", func(t *testing.T) {
+		item := model.Pricing{EnableGroup: []string{"default"}, BillingPluginVariants: []model.PricingPluginVariant{
+			{PluginKey: "one", BillingExpr: `tier("x", u("requests") * 4.2)`, BillingUsageSchema: schema},
+			{PluginKey: "two", BillingExpr: `tier("x", u("requests") * 6.6)`, BillingUsageSchema: schema},
+		}}
+		price := canvasPriceSummary(item, groups, map[string]bool{"one": true, "two": true}, resolutions)
+		require.NotNil(t, price)
+		assert.Empty(t, price.Estimate)
+		assert.Empty(t, price.EstimatesByResolution)
+	})
+}
+
+func TestCanvasModelFamilies(t *testing.T) {
+	for _, tc := range []struct{ id, name, series, want string }{
+		{"sd25f", "Seedance 2.5 Flash · 720p", "Seedance 2.5", "seedance-2.5-flash"},
+		{"ap-seedance-2-0-ot-fast", "Seedance 2.0 Fast · Token", "Seedance 2.0", "seedance-2.0-fast"},
+		{"seedance-2-0-mini-b1-480p", "", "", "seedance-2.0-mini"},
+		{"aj-wan-3-0", "Wan 3.0", "", "wan3"},
+		{"ms-minimax-h3", "MiniMax H3 · Generate", "", "MiniMax H3"},
+		{"mf-gemini-omni", "Gemini Omni Flash", "", "Gemini Omni"},
+		{"muse-zr-700", "Muse Video · Character", "", "Muse"},
+		{"nw-image-2", "Image 2 · 画质可调", "", "gpt-image-2"},
+		{"ac-seedream-5-0", "", "", "seedream"},
+		{"tinysnow-banana-3", "Nano Banana Pro", "", "banana"},
+		{"other-model", "", "自定义系列", "自定义系列"},
+	} {
+		t.Run(tc.id, func(t *testing.T) {
+			assert.Equal(t, tc.want, canvasModelFamily(tc.id, tc.name, tc.series))
+		})
+	}
 }
 
 func canvasRequest(t *testing.T, handler gin.HandlerFunc, bearer string, input any) *httptest.ResponseRecorder {

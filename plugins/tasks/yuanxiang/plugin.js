@@ -1,23 +1,37 @@
-// Yuanxiang's authenticated /v1/models catalog, checked 2026-11-09.
+// Yuanxiang's public API model catalog, checked 2026-11-21.
 // Defaults are sent explicitly so upstream defaults cannot change the facts.
 const SD25_STABLE_CHANNEL = "route:stable";
 const VIDEO_MODELS = {
-  "SD 2.5 · 官方直连（满血版）按秒": { seconds: 5, resolution: "720p" },
+  "SD 2.5 · 官方满血按秒": { seconds: 5, resolution: "720p" },
   "SD 2.0 满血版 按秒": { seconds: 5, resolution: "720p" },
+  "SD 2.0 · 官转满血68折（返官链）": { seconds: 5, resolution: "720p", version: "标准" },
   "SD 2.5 · 特价按次": { seconds: 5, resolution: "1080p", channel: SD25_STABLE_CHANNEL },
   "Sd 2.0 · 特价按次 · 漫剧短剧专线": { seconds: 5, resolution: "720p" },
   "SD 2.0 · 特价按次 · 电商专线": { seconds: 5, resolution: "720p", quality: "真人模特" },
+  "SD 2.0 FAST · 特价按秒 · 稳定冲量": { seconds: 5, resolution: "720p" },
+  "Sd 2.0 · 即梦满血按秒专线": { seconds: 5, resolution: "720p" },
+  "Sd 2.5 · 即梦满血按秒专线": { seconds: 5, resolution: "720p" },
+  "GK-video-3.5": { seconds: 5, resolution: "720p", requiredImages: 1 },
   "Muse · 特价按次 ·【原生】": { seconds: 10, resolution: "720p" },
   "MiniMax H3 · 特价按秒": { seconds: 5, resolution: "480p" },
-  "MiniMax H3 · 特价按次": { seconds: 4, resolution: "768p" },
+  "MiniMax H3 · 特价按次（慢线）": { seconds: 4, resolution: "768p" },
   "Wan 3.0 ·  官方直连 · 特价按秒": { seconds: 5, resolution: "480p" },
 };
 const IMAGE_MODELS = {
-  // The API currently accepts low only; the public docs also advertise higher
-  // qualities which the authenticated API rejects before task creation.
   "GT Image 2.5": { resolution: "1k", quality: "low" },
+  "GT Image 2.5 · 特价按张": { resolution: "1k", quality: "low" },
+  "GT Image 2.6 Flare": { resolution: "1k", quality: "auto" },
+  "GT Image 2 · OpenAI": { resolution: "1k", quality: "low" },
+  "Banana 2": { resolution: "1k" },
 };
-const MODEL_MAPPING = Object.fromEntries(Object.keys(VIDEO_MODELS).concat(Object.keys(IMAGE_MODELS)).map((model) => [model + "-YX", model]));
+const LEGACY_MODEL_MAPPING = {
+  "SD 2.5 · 官方直连（满血版）按秒": "SD 2.5 · 官方满血按秒",
+  "MiniMax H3 · 特价按次": "MiniMax H3 · 特价按次（慢线）",
+};
+const MODEL_MAPPING = Object.fromEntries(
+  Object.keys(VIDEO_MODELS).concat(Object.keys(IMAGE_MODELS)).map((model) => [model + "-YX", model])
+    .concat(Object.entries(LEGACY_MODEL_MAPPING).map(([alias, model]) => [alias + "-YX", model]))
+);
 const VIDEO_NAMES = Object.keys(MODEL_MAPPING).filter((name) => Object.prototype.hasOwnProperty.call(VIDEO_MODELS, MODEL_MAPPING[name]));
 const IMAGE_NAMES = Object.keys(MODEL_MAPPING).filter((name) => Object.prototype.hasOwnProperty.call(IMAGE_MODELS, MODEL_MAPPING[name]));
 const DURATION_TIERS = ["5", "10", "15", "20", "30", "40", "50", "60"];
@@ -58,7 +72,7 @@ export const meta = {
   name: "Yuanxiang AI",
   icon: "text:YX",
   description: { en: "Yuanxiang video and image generation with canvas parameter mapping and configurable reference video pricing", zh: "元象视频与图片生成，支持画布参数映射和可选参考视频计费" },
-  version: "1.0.9",
+  version: "1.1.0",
   author: { name: "QuantumNous" },
   website: "https://yuanxiangai.cc/api-docs",
   baseUrl: "https://yuanxiangai.cc",
@@ -83,7 +97,8 @@ export const meta = {
 
 function modelDetails(ctx) {
   const requested = ctx.upstreamModel || ctx.model;
-  const model = Object.prototype.hasOwnProperty.call(MODEL_MAPPING, requested) ? MODEL_MAPPING[requested] : requested;
+  const model = Object.prototype.hasOwnProperty.call(MODEL_MAPPING, requested) ? MODEL_MAPPING[requested]
+    : Object.prototype.hasOwnProperty.call(LEGACY_MODEL_MAPPING, requested) ? LEGACY_MODEL_MAPPING[requested] : requested;
   if (Object.prototype.hasOwnProperty.call(VIDEO_MODELS, model)) return { model: model, kind: "video", defaults: VIDEO_MODELS[model] };
   if (Object.prototype.hasOwnProperty.call(IMAGE_MODELS, model)) return { model: model, kind: "image", defaults: IMAGE_MODELS[model] };
   throw new Error("unsupported Yuanxiang model");
@@ -237,6 +252,8 @@ function submission(ctx) {
     if (!Number.isSafeInteger(file.size) || file.size <= 0) throw new Error("reference files must not be empty");
     references[kind].push({ fileRef: file.ref });
   }
+  if (profile.defaults.requiredImages !== undefined && references.images.length !== profile.defaults.requiredImages)
+    throw new Error(profile.model + " requires exactly " + profile.defaults.requiredImages + " reference image");
   if (stableSD25) {
     if (body.resolution !== "720p") throw new Error("route:stable requires 720p resolution");
     if (![5, 10, 15, 30].includes(body.duration)) throw new Error("route:stable requires a duration of 5, 10, 15 or 30 seconds");

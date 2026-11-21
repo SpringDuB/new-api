@@ -164,6 +164,41 @@ func TestPresentTaskSubmissionUsesHostOpenAIVideoCreateReceipt(t *testing.T) {
 	assert.NotContains(t, recorder.Body.String(), "task_id")
 }
 
+func TestPresentTaskSubmissionKeepsCompletedVideoWhenOSSDeliveryFails(t *testing.T) {
+	t.Setenv("TASK_ARTIFACT_STORE_MODE", "oss")
+	t.Setenv("TASK_ARTIFACT_STORE_OSS_ENDPOINT", "")
+	task := &model.Task{
+		TaskID:     "task_public",
+		Action:     constant.TaskActionTextToVideo,
+		Status:     model.TaskStatusSuccess,
+		Progress:   "100%",
+		CreatedAt:  456,
+		Properties: model.Properties{OriginModelName: "video-model"},
+		PrivateData: model.TaskPrivateData{
+			ResultURL: "https://cdn.example/video.mp4?signature=private",
+		},
+	}
+	task.SetData(map[string]any{"status": "completed", "video_url": task.GetResultURL()})
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", nil)
+	c.Set(pluginruntime.ContextKeyPinnedEndpoint, pluginruntime.PinnedEndpoint{
+		Protocol:  "openai_video",
+		Operation: pluginruntime.HostProtocolOperation{Name: "create"},
+	})
+
+	presentTaskSubmission(c, &taskSubmissionOutcome{
+		Result:    &relay.TaskSubmitResult{},
+		Task:      task,
+		RelayInfo: &relaycommon.RelayInfo{},
+	})
+
+	assert.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	assert.Contains(t, recorder.Body.String(), `"status":"completed"`)
+	assert.NotContains(t, recorder.Body.String(), "cdn.example")
+	assert.NotContains(t, recorder.Body.String(), "video_delivery_failed")
+}
+
 func TestExecuteTaskSubmissionRefundsWhenInsertFails(t *testing.T) {
 	events := make([]string, 0, 3)
 	database := setupTaskSubmissionDatabase(t, false, &events)

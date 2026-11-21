@@ -822,8 +822,10 @@ func presentTaskSubmission(c *gin.Context, outcome *taskSubmissionOutcome) {
 	if service.TaskArtifactOSSRequired() && (openAIVideoCreate || service.IsVideoTask(outcome.Task.Action)) {
 		response, err := service.BuildPublicVideoTask(c.Request.Context(), outcome.Task)
 		if err != nil {
-			videoProxyError(c, http.StatusBadGateway, "video_delivery_failed", i18n.T(c, i18n.MsgRelayVideoDeliveryFailed))
-			return
+			// Preserve the completed task receipt. Clients retrieve the media from
+			// the gateway content route, which can proxy the provider result if OSS
+			// archival is unavailable, without exposing the provider URL.
+			logger.LogTaskArtifactFailure(c.Request.Context(), outcome.Task.TaskID, "delivery_proxy_fallback", 0)
 		}
 		if !openAIVideoCreate {
 			response.TaskID = response.ID

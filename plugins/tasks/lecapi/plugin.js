@@ -3279,6 +3279,55 @@ function resultURL(value) {
   return "";
 }
 
+function signedURLTimestamp(value) {
+  const numeric = Number(value);
+  if (Number.isFinite(numeric)) return numeric >= 1000000000 ? Math.floor(numeric > 1000000000000 ? numeric / 1000 : numeric) : 0;
+  const compact = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/.exec(String(value));
+  if (compact) return Math.floor(Date.UTC(Number(compact[1]), Number(compact[2]) - 1, Number(compact[3]), Number(compact[4]), Number(compact[5]), Number(compact[6])) / 1000);
+  const parsed = Date.parse(String(value));
+  return Number.isFinite(parsed) ? Math.floor(parsed / 1000) : 0;
+}
+
+function signedURLExpiration(value) {
+  if (typeof value !== "string") return 0;
+  const queryStart = value.indexOf("?");
+  if (queryStart < 0) return 0;
+  const query = value.slice(queryStart + 1).split("#", 1)[0];
+  const parameters = {};
+  for (const pair of query.split("&")) {
+    const separator = pair.indexOf("=");
+    if (separator < 0) continue;
+    try {
+      const key = decodeURIComponent(pair.slice(0, separator).replace(/\+/g, " ")).toLowerCase();
+      if (parameters[key] === undefined) parameters[key] = decodeURIComponent(pair.slice(separator + 1).replace(/\+/g, " "));
+    } catch {
+      continue;
+    }
+  }
+
+  for (const key of ["expires", "expire", "expiration", "expires_at", "expiresat", "expiry", "valid_until"]) {
+    if (parameters[key] !== undefined) {
+      const expiration = signedURLTimestamp(parameters[key]);
+      if (expiration > 0) return expiration;
+    }
+  }
+
+  for (const prefix of ["x-amz", "x-goog", "x-oss"]) {
+    const signedAt = signedURLTimestamp(parameters[prefix + "-date"] || "");
+    const duration = Number(parameters[prefix + "-expires"]);
+    if (signedAt > 0 && Number.isFinite(duration) && duration > 0) return signedAt + duration;
+  }
+
+  for (const key of ["q-sign-time", "q-key-time"]) {
+    const interval = parameters[key]?.split(";");
+    if (interval?.length === 2) {
+      const expiration = signedURLTimestamp(interval[1]);
+      if (expiration > 0) return expiration;
+    }
+  }
+  return 0;
+}
+
 export function parseTaskResult(ctx, response) {
   const body = responseObject(response),
     id = response.object === "lecapi.task" ? response.id : body.id || body.task_id || body.metadata?.task_id;
@@ -3420,12 +3469,16 @@ export function buildContentRequest(ctx) {
   // id. Only models with an asynchronous task API can refresh those old rows.
   const profile = modelProfile(ctx);
   const queryable = ctx.state?.queryable ?? (profile.kind === "video" || ASYNC_IMAGE_MODELS.includes(profile.vendorModel));
-  // The completion poll already supplies a fresh deliverable. Re-querying
-  // immediately can hit the task endpoint's rate limit during OSS archival.
-  // Historical downloads still refresh their possibly expired source URL.
+  // Prefer the signed URL's actual expiration; completion age alone can cause
+  // unnecessary queries and rate limits while OSS archives a still-valid URL.
   const completedAt = Number(responseObject(data).completed_at);
-  const completedAge = utils.unixNow() - completedAt;
-  const freshResult = completedAt > 0 && completedAge >= 0 && completedAge < 60 && !!resultURL(data);
+  const now = utils.unixNow();
+  const completedAge = now - completedAt;
+  const sourceURL = resultURL(data);
+  const sourceExpiresAt = signedURLExpiration(sourceURL);
+  const freshSignedURL = sourceExpiresAt > 0 && sourceExpiresAt - now > 30;
+  const recentUnsignedResult = sourceExpiresAt === 0 && completedAt > 0 && completedAge >= 0 && completedAge < 60;
+  const freshResult = !!sourceURL && (freshSignedURL || recentUnsignedResult);
   if (ctx.upstreamTaskId && queryable && !freshResult) {
     const query = buildQueryRequest({ ...ctx, taskId: ctx.upstreamTaskId });
     const refreshed = utils.fetch(query);

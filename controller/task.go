@@ -488,11 +488,25 @@ func TaskArtifactContent(c *gin.Context) {
 		}
 		deliveries, err := resolveTaskVideoDelivery(c.Request.Context(), task)
 		if err != nil {
-			writeTaskMediaProxyError(c, err)
+			logger.LogTaskArtifactFailure(c.Request.Context(), task.TaskID, "delivery_proxy_fallback", 0)
+			if fallbackErr := proxyTaskVideoArtifact(c, task, relaychannel.TaskArtifact{Key: artifactKey, Type: "video", MimeType: "video/mp4"}); fallbackErr == nil {
+				return
+			} else {
+				writeTaskMediaProxyError(c, fallbackErr)
+			}
 			return
 		}
 		if delivery, ok := deliveries[artifactKey]; ok {
 			if err := delivery.Serve(c, task); err != nil {
+				if !c.Writer.Written() {
+					logger.LogTaskArtifactFailure(c.Request.Context(), task.TaskID, "delivery_proxy_fallback", 0)
+					if fallbackErr := proxyTaskVideoArtifact(c, task, relaychannel.TaskArtifact{Key: artifactKey, Type: "video", MimeType: "video/mp4"}); fallbackErr == nil {
+						return
+					} else {
+						writeTaskMediaProxyError(c, fallbackErr)
+						return
+					}
+				}
 				writeTaskMediaProxyError(c, err)
 			}
 			return
@@ -524,10 +538,24 @@ func TaskArtifactContent(c *gin.Context) {
 	if selected.Type == "video" && service.TaskArtifactOSSRequired() {
 		delivery, err := taskVideoDelivery(c.Request.Context(), task, *selected, service.GetTaskArtifactStore())
 		if err != nil {
-			writeTaskMediaProxyError(c, err)
+			logger.LogTaskArtifactFailure(c.Request.Context(), task.TaskID, "delivery_proxy_fallback", 0)
+			if fallbackErr := proxyTaskVideoArtifact(c, task, *selected); fallbackErr == nil {
+				return
+			} else {
+				writeTaskMediaProxyError(c, fallbackErr)
+			}
 			return
 		}
 		if err := delivery.Serve(c, task); err != nil {
+			if !c.Writer.Written() {
+				logger.LogTaskArtifactFailure(c.Request.Context(), task.TaskID, "delivery_proxy_fallback", 0)
+				if fallbackErr := proxyTaskVideoArtifact(c, task, *selected); fallbackErr == nil {
+					return
+				} else {
+					writeTaskMediaProxyError(c, fallbackErr)
+					return
+				}
+			}
 			writeTaskMediaProxyError(c, err)
 		}
 		return

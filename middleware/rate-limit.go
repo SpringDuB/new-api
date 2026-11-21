@@ -197,6 +197,7 @@ func GlobalAPIRateLimit() func(c *gin.Context) {
 	sessionCleanup := rateLimitFactory(maximum, 60, "CANVAS:session-cleanup")
 	metadata := rateLimitFactory(maximum, 60, "CANVAS:metadata")
 	identity := rateLimitFactory(maximum, 60, "CANVAS:identity-ingress")
+	catalog := rateLimitFactory(maximum, 60, "CANVAS:model-catalog")
 	return func(c *gin.Context) {
 		switch c.Request.Method + " " + c.FullPath() {
 		case "GET /api/usage/token/":
@@ -204,6 +205,9 @@ func GlobalAPIRateLimit() func(c *gin.Context) {
 			return
 		case "GET /api/canvas/identity":
 			identity(c)
+			return
+		case "GET /api/canvas/model-catalog":
+			catalog(c)
 			return
 		case "POST /api/canvas/authorize":
 			authorize(c)
@@ -279,6 +283,10 @@ func TokenUsageRateLimit() gin.HandlerFunc {
 func CanvasIdentityRateLimit() gin.HandlerFunc {
 	maximum := max(1, common.GetEnvOrDefault("STOLAS_IDENTITY_RATE_LIMIT", 600))
 	return userRateLimitFactory(maximum, 60, "CANVAS:identity")
+}
+
+func CanvasModelCatalogRateLimit() gin.HandlerFunc {
+	return userRateLimitFactory(max(1, common.GetEnvOrDefault("STOLAS_MODEL_CATALOG_RATE_LIMIT", 90)), 60, "CANVAS:catalog")
 }
 
 func CriticalRateLimit() func(c *gin.Context) {

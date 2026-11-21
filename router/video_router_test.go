@@ -147,10 +147,10 @@ func TestOpenAIVideoRouteKeepsPlatformIdentityWithStorageOff(t *testing.T) {
 	}
 }
 
-func TestVideoQueryNeverReturnsProviderSnapshot(t *testing.T) {
+func TestVideoQueryFallbackDoesNotExposeProviderURLs(t *testing.T) {
 	require.NoError(t, i18n.Init())
 	setupRelayRouterTestDB(t)
-	t.Setenv("TASK_ARTIFACT_STORE_MODE", "oss") // Enabled with invalid configuration: no upstream fallback.
+	t.Setenv("TASK_ARTIFACT_STORE_MODE", "oss") // A failed archive must not expose the provider URL.
 	require.NoError(t, model.DB.AutoMigrate(&model.Channel{}, &model.Task{}))
 	require.NoError(t, model.DB.Create(&model.User{Id: 92, Username: "xai-fetch-user", Status: common.UserStatusEnabled, Group: "default", Quota: 100}).Error)
 	require.NoError(t, model.DB.Create(&model.Token{UserId: 92, Key: "xaifetch", Status: common.TokenStatusEnabled, ExpiredTime: -1, UnlimitedQuota: true}).Error)
@@ -204,7 +204,12 @@ func TestVideoQueryNeverReturnsProviderSnapshot(t *testing.T) {
 			recorder := httptest.NewRecorder()
 			engine.ServeHTTP(recorder, request)
 
-			assert.GreaterOrEqual(t, recorder.Code, 500, recorder.Body.String())
+			if taskID == "task_xai_openai" {
+				assert.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+				assert.Contains(t, recorder.Body.String(), `"status":"completed"`)
+			} else {
+				assert.GreaterOrEqual(t, recorder.Code, 500, recorder.Body.String())
+			}
 			assert.Empty(t, recorder.Header().Get("Location"))
 			assert.NotContains(t, recorder.Body.String(), "xai-private-1")
 			assert.NotContains(t, recorder.Body.String(), "cdn.example")

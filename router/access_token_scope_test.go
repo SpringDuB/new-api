@@ -128,6 +128,7 @@ func TestCanvasCreditMigrationRouteRequiresBridgeSecretInBothHeaders(t *testing.
 func TestCanvasIdentityAndWalletHaveIndependentUserBudgets(t *testing.T) {
 	t.Setenv("TOKEN_USAGE_RATE_LIMIT", "1")
 	t.Setenv("STOLAS_IDENTITY_RATE_LIMIT", "2")
+	t.Setenv("STOLAS_MODEL_CATALOG_RATE_LIMIT", "1")
 	engine, user, _ := canvasRateLimitRouter(t, true)
 	var token model.Token
 	require.NoError(t, model.DB.First(&token, "user_id = ?", user.Id).Error)
@@ -138,6 +139,8 @@ func TestCanvasIdentityAndWalletHaveIndependentUserBudgets(t *testing.T) {
 		require.Equal(t, http.StatusOK, response.Code, response.Body.String())
 	}
 	assert.Equal(t, http.StatusTooManyRequests, canvasRateRequest(t, engine, "GET", "/api/canvas/identity", "sk-"+token.Key, secret, nil).Code)
+	assert.NotEqual(t, http.StatusTooManyRequests, canvasRateRequest(t, engine, "GET", "/api/canvas/model-catalog", "sk-"+token.Key, secret, nil).Code)
+	assert.Equal(t, http.StatusTooManyRequests, canvasRateRequest(t, engine, "GET", "/api/canvas/model-catalog", "sk-"+token.Key, secret, nil).Code)
 	assert.Equal(t, http.StatusOK, canvasRateRequest(t, engine, "GET", "/api/usage/token/", "sk-"+token.Key, "", nil).Code)
 }
 
@@ -338,6 +341,7 @@ var accessTokenExemptRoutes = []string{
 	// The canvas backend authenticates with its configured application secret.
 	"POST /api/canvas/exchange",
 	"GET /api/canvas/identity",
+	"GET /api/canvas/model-catalog",
 	"POST /api/canvas/credit-migration",
 
 	// Payment callbacks.

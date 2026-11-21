@@ -702,6 +702,14 @@ export const protocols={openai_video:{decodeRequest(){return {}},render(ctx,task
 				_, err := service.BuildTaskPluginDeliveryView(t.Context(), &current)
 				require.Error(t, err)
 				assert.NotContains(t, err.Error(), "signature=")
+				recorder := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(recorder)
+				c.Set("id", current.UserId)
+				c.Params = gin.Params{{Key: "task_id", Value: current.TaskID}}
+				c.Request = httptest.NewRequest(http.MethodGet, "/v1/videos/"+current.TaskID+"/content", nil)
+				VideoProxy(c)
+				assert.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+				assert.Equal(t, "video-bytes", recorder.Body.String())
 				failUpload.Store(false)
 			}
 			view, err := service.BuildTaskPluginDeliveryView(t.Context(), &current)
@@ -1612,14 +1620,17 @@ func TestLegacyVideoArtifactContentSignsStoredResult(t *testing.T) {
 	assert.Empty(t, recorder.Body.String())
 }
 
-func TestMisconfiguredArtifactStoreNeverFallsBackToPluginVideo(t *testing.T) {
+func TestMisconfiguredArtifactStoreFallsBackThroughGatewayVideoProxy(t *testing.T) {
 	require.NoError(t, i18n.Init())
 	t.Setenv("TASK_ARTIFACT_STORE_MODE", "oss")
 	t.Setenv("TASK_ARTIFACT_STORE_OSS_ENDPOINT", "")
 	task := setupGenericTaskTest(t)
+	var upstreamCalls atomic.Int32
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Error("unavailable OSS must not trigger an upstream download")
-		w.WriteHeader(http.StatusInternalServerError)
+		upstreamCalls.Add(1)
+		assert.Equal(t, "provider-key", r.Header.Get("x-goog-api-key"))
+		w.Header().Set("Content-Type", "video/mp4")
+		_, _ = io.WriteString(w, "video-content")
 	}))
 	defer upstream.Close()
 	allowPrivateTaskMediaTest(t)
@@ -1654,9 +1665,36 @@ func TestMisconfiguredArtifactStoreNeverFallsBackToPluginVideo(t *testing.T) {
 
 	VideoProxy(c)
 
-	assert.Equal(t, http.StatusBadGateway, recorder.Code)
+	assert.Equal(t, http.StatusOK, recorder.Code)
 	assert.Empty(t, recorder.Header().Get("Location"))
 	assert.NotContains(t, recorder.Body.String(), upstream.URL)
+	assert.Equal(t, "video-content", recorder.Body.String())
+	assert.EqualValues(t, 1, upstreamCalls.Load())
+}
+
+func TestVideoTaskQueryReturnsCompletedReceiptWhenOSSDeliveryFails(t *testing.T) {
+	require.NoError(t, i18n.Init())
+	t.Setenv("TASK_ARTIFACT_STORE_MODE", "oss")
+	t.Setenv("TASK_ARTIFACT_STORE_OSS_ENDPOINT", "")
+	task := setupGenericTaskTest(t)
+	task.Action = constant.TaskActionTextToVideo
+	task.PrivateData.ResultURL = "https://cdn.example/video.mp4?signature=private"
+	task.SetData(map[string]any{"status": "done", "video_url": task.GetResultURL()})
+	require.NoError(t, model.DB.Save(task).Error)
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Set("id", task.UserId)
+	c.Params = gin.Params{{Key: "task_id", Value: task.TaskID}}
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/videos/"+task.TaskID, nil)
+
+	failure := relay.RelayTaskFetch(c, relayconstant.RelayModeVideoFetchByID)
+
+	require.Nil(t, failure)
+	assert.Equal(t, http.StatusOK, recorder.Code)
+	assert.Contains(t, recorder.Body.String(), `"status":"completed"`)
+	assert.NotContains(t, recorder.Body.String(), "cdn.example")
+	assert.NotContains(t, recorder.Body.String(), "video_delivery_failed")
 }
 
 // hailuo looks the MiniMax download link up with utils.fetch; the signed OSS

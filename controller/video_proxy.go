@@ -112,18 +112,62 @@ func VideoProxy(c *gin.Context) {
 	}
 	deliveries, err := resolveTaskVideoDelivery(c.Request.Context(), task)
 	if err != nil {
-		writeTaskMediaProxyError(c, err)
+		logger.LogTaskArtifactFailure(c.Request.Context(), task.TaskID, "delivery_proxy_fallback", 0)
+		fallbackErr := proxyPrimaryTaskVideo(c, task)
+		if fallbackErr == nil {
+			return
+		}
+		writeTaskMediaProxyError(c, fallbackErr)
 		return
 	}
 	primaryKey := service.PrimaryTaskVideoKey(deliveries)
 	if delivery, ok := deliveries[primaryKey]; ok {
 		if err := delivery.Serve(c, task); err != nil {
+			if !c.Writer.Written() {
+				logger.LogTaskArtifactFailure(c.Request.Context(), task.TaskID, "delivery_proxy_fallback", 0)
+				if fallbackErr := proxyPrimaryTaskVideo(c, task); fallbackErr == nil {
+					return
+				} else {
+					writeTaskMediaProxyError(c, fallbackErr)
+					return
+				}
+			}
 			writeTaskMediaProxyError(c, err)
 		}
 		return
 	}
 
 	writeTaskMediaProxyError(c, service.ErrTaskVideoDelivery)
+}
+
+func proxyPrimaryTaskVideo(c *gin.Context, task *model.Task) error {
+	artifacts, err := videoArtifactsForTask(task)
+	if err != nil {
+		return service.ErrTaskVideoDelivery
+	}
+	artifact, ok := primaryVideoArtifact(artifacts)
+	if !ok {
+		return service.ErrTaskVideoDelivery
+	}
+	descriptor, err := taskVideoContentRequest(c.Request.Context(), task, artifact, relaychannel.TaskArtifactClientRequest{
+		Method:  c.Request.Method,
+		Headers: taskArtifactClientHeaders(c.Request.Header),
+	})
+	if err != nil {
+		return err
+	}
+	return proxyTaskMedia(c, task, descriptor)
+}
+
+func proxyTaskVideoArtifact(c *gin.Context, task *model.Task, artifact relaychannel.TaskArtifact) error {
+	descriptor, err := taskVideoContentRequest(c.Request.Context(), task, artifact, relaychannel.TaskArtifactClientRequest{
+		Method:  c.Request.Method,
+		Headers: taskArtifactClientHeaders(c.Request.Header),
+	})
+	if err != nil {
+		return err
+	}
+	return proxyTaskMedia(c, task, descriptor)
 }
 
 func proxyTaskMedia(c *gin.Context, task *model.Task, descriptor *relaychannel.TaskContentRequest) error {

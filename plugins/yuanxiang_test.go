@@ -101,10 +101,20 @@ func TestYuanxiangCanvasMappingAndBilling(t *testing.T) {
 
 func TestYuanxiangModelFamiliesAndImageProtocol(t *testing.T) {
 	plugin := loadYuanxiangPlugin(t)
-	videoModels := []string{"SD 2.5 · 官方直连（满血版）按秒", "SD 2.0 满血版 按秒", "SD 2.5 · 特价按次", "Sd 2.0 · 特价按次 · 漫剧短剧专线", "SD 2.0 · 特价按次 · 电商专线", "Muse · 特价按次 ·【原生】", "MiniMax H3 · 特价按秒", "MiniMax H3 · 特价按次", "Wan 3.0 ·  官方直连 · 特价按秒"}
+	videoModels := []string{
+		"SD 2.5 · 官方满血按秒", "SD 2.0 满血版 按秒", "SD 2.0 · 官转满血68折（返官链）",
+		"SD 2.5 · 特价按次", "Sd 2.0 · 特价按次 · 漫剧短剧专线", "SD 2.0 · 特价按次 · 电商专线",
+		"SD 2.0 FAST · 特价按秒 · 稳定冲量", "Sd 2.0 · 即梦满血按秒专线", "Sd 2.5 · 即梦满血按秒专线",
+		"GK-video-3.5", "Muse · 特价按次 ·【原生】", "MiniMax H3 · 特价按秒",
+		"MiniMax H3 · 特价按次（慢线）", "Wan 3.0 ·  官方直连 · 特价按秒",
+	}
 	for _, model := range videoModels {
 		t.Run(model, func(t *testing.T) {
-			ctx := yuanxiangContext(model+"-YX", map[string]any{"prompt": "A boat"})
+			requestBody := map[string]any{"prompt": "A boat"}
+			if model == "GK-video-3.5" {
+				requestBody["image_ids"] = []string{"uploaded-image"}
+			}
+			ctx := yuanxiangContext(model+"-YX", requestBody)
 			for _, upstream := range []string{"vendor", "new_api"} {
 				ctx["upstream"] = map[string]any{"kind": upstream}
 				body := yuanxiangHook(t, plugin, "buildSubmitRequest", ctx)["body"].(map[string]any)
@@ -114,12 +124,56 @@ func TestYuanxiangModelFamiliesAndImageProtocol(t *testing.T) {
 				}
 				assert.Equal(t, wantModel, body["model"])
 				options, _ := body["options"].(map[string]any)
-				assert.NotContains(t, options, "version", "use the platform's default model version on %s", upstream)
+				if model == "SD 2.0 · 官转满血68折（返官链）" {
+					assert.Equal(t, "标准", options["version"])
+				} else {
+					assert.NotContains(t, options, "version", "use the platform's default model version on %s", upstream)
+				}
 				assert.NotContains(t, body, "version")
 			}
 			schema, _ := plugin.Meta.UsageForModels(model + "-YX")
 			assert.Equal(t, []string{"duration_tier", "reference_seconds", "requests", "resolution", "seconds", "tokens", "video_input"}, slices.Sorted(maps.Keys(schema)))
 		})
+	}
+	for alias, target := range map[string]string{
+		"SD 2.5 · 官方直连（满血版）按秒": "SD 2.5 · 官方满血按秒",
+		"MiniMax H3 · 特价按次":    "MiniMax H3 · 特价按次（慢线）",
+	} {
+		t.Run("legacy model alias/"+alias, func(t *testing.T) {
+			ctx := yuanxiangContext(alias+"-YX", map[string]any{"prompt": "A boat"})
+			body := yuanxiangHook(t, plugin, "buildSubmitRequest", ctx)["body"].(map[string]any)
+			assert.Equal(t, target, body["model"])
+		})
+	}
+	for _, tc := range []struct {
+		model, quality string
+	}{
+		{"GT Image 2.5 · 特价按张", "low"},
+		{"GT Image 2.6 Flare", "auto"},
+		{"GT Image 2 · OpenAI", "low"},
+		{"Banana 2", ""},
+	} {
+		t.Run(tc.model, func(t *testing.T) {
+			ctx := yuanxiangContext(tc.model+"-YX", map[string]any{"prompt": "A boat"})
+			body := yuanxiangHook(t, plugin, "buildSubmitRequest", ctx)["body"].(map[string]any)
+			assert.Equal(t, tc.model, body["model"])
+			assert.Equal(t, "1k", body["resolution"])
+			if tc.quality == "" {
+				assert.NotContains(t, body, "quality")
+			} else {
+				assert.Equal(t, tc.quality, body["quality"])
+			}
+			facts := yuanxiangHook(t, plugin, "extractUsage", ctx)
+			assert.Equal(t, float64(1), facts["image_count"])
+			schema, _ := plugin.Meta.UsageForModels(tc.model + "-YX")
+			assert.Equal(t, []string{"image_count", "resolution"}, slices.Sorted(maps.Keys(schema)))
+		})
+	}
+	for _, imageIDs := range [][]string{nil, {"first", "second"}} {
+		_, err := plugin.Engine.Call(t.Context(), "buildSubmitRequest", yuanxiangContext("GK-video-3.5-YX", map[string]any{
+			"prompt": "A boat", "image_ids": imageIDs,
+		}))
+		require.Error(t, err)
 	}
 	for _, model := range []string{"GT Image 2.5"} {
 		t.Run(model, func(t *testing.T) {
@@ -148,7 +202,7 @@ func TestYuanxiangModelFamiliesAndImageProtocol(t *testing.T) {
 		assert.True(t, strings.HasSuffix(model, "-YX"), model)
 	}
 	assert.NotContains(t, plugin.Meta.Models, "wan3.0-video-nsfw-YX", "the user's example is not an upstream model")
-	assert.Len(t, plugin.Meta.Models, 10)
+	assert.Len(t, plugin.Meta.Models, len(videoModels)+5+2)
 }
 
 func TestYuanxiangSD25PerItemStableRoute(t *testing.T) {
@@ -581,10 +635,14 @@ func TestYuanxiangDurationBranchesIndependentlyForEveryVideoModel(t *testing.T) 
 							continue // These durations are unavailable on the model's 720p line.
 						}
 					}
-					ctx := yuanxiangContext(modelName, map[string]any{
+					requestBody := map[string]any{
 						"prompt":   "boat",
 						"metadata": metadata,
-					})
+					}
+					if modelName == "GK-video-3.5-YX" {
+						requestBody["image_ids"] = []string{"uploaded-image"}
+					}
+					ctx := yuanxiangContext(modelName, requestBody)
 					ctx["model"] = "local-alias"
 					facts := yuanxiangHook(t, plugin, "extractUsage", ctx)
 					body := yuanxiangHook(t, plugin, "buildSubmitRequest", ctx)["body"].(map[string]any)
@@ -609,7 +667,7 @@ func TestYuanxiangDurationBranchesIndependentlyForEveryVideoModel(t *testing.T) 
 			}
 		})
 	}
-	assert.Equal(t, 9, videos)
+	assert.Equal(t, 16, videos)
 	t.Run("Muse continuation normalizes to 20 seconds before billing", func(t *testing.T) {
 		ctx := yuanxiangContext("Muse · 特价按次 ·【原生】-YX", map[string]any{
 			"prompt": "boat", "seconds": 10, "video_b64s": []string{"unmeasured-reference"},
@@ -661,10 +719,14 @@ func TestYuanxiangTokenEstimatesMatchDoubao(t *testing.T) {
 						continue
 					}
 				}
-				ctx := yuanxiangContext(modelName, map[string]any{
+				requestBody := map[string]any{
 					"prompt": "boat", "metadata": metadata,
 					"tokens": 0, "usage": map[string]any{"completion_tokens": 0},
-				})
+				}
+				if modelName == "GK-video-3.5-YX" {
+					requestBody["image_ids"] = []string{"uploaded-image"}
+				}
+				ctx := yuanxiangContext(modelName, requestBody)
 				ctx["model"] = "mapped-client-name"
 				facts := yuanxiangHook(t, plugin, "extractUsage", ctx)
 				assert.Equal(t, tc.tokens, facts["tokens"], "client-supplied usage cannot replace metered facts")
@@ -676,7 +738,7 @@ func TestYuanxiangTokenEstimatesMatchDoubao(t *testing.T) {
 			}
 		})
 	}
-	assert.Equal(t, 9, videos)
+	assert.Equal(t, 16, videos)
 	for _, tc := range []struct {
 		resolution string
 		seconds    int

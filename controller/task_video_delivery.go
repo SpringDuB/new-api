@@ -25,6 +25,57 @@ func init() {
 	service.ResolveTaskVideoDelivery = resolveTaskVideoDelivery
 }
 
+func videoArtifactsForTask(task *model.Task) ([]relaychannel.TaskArtifact, error) {
+	artifacts, err := taskStorageArtifacts(task)
+	if err != nil {
+		return nil, err
+	}
+	if !taskHasPluginExecution(task) && (legacyVideoAvailable(task) || task.GetResultURL() != "" && len(artifacts) == 0 && !model.IsImageTaskAction(task.Action)) {
+		return []relaychannel.TaskArtifact{{Key: "video", Type: "video", MimeType: "video/mp4"}}, nil
+	}
+	return artifacts, nil
+}
+
+func primaryVideoArtifact(artifacts []relaychannel.TaskArtifact) (relaychannel.TaskArtifact, bool) {
+	var primary relaychannel.TaskArtifact
+	found := false
+	for _, artifact := range artifacts {
+		if artifact.Type != "video" {
+			continue
+		}
+		if artifact.Key == "video" {
+			return artifact, true
+		}
+		if !found || artifact.Key < primary.Key {
+			primary, found = artifact, true
+		}
+	}
+	return primary, found
+}
+
+func taskVideoContentRequest(ctx context.Context, task *model.Task, artifact relaychannel.TaskArtifact, clientRequest relaychannel.TaskArtifactClientRequest) (*relaychannel.TaskContentRequest, error) {
+	descriptor := &relaychannel.TaskContentRequest{URL: task.GetResultURL(), Method: clientRequest.Method, Credentialless: true}
+	if !taskHasPluginExecution(task) {
+		return descriptor, nil
+	}
+	adaptor, err := initTaskArtifactAdaptor(task)
+	if err != nil {
+		return nil, err
+	}
+	provider, ok := adaptor.(relaychannel.TaskContentRequestProvider)
+	if !ok {
+		return nil, errTaskArtifactPluginUnavailable
+	}
+	descriptor, err = provider.BuildContentRequest(ctx, task, artifact.Key, clientRequest)
+	if err != nil {
+		return nil, err
+	}
+	if descriptor == nil {
+		return nil, errors.New("video content request is unavailable")
+	}
+	return descriptor, nil
+}
+
 // Resolve delivery independently of the vendor's JSON envelope. The original
 // snapshot remains the source for driver refreshes and background polling.
 func resolveTaskVideoDelivery(ctx context.Context, task *model.Task) (map[string]service.TaskVideoDelivery, error) {
@@ -33,25 +84,14 @@ func resolveTaskVideoDelivery(ctx context.Context, task *model.Task) (map[string
 	if task == nil || task.Status != model.TaskStatusSuccess {
 		return deliveries, nil
 	}
-	artifacts, err := taskStorageArtifacts(task)
+	artifacts, err := videoArtifactsForTask(task)
 	if err != nil {
 		return nil, service.ErrTaskVideoDelivery
 	}
-	if !taskHasPluginExecution(task) && (legacyVideoAvailable(task) || task.GetResultURL() != "" && len(artifacts) == 0 && !model.IsImageTaskAction(task.Action)) {
-		artifacts = []relaychannel.TaskArtifact{{Key: "video", Type: "video", MimeType: "video/mp4"}}
-	}
+	primary, hasPrimary := primaryVideoArtifact(artifacts)
 	primaryKey := ""
-	for _, artifact := range artifacts {
-		if artifact.Type != "video" {
-			continue
-		}
-		if artifact.Key == "video" {
-			primaryKey = artifact.Key
-			break
-		}
-		if primaryKey == "" || artifact.Key < primaryKey {
-			primaryKey = artifact.Key
-		}
+	if hasPrimary {
+		primaryKey = primary.Key
 	}
 	for _, artifact := range artifacts {
 		if artifact.Type != "video" {
@@ -167,19 +207,7 @@ func fetchTaskVideoDelivery(ctx context.Context, task *model.Task, artifact rela
 		}
 		defer release()
 	}
-	descriptor := &relaychannel.TaskContentRequest{URL: task.GetResultURL(), Method: http.MethodGet, Credentialless: true}
-	var err error
-	if taskHasPluginExecution(task) {
-		var adaptor relaychannel.TaskAdaptor
-		adaptor, err = initTaskArtifactAdaptor(task)
-		if err == nil {
-			if provider, ok := adaptor.(relaychannel.TaskContentRequestProvider); ok {
-				descriptor, err = provider.BuildContentRequest(ctx, task, artifact.Key, relaychannel.TaskArtifactClientRequest{Method: http.MethodGet})
-			} else {
-				err = errTaskArtifactPluginUnavailable
-			}
-		}
-	}
+	descriptor, err := taskVideoContentRequest(ctx, task, artifact, relaychannel.TaskArtifactClientRequest{Method: http.MethodGet})
 	if descriptor != nil && descriptor.URL != "" {
 		delivery.SourceURLs = []string{descriptor.URL}
 	}

@@ -528,7 +528,9 @@ func videoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *d
 		}
 		response, err := service.BuildPublicVideoTask(c.Request.Context(), originTask)
 		if err != nil {
-			return nil, service.TaskErrorWrapperLocal(errors.New(i18n.T(c, i18n.MsgRelayVideoDeliveryFailed)), "video_delivery_failed", http.StatusBadGateway)
+			// Keep the task terminal state visible. The content endpoint performs
+			// the guarded upstream proxy fallback if archival cannot serve the video.
+			logger.LogTaskArtifactFailure(c.Request.Context(), originTask.TaskID, "delivery_proxy_fallback", 0)
 		}
 		c.Header("Cache-Control", "private, no-store")
 		if isOpenAIVideoAPI {

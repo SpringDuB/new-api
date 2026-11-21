@@ -1078,16 +1078,22 @@ func TestLecAPIRefreshesArtifactsWithoutSendingCredentialsToStorage(t *testing.T
 
 func TestLecAPIRecentCompletedArtifactsAvoidDuplicateQueries(t *testing.T) {
 	plugin := loadLecAPIPlugin(t)
+	now := time.Now().Unix()
+	signedAt := time.Unix(now-120, 0).UTC().Format("20060102T150405Z")
 	for _, tc := range []struct {
 		name        string
 		completedAt int64
 		url         string
 		refresh     bool
 	}{
-		{"just completed", time.Now().Unix() - 5, "https://storage.example/current.mp4", false},
+		{"just completed", now - 5, "https://storage.example/current.mp4", false},
+		{"historical result with valid signed URL", now - 3600, fmt.Sprintf("https://storage.example/current.mp4?Expires=%d&Signature=abc", now+600), false},
+		{"historical result with valid relative signed URL", now - 3600, fmt.Sprintf("https://storage.example/current.mp4?X-Amz-Date=%s&X-Amz-Expires=3600&X-Amz-Signature=abc", signedAt), false},
+		{"signed URL expired", now - 5, fmt.Sprintf("https://storage.example/expired.mp4?expires=%d&signature=abc", now-60), true},
+		{"signed URL near expiry", now - 5, fmt.Sprintf("https://storage.example/soon.mp4?expires=%d&signature=abc", now+10), true},
 		{"historical result", 1, "https://storage.example/expired.mp4", true},
 		{"missing completion time", 0, "https://storage.example/expired.mp4", true},
-		{"missing result", time.Now().Unix() - 5, "", true},
+		{"missing result", now - 5, "", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := lecAPIContext("aj-wan-3-0", nil)
@@ -1110,7 +1116,11 @@ func TestLecAPIRecentCompletedArtifactsAvoidDuplicateQueries(t *testing.T) {
 				assert.Contains(t, string(encoded), "refreshed.mp4")
 			} else {
 				assert.Zero(t, queries)
-				assert.JSONEq(t, `{"url":"https://storage.example/current.mp4","method":"GET","credentialless":true}`, string(encoded))
+				var descriptor map[string]any
+				require.NoError(t, common.Unmarshal(encoded, &descriptor))
+				assert.Equal(t, tc.url, descriptor["url"])
+				assert.Equal(t, "GET", descriptor["method"])
+				assert.Equal(t, true, descriptor["credentialless"])
 			}
 		})
 	}

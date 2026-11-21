@@ -47,8 +47,8 @@ func GetGroupEnabledModels(group string) []string {
 	return models
 }
 
-// GetEnabledModelChannels loads only routing metadata for models accessible in
-// the requested groups. Credentials are not needed to check plugin prices.
+// GetEnabledModelChannels loads routing metadata, without credentials, for
+// enabled models in the requested groups.
 func GetEnabledModelChannels(groups, modelNames []string) (map[string][]*Channel, error) {
 	result := make(map[string][]*Channel)
 	if len(groups) == 0 || len(modelNames) == 0 {
@@ -59,7 +59,7 @@ func GetEnabledModelChannels(groups, modelNames []string) (map[string][]*Channel
 		Channel
 	}
 	err := DB.Table("abilities").
-		Distinct("abilities.model", "channels.id", "channels.type", "channels.status", "channels.setting", "channels.model_mapping").
+		Distinct("abilities.model", "channels.id", "channels.type", "channels.status", "channels.setting", "channels.model_mapping", "channels.settings").
 		Joins("JOIN channels ON abilities.channel_id = channels.id").
 		Where("abilities.enabled = ? AND channels.status = ?", true, common.ChannelStatusEnabled).
 		Where("abilities."+commonGroupCol+" IN ?", groups).
