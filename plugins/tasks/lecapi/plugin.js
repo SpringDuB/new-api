@@ -1,9 +1,9 @@
-// LecAPI public media catalog and documentation snapshot: 2026-11-21.
-// Sources: https://api.lecapi.net/api/media-models/catalog, /api/pricing, and /docs.
-// Catalog version: sha256:f5068ed5b18109920c720c7514fe1d8c673b882760b3b61c01caa7095dbdb580.
+// LecAPI public media catalog and pricing snapshot: 2026-11-22.
+// Sources: https://api.lecapi.net/api/media-models/catalog and /api/pricing.
+// Catalog version: sha256:90ad999605ec6e5c311a8c903f53ebe71344fcb9e52d5f4cb73e248f0bb4adc2.
 // Pricing version: a42d372ccf0b5dd13ecf71203521f9d2.
-// The refresh returned 73 catalog and 84 pricing entries; the pricing version is unchanged.
-// Static media kinds take precedence over inconsistent /v1/models labels.
+// Cross-checked 76 catalog entries and 86 pricing entries against the authenticated /v1/models list.
+// The catalog determines media kinds; this plugin serves only image and video generation.
 // User pricing policy: published CNY price +20%, platform CNY/USD units 1:1.
 // Each expression contains the final marked-up numeric coefficient, with no FX
 // conversion or hidden multiplier. Rounding only removes binary float noise.
@@ -149,6 +149,52 @@ const MODELS = {
     },
     billing: { billing_unit: "request", price_per_request: 2 },
   },
+  "lec-vg-seedance-2-0-fast-cc": {
+    kind: "video",
+    name: "Seedance 2.0 Fast（VG）",
+    icon: "Doubao.Color",
+    tags: ["fast", "720p", "image", "audio", "per_request"],
+    parameters: {
+      prompt: { type: "string", required: true },
+      duration: { type: "integer", default: 5, min: 4, max: 15, step: 1 },
+      aspect_ratio: { type: "enum", default: "16:9", values: ["16:9", "9:16", "21:9", "4:3", "1:1", "3:4"] },
+      images: { type: "array", constraints: { max_items: 9, url_schemes: ["http", "https"], allow_data_url: true } },
+      audios: { type: "array", constraints: { max_items: 3, url_schemes: ["http", "https"], allow_data_url: true } },
+      resolution: { type: "enum", default: "720p", values: ["720p"] },
+    },
+    billing: { billing_unit: "request", price_per_request: 1.3 },
+  },
+  "lec-vg-seedance-2-5-op": {
+    kind: "video",
+    name: "Seedance 2.5 OP（VG）",
+    icon: "Doubao.Color",
+    tags: ["full", "301010", "720p", "image", "video", "audio", "native", "per_request"],
+    parameters: {
+      prompt: { type: "string", required: true },
+      duration: { type: "integer", required: true, default: 5, min: 5, max: 30, step: 1 },
+      aspect_ratio: { type: "enum", default: "16:9", values: ["16:9", "9:16", "21:9"] },
+      images: { type: "array", required: true, constraints: { min_items: 1, max_items: 30, url_schemes: ["http", "https"], allow_data_url: true } },
+      videos: { type: "array", constraints: { max_items: 10, url_schemes: ["http", "https"], allow_data_url: true, allow_data_url: true } },
+      audios: { type: "array", constraints: { max_items: 10, url_schemes: ["http", "https"], allow_data_url: true, allow_data_url: true } },
+      resolution: { type: "enum", default: "720p", values: ["720p"] },
+    },
+    billing: { billing_unit: "request", price_per_request: 4.7 },
+  },
+  "lec-md-seedance-2-5-900-720p": {
+    kind: "video",
+    name: "Seedance 2.5 900（MD）",
+    icon: "Video.Color",
+    tags: ["full", "900", "720p", "image", "supported", "per_request"],
+    parameters: {
+      prompt: { type: "string", required: true },
+      duration: { type: "integer", required: true, default: 30, values: [5, 10, 15, 30], min: 5, max: 30 },
+      aspect_ratio: { type: "enum", required: true, default: "16:9", values: ["16:9", "9:16", "1:1", "4:3", "3:4"] },
+      images: { type: "array", constraints: { max_items: 9, url_schemes: ["https"], allow_data_url: true } },
+      process_face: { type: "boolean" },
+      resolution: { type: "enum", default: "720p", values: ["720p"] },
+    },
+    billing: { billing_unit: "request", price_per_request: 5 },
+  },
   "lec-rs-seedance-2-0-fast": {
     kind: "video",
     name: "Seedance 2.0 Fast（RS）",
@@ -164,7 +210,6 @@ const MODELS = {
     billing: { billing_unit: "request", price_per_request: 1.3, resolution_prices: { "720p": 1.3 } },
   },
   "lec-mj-seedance-2-5-fd-720p": {
-    retired: true,
     kind: "video",
     name: "Seedance 2.5（MJ）",
     icon: "Doubao.Color",
@@ -197,6 +242,7 @@ const MODELS = {
     billing: { billing_unit: "request", price_per_request: 5, resolution_prices: { "720p": 5 } },
   },
   "lec-zy-seedance-2-5-discount2": {
+    retired: true,
     kind: "video",
     name: "Seedance 2.5 二号（ZY）",
     icon: "Doubao.Color",
@@ -212,6 +258,7 @@ const MODELS = {
     billing: { billing_unit: "request", price_per_request: 4.5, resolution_prices: { "720p": 4.5 } },
   },
   "lec-zy-seedance-2-5-discount": {
+    retired: true,
     kind: "video",
     name: "Seedance 2.5 一号（ZY）",
     icon: "Doubao.Color",
@@ -227,6 +274,7 @@ const MODELS = {
     billing: { billing_unit: "request", price_per_request: 5.5, resolution_prices: { "720p": 5.5 } },
   },
   "lec-mf-seedance-2-5-x": {
+    retired: true,
     kind: "video",
     name: "Seedance 2.5 X（MF）",
     icon: "Doubao.Color",
@@ -404,6 +452,7 @@ const MODELS = {
     billing: { billing_unit: "request", price_per_request: 1.3, resolution_prices: { "480p": 1.3, "720p": 1.8 } },
   },
   "lec-hc-seedance-2-5-3010": {
+    retired: true,
     kind: "video",
     name: "Seedance 2.5 3010（HC）",
     icon: "Doubao.Color",
@@ -515,7 +564,6 @@ const MODELS = {
     billing: { billing_unit: "request", price: 0.13 },
   },
   "lec-vw-seedance-2-0-fast": {
-    retired: true,
     kind: "video",
     name: "Seedance 2.0 Fast（VW）",
     icon: "Doubao.Color",
@@ -905,6 +953,7 @@ const MODELS = {
     max_reference_video_seconds: 15,
   },
   "lec-mf-video-upscale": {
+    retired: true,
     kind: "video",
     name: "火山-视频超分（MF）",
     icon: "Doubao.Color",
@@ -1441,7 +1490,6 @@ const MODELS = {
     billing: { billing_unit: "second", resolution_prices: { "720p": 0.7 }, equivalent_second_price: 0.7 },
   },
   "lec-md-seedance-2-0-900-720p": {
-    retired: true,
     kind: "video",
     name: "Seedance 2.0 Mini 900（MD）",
     icon: "Video.Color",
@@ -1730,6 +1778,7 @@ const MODELS = {
     billing: { billing_unit: "request", price_per_image: 0.05, price_per_request: 0.05 },
   },
   "lec-vv-seedance-2-5-r2": {
+    retired: true,
     kind: "video",
     name: "Seedance 2.5 R2（VV）",
     icon: "Doubao.Color",
@@ -1749,6 +1798,7 @@ const MODELS = {
     billing: { billing_unit: "request", resolution_prices: { "480p": 5.3 }, price_per_request: 5.3 },
   },
   "lec-vv-seedance-2-5-r2-plus": {
+    retired: true,
     kind: "video",
     name: "Seedance 2.5 R2 Plus（VV）",
     icon: "Doubao.Color",
@@ -1803,6 +1853,7 @@ const MODELS = {
     billing: { billing_unit: "request", resolution_prices: { "480p": 2.5 }, price_per_request: 3 },
   },
   "lec-haya-seedance-2-5-xg-480p": {
+    retired: true,
     kind: "video",
     name: "Seedance 2.5 XG 3（HAYA）",
     icon: "Doubao.Color",
@@ -1863,6 +1914,7 @@ const MODELS = {
     billing: { billing_unit: "request", price_per_request: 3 },
   },
   "lec-mf-seedance-2-5-std": {
+    retired: true,
     kind: "video",
     name: "Seedance 2.5（MF）",
     icon: "Doubao.Color",
@@ -1910,6 +1962,7 @@ const MODELS = {
     billing: { billing_unit: "request", price_per_request: 3.5 },
   },
   "lec-seedance-2-5-301010": {
+    retired: true,
     kind: "video",
     name: "Seedance 2.5 301010（渠道1）",
     icon: "Doubao.Color",
@@ -1928,6 +1981,7 @@ const MODELS = {
     billing: { billing_unit: "request", price_per_request: 4.7 },
   },
   "lec-mj-seedance-2-5-qn": {
+    retired: true,
     kind: "video",
     name: "Seedance 2.5 QN（MJ）",
     icon: "Doubao.Color",
@@ -1960,8 +2014,8 @@ const MODELS = {
     },
     billing: { billing_unit: "request", resolution_prices: { "720p": 1.5, "1080p": 1.8 } },
   },
+  // Listed in public pricing and /v1/models, with a separate Image 2 API spec.
   "lec-image-2": {
-    retired: true,
     kind: "image",
     name: "Image 2",
     icon: "OpenAI.Color",
@@ -2171,6 +2225,7 @@ const MODELS = {
     max_reference_video_total_seconds: 15,
   },
   "lec-vp-seedance-2-5-flash": {
+    retired: true,
     kind: "video",
     name: "Seedance 2.5 Flash（VP）",
     icon: "Doubao.Color",
@@ -2193,6 +2248,7 @@ const MODELS = {
     billing: { billing_unit: "request", price_per_request: 4 },
   },
   "lec-vp-seedance-2-5-flash-m": {
+    retired: true,
     kind: "video",
     name: "Seedance 2.5 Flash M（VP）",
     icon: "Doubao.Color",
@@ -2253,6 +2309,11 @@ const MODELS = {
 const FIXED_VIDEO_OUTPUTS = {
   "lec-haya-seedance-2-5-xg-480p": { resolution: "480p" },
   "lec-hc-seedance-2-0-903": { resolution: "720p" },
+  "lec-md-seedance-2-0-900-720p": { resolution: "720p" },
+  "lec-md-seedance-2-5-900-720p": { resolution: "720p" },
+  "lec-mj-seedance-2-5-fd-720p": { resolution: "720p" },
+  "lec-vg-seedance-2-0-fast-cc": { resolution: "720p" },
+  "lec-vg-seedance-2-5-op": { resolution: "720p" },
   "lec-md-seedance-2-0-fast-900-720p": { resolution: "720p" },
   "lec-mf-seedance-2-5-30ref": { resolution: "720p" },
   "lec-mg-seedance-2-5": { resolution: "720p" },
@@ -2413,7 +2474,9 @@ for (const vendorModel of Object.keys(MODELS)) {
   // Reuse the exact spelling already shared by Hailuo's host binding.
   const publicModel = vendorModel === "lec-minimax-h3" ? "MiniMax-H3" : vendorModel.startsWith("lec-") ? vendorModel.slice(4) : vendorModel;
   if (Object.prototype.hasOwnProperty.call(MODEL_MAPPING, publicModel)) throw new Error("LecAPI public model id collision: " + publicModel);
-  if (!MODELS[vendorModel].retired && !MODELS[vendorModel].legacyPool && !INTERNAL_VIDEO_MODELS.has(vendorModel)) MODEL_MAPPING[publicModel] = vendorModel;
+  const profile = MODELS[vendorModel];
+  if (!profile.retired && !profile.poolUnavailable && !profile.legacyPool && !INTERNAL_VIDEO_MODELS.has(vendorModel))
+    MODEL_MAPPING[publicModel] = vendorModel;
   PUBLIC_MODEL_NAMES[vendorModel] = publicModel;
   for (const name of [publicModel, vendorModel]) {
     const lookup = name.toLowerCase();
@@ -2699,7 +2762,6 @@ function describeVideoPoolRatios(profile) {
 }
 
 function modelDescription(profile) {
-  if (profile.poolUnavailable) return { en: "No upstream route currently available", zh: "当前没有可用的上游线路" };
   const english = [],
     chinese = [];
   const types = { string: "字符串类型", integer: "整数类型", number: "数字类型", boolean: "布尔类型", array: "数组类型" };
@@ -2851,6 +2913,11 @@ function modelDescription(profile) {
 
 // Catalog titles belong to public API IDs, not the vendor's route labels.
 const PUBLIC_DISPLAY_NAMES = {
+  "vg-seedance-2-0-fast-cc": "Seedance 2.0 Fast · VG",
+  "vg-seedance-2-5-op": "Seedance 2.5 OP · VG",
+  "md-seedance-2-5-900-720p": "Seedance 2.5 900 · MD",
+  "md-seedance-2-0-900-720p": "Seedance 2.0 Mini 900 · MD",
+  "vw-seedance-2-0-fast": "Seedance 2.0 Fast · VW",
   "ap-minimax-h3": "MiniMax H3 933 · 30秒",
   "ap-seedance-2-0-image-audio": "Seedance 2.0 903 · 图音",
   "mf-seedance-2-0-fast-gz": "Seedance 2.0 Fast · 官转",
@@ -2949,7 +3016,7 @@ export const meta = {
   key: "lecapi",
   name: "LecAPI",
   icon: "text:LE",
-  version: "1.10.0",
+  version: "1.11.0",
   author: { name: "QuantumNous" },
   website: "https://api.lecapi.net/docs",
   baseUrl: "https://api.lecapi.net",
@@ -3423,6 +3490,11 @@ function resolveSubmission(ctx, includeAlternatives = false) {
 
 export function buildSubmitRequest(ctx) {
   const request = resolveSubmission(ctx, true);
+  if (ctx.upstream?.kind !== "new_api") {
+    const fixed = FIXED_VIDEO_OUTPUTS[request.profile.vendorModel];
+    if (fixed?.resolution) delete request.body.resolution;
+    if (fixed?.duration) delete request.body.duration;
+  }
   const path =
     request.profile.kind === "image"
       ? ctx.upstream?.kind === "new_api" && ASYNC_IMAGE_MODELS.includes(request.profile.vendorModel)
@@ -3757,6 +3829,7 @@ function decodeRequest(ctx, kind, nativeRoute) {
   const model = ctx.model || (vendorModel ? PUBLIC_MODEL_NAMES[vendorModel] : requestedModel);
   if (typeof model !== "string" || !model.trim()) throw new Error("model is required");
   if (vendorModel && MODELS[vendorModel].retired) throw new Error(PUBLIC_MODEL_NAMES[vendorModel] + " is no longer available on LecAPI");
+  if (vendorModel && MODELS[vendorModel].poolUnavailable) throw new Error("No LecAPI route is currently available for this model");
   if (INTERNAL_VIDEO_MODELS.has(vendorModel) || INTERNAL_VIDEO_MODELS.has(vendorModelName(body.model)))
     throw new Error("Use a public LecAPI video entry instead of a retired route model name");
   if (vendorModel && MODELS[vendorModel].kind !== kind) throw new Error("model does not support this media endpoint");

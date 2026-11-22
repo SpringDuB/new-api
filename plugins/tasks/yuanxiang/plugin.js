@@ -3,7 +3,6 @@
 const SD25_STABLE_CHANNEL = "route:stable";
 const VIDEO_MODELS = {
   "SD 2.5 · 官方满血按秒": { seconds: 5, resolution: "720p" },
-  "SD 2.0 满血版 按秒": { seconds: 5, resolution: "720p" },
   "SD 2.0 · 官转满血68折（返官链）": { seconds: 5, resolution: "720p", version: "标准" },
   "SD 2.5 · 特价按次": { seconds: 5, resolution: "1080p", channel: SD25_STABLE_CHANNEL },
   "Sd 2.0 · 特价按次 · 漫剧短剧专线": { seconds: 5, resolution: "720p" },
@@ -24,14 +23,7 @@ const IMAGE_MODELS = {
   "GT Image 2 · OpenAI": { resolution: "1k", quality: "low" },
   "Banana 2": { resolution: "1k" },
 };
-const LEGACY_MODEL_MAPPING = {
-  "SD 2.5 · 官方直连（满血版）按秒": "SD 2.5 · 官方满血按秒",
-  "MiniMax H3 · 特价按次": "MiniMax H3 · 特价按次（慢线）",
-};
-const MODEL_MAPPING = Object.fromEntries(
-  Object.keys(VIDEO_MODELS).concat(Object.keys(IMAGE_MODELS)).map((model) => [model + "-YX", model])
-    .concat(Object.entries(LEGACY_MODEL_MAPPING).map(([alias, model]) => [alias + "-YX", model]))
-);
+const MODEL_MAPPING = Object.fromEntries(Object.keys(VIDEO_MODELS).concat(Object.keys(IMAGE_MODELS)).map((model) => [model + "-YX", model]));
 const VIDEO_NAMES = Object.keys(MODEL_MAPPING).filter((name) => Object.prototype.hasOwnProperty.call(VIDEO_MODELS, MODEL_MAPPING[name]));
 const IMAGE_NAMES = Object.keys(MODEL_MAPPING).filter((name) => Object.prototype.hasOwnProperty.call(IMAGE_MODELS, MODEL_MAPPING[name]));
 const DURATION_TIERS = ["5", "10", "15", "20", "30", "40", "50", "60"];
@@ -97,8 +89,7 @@ export const meta = {
 
 function modelDetails(ctx) {
   const requested = ctx.upstreamModel || ctx.model;
-  const model = Object.prototype.hasOwnProperty.call(MODEL_MAPPING, requested) ? MODEL_MAPPING[requested]
-    : Object.prototype.hasOwnProperty.call(LEGACY_MODEL_MAPPING, requested) ? LEGACY_MODEL_MAPPING[requested] : requested;
+  const model = Object.prototype.hasOwnProperty.call(MODEL_MAPPING, requested) ? MODEL_MAPPING[requested] : requested;
   if (Object.prototype.hasOwnProperty.call(VIDEO_MODELS, model)) return { model: model, kind: "video", defaults: VIDEO_MODELS[model] };
   if (Object.prototype.hasOwnProperty.call(IMAGE_MODELS, model)) return { model: model, kind: "image", defaults: IMAGE_MODELS[model] };
   throw new Error("unsupported Yuanxiang model");

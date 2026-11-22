@@ -102,7 +102,7 @@ func TestYuanxiangCanvasMappingAndBilling(t *testing.T) {
 func TestYuanxiangModelFamiliesAndImageProtocol(t *testing.T) {
 	plugin := loadYuanxiangPlugin(t)
 	videoModels := []string{
-		"SD 2.5 · 官方满血按秒", "SD 2.0 满血版 按秒", "SD 2.0 · 官转满血68折（返官链）",
+		"SD 2.5 · 官方满血按秒", "SD 2.0 · 官转满血68折（返官链）",
 		"SD 2.5 · 特价按次", "Sd 2.0 · 特价按次 · 漫剧短剧专线", "SD 2.0 · 特价按次 · 电商专线",
 		"SD 2.0 FAST · 特价按秒 · 稳定冲量", "Sd 2.0 · 即梦满血按秒专线", "Sd 2.5 · 即梦满血按秒专线",
 		"GK-video-3.5", "Muse · 特价按次 ·【原生】", "MiniMax H3 · 特价按秒",
@@ -135,16 +135,9 @@ func TestYuanxiangModelFamiliesAndImageProtocol(t *testing.T) {
 			assert.Equal(t, []string{"duration_tier", "reference_seconds", "requests", "resolution", "seconds", "tokens", "video_input"}, slices.Sorted(maps.Keys(schema)))
 		})
 	}
-	for alias, target := range map[string]string{
-		"SD 2.5 · 官方直连（满血版）按秒": "SD 2.5 · 官方满血按秒",
-		"MiniMax H3 · 特价按次":    "MiniMax H3 · 特价按次（慢线）",
-	} {
-		t.Run("legacy model alias/"+alias, func(t *testing.T) {
-			ctx := yuanxiangContext(alias+"-YX", map[string]any{"prompt": "A boat"})
-			body := yuanxiangHook(t, plugin, "buildSubmitRequest", ctx)["body"].(map[string]any)
-			assert.Equal(t, target, body["model"])
-		})
-	}
+	assert.NotContains(t, plugin.Meta.Models, "SD 2.0 满血版 按秒-YX")
+	assert.NotContains(t, plugin.Meta.Models, "SD 2.5 · 官方直连（满血版）按秒-YX")
+	assert.NotContains(t, plugin.Meta.Models, "MiniMax H3 · 特价按次-YX")
 	for _, tc := range []struct {
 		model, quality string
 	}{
@@ -202,7 +195,7 @@ func TestYuanxiangModelFamiliesAndImageProtocol(t *testing.T) {
 		assert.True(t, strings.HasSuffix(model, "-YX"), model)
 	}
 	assert.NotContains(t, plugin.Meta.Models, "wan3.0-video-nsfw-YX", "the user's example is not an upstream model")
-	assert.Len(t, plugin.Meta.Models, len(videoModels)+5+2)
+	assert.Len(t, plugin.Meta.Models, len(videoModels)+5)
 }
 
 func TestYuanxiangSD25PerItemStableRoute(t *testing.T) {
@@ -667,7 +660,7 @@ func TestYuanxiangDurationBranchesIndependentlyForEveryVideoModel(t *testing.T) 
 			}
 		})
 	}
-	assert.Equal(t, 16, videos)
+	assert.Equal(t, 13, videos)
 	t.Run("Muse continuation normalizes to 20 seconds before billing", func(t *testing.T) {
 		ctx := yuanxiangContext("Muse · 特价按次 ·【原生】-YX", map[string]any{
 			"prompt": "boat", "seconds": 10, "video_b64s": []string{"unmeasured-reference"},
@@ -738,7 +731,7 @@ func TestYuanxiangTokenEstimatesMatchDoubao(t *testing.T) {
 			}
 		})
 	}
-	assert.Equal(t, 16, videos)
+	assert.Equal(t, 13, videos)
 	for _, tc := range []struct {
 		resolution string
 		seconds    int
@@ -766,7 +759,7 @@ func TestYuanxiangTokenEstimatesMatchDoubao(t *testing.T) {
 
 func TestYuanxiangActualTokenSettlementAndEstimatedFallback(t *testing.T) {
 	plugin := loadYuanxiangPlugin(t)
-	const modelName = "SD 2.0 满血版 按秒-YX"
+	const modelName = "SD 2.5 · 官方满血按秒-YX"
 	const expression = "tier(\"tokens\", u(\"tokens\") * 1 / 1000000)"
 	frozen := yuanxiangHook(t, plugin, "extractUsage", yuanxiangContext(modelName, map[string]any{
 		"prompt": "boat", "seconds": 10, "resolution": "720p",
@@ -835,7 +828,7 @@ func TestYuanxiangActualTokenSettlementAndEstimatedFallback(t *testing.T) {
 
 func TestYuanxiangReferenceVideoPricingConditions(t *testing.T) {
 	plugin := loadYuanxiangPlugin(t)
-	const modelName = "SD 2.0 满血版 按秒-YX"
+	const modelName = "SD 2.5 · 官方满血按秒-YX"
 	const expression = `
 	u("resolution") == "720p" && u("video_input") == "video" ? tier("reference", u("requests") * 2) :
 	u("resolution") == "720p" && u("video_input") == "none" ? tier("text", u("requests") * 1) :
