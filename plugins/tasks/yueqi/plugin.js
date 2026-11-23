@@ -1,119 +1,13 @@
-// Model names come from Yueqi's /v1/models and public /api/pricing catalogs.
-// Existing defaults are retained; new models use a supported request_spec resolution.
-// Its descriptions and request_spec disagree about reference capabilities, so
-// preserve media fields and let the upstream validate each model's inputs.
-const MODELS = {
-  "BD Seedance2.5": { defaultResolution: "720p" },
-  "MINIMAXH3-2.0采样": { defaultResolution: "720p" },
-  "h3-2k": { defaultResolution: "2k" },
-  "kling-4.0": { defaultResolution: "720p" },
-  "mi-seedance2.5": { defaultResolution: "720p" },
-  "sd2.5新": { defaultResolution: "720p" },
-  "seedance-2.0": { defaultResolution: "720p" },
-  "seedance-2.0-fast-通用": { defaultResolution: "720p" },
-  "seedance-2.5-standard-seconds": { defaultResolution: "720p" },
-  "seedance-2.5-standard-video": { defaultResolution: "720p" },
-  "seedance2.5无限并发版": { defaultResolution: "720p" },
-  "shot-enhanced-2": { defaultResolution: "720p" },
-  "vidu-q4": { defaultResolution: "720p" },
-  "vidu-q4-nopeak": { defaultResolution: "720p" },
-  "w3-c1": { defaultResolution: "720p" },
-  "wan-3.0": { defaultResolution: "720p" },
-  "wan-3.0-pro": { defaultResolution: "720p" },
-  "wan3.0-video-prime-deal": { defaultResolution: "720p" },
-  "不卡脸seedance-2.0": { defaultResolution: "720p" },
-  "新seedance2.0-933": { defaultResolution: "720p" },
-  "新满-seedance-933": { defaultResolution: "720p" },
-  // The upstream advertises only 720p despite the model name.
-  "特惠版2.5 满血 480p": { defaultResolution: "720p" },
-  "特惠版 Seedance 2.5 满血 720p": { defaultResolution: "720p" },
-  "特惠版 Wan 3 快速版": { defaultResolution: "480p" },
-};
-// Explicit public model names are video protocol bindings as well as driver
-// aliases. This keeps routing independent of cross-channel alias inference,
-// which can become ambiguous when another channel maps the same public name
-// to a different model. Channel model_mapping still takes precedence.
-const MODEL_ALIASES = {
-  "seedance2.5-per": "BD Seedance2.5",
-  "seedance-2.0-fast-per": "seedance-2.0-fast-通用",
-  "seedance2.5": "seedance2.5无限并发版",
-  "seedance2.0-9:16-per": "新seedance2.0-933",
-  "vidu-q4-per": "vidu-q4",
-  "wan3.0-video-prime": "wan3.0-video-prime-deal",
-  "new-seedance2.5-per": "sd2.5新",
-  "wan3-c1-per": "w3-c1",
-};
-const VIDEO_USAGE_SCHEMA = {
+const PUBLIC_MODEL = "seedance-2.5-超低价";
+const VENDOR_MODEL = "kk-sd25";
+const REQUEST_USAGE_SCHEMA = {
   requests: {
     type: "number",
     unit: "count",
     description: { en: "Video generation request unit price", zh: "视频生成按次单价" },
   },
-  resolution: {
-    enum: ["720p"],
-    allowCustom: true,
-    description: { en: "Output video resolution", zh: "输出视频分辨率" },
-  },
-  reference_seconds: {
-    type: "number",
-    unit: "second",
-    optional: true,
-    description: { en: "Reference video unit price", zh: "参考视频单价" },
-  },
-  seconds: {
-    type: "number",
-    unit: "second",
-    description: { en: "Video generation duration unit price", zh: "视频生成时长单价" },
-  },
 };
 const CONTAINERS = ["values", "metadata", "extra", "parameters"];
-const VIDEO_FIELDS = [
-  "video_url",
-  "video_urls",
-  "videoUrls",
-  "video_refs",
-  "video_references",
-  "videoReferences",
-  "reference_videos",
-  "referenceVideos",
-  "videos",
-];
-const MEDIA_FIELDS = [
-  "image",
-  "images",
-  "image_url",
-  "image_urls",
-  "imageUrls",
-  "image_refs",
-  "image_references",
-  "imageReferences",
-  "reference_images",
-  "referenceImages",
-  "input_reference",
-  "video_url",
-  "video_urls",
-  "videoUrls",
-  "video_refs",
-  "video_references",
-  "videoReferences",
-  "reference_videos",
-  "referenceVideos",
-  "videos",
-  "audio_url",
-  "audio_urls",
-  "audioUrls",
-  "audio_refs",
-  "audio_references",
-  "audioReferences",
-  "reference_audios",
-  "referenceAudios",
-  "audios",
-  "references",
-  "first_image",
-  "last_image",
-  "first_frame_url",
-  "last_frame_url",
-];
 
 export const meta = {
   apiVersion: 1,
@@ -121,10 +15,10 @@ export const meta = {
   name: "Yueqi Video",
   icon: "text:YQ",
   description: {
-    en: "Seedance, Wan, Kling, Vidu, and MiniMax video generation through Yueqi with frame and media references",
-    zh: "通过 Yueqi 调用 Seedance、Wan、Kling、Vidu 和 MiniMax 视频模型，支持首尾帧和参考素材",
+    en: "Seedance 2.5 text-to-video generation through Yueqi",
+    zh: "通过 Yueqi 调用 Seedance 2.5 文生视频",
   },
-  version: "1.2.0",
+  version: "1.3.0",
   author: { name: "QuantumNous" },
   website: "https://yueqi.icu/docs",
   baseUrl: "https://yueqi.icu",
@@ -132,11 +26,25 @@ export const meta = {
   upstreams: ["vendor", "new_api"],
   // An accepted creation has no documented idempotency key. Never retry an
   // ambiguous submission, even on another channel; poll its original id.
-  requiredCapabilities: ["submit-no-retry@1", "media-duration@1"],
-  models: Object.keys(MODELS).concat(Object.keys(MODEL_ALIASES)),
-  // Every model reports the same usage facts. Only the administrator's expression
-  // chooses which quantity is charged and its unit price.
-  usageSchema: VIDEO_USAGE_SCHEMA,
+  requiredCapabilities: ["submit-no-retry@1"],
+  models: [PUBLIC_MODEL],
+  modelDefaults: {
+    [PUBLIC_MODEL]: {
+      displayName: PUBLIC_MODEL,
+      vendor: "ByteDance",
+      description: { en: "720p text-to-video generation only", zh: "仅支持 720p 文生视频" },
+      icon: "Doubao.Color",
+      tags: ["video", "text-to-video", "720p"],
+      // Same platform CNY/USD 1:1 pricing convention as LecAPI.
+      billingExpr: 'tier("base", u("requests") * 3)',
+    },
+  },
+  // Older in-flight tasks can still settle by the resolution returned by Yueqi.
+  usageSchema: {
+    ...REQUEST_USAGE_SCHEMA,
+    resolution: { enum: ["720p"], allowCustom: true, description: { en: "Output video resolution", zh: "输出视频分辨率" } },
+  },
+  usageProfiles: [{ models: [PUBLIC_MODEL], schema: REQUEST_USAGE_SCHEMA }],
   protocols: ["openai_video"],
 };
 
@@ -144,183 +52,85 @@ function secondsValue(value) {
   if (typeof value !== "number" && (typeof value !== "string" || !/^\d+(?:\.\d+)?$/.test(value.trim())))
     throw new Error("seconds must be a decimal number between 1 and 60");
   const seconds = Number(value);
-  // Yueqi's public model metadata caps output duration at 60 seconds. The
-  // upstream enforces any narrower model limits. Auto duration is unsupported.
+  // Retain the Yueqi duration bound; the upstream enforces narrower limits.
   if (!Number.isFinite(seconds) || seconds < 1 || seconds > 60) throw new Error("seconds must be between 1 and 60");
   return seconds;
 }
 
-// Submission and metering share normalization, including billing aliases in
-// passthrough containers. Media objects keep their own duration and role data.
+// Normalize client and nested parameters to the fields in Yueqi's text request spec.
 function videoSubmission(ctx) {
   const requestedModel = ctx.upstreamModel || ctx.model;
-  const model = Object.prototype.hasOwnProperty.call(MODEL_ALIASES, requestedModel) ? MODEL_ALIASES[requestedModel] : requestedModel;
-  if (!Object.prototype.hasOwnProperty.call(MODELS, model)) throw new Error("unsupported Yueqi video model");
-  const profile = MODELS[model];
+  if (requestedModel !== PUBLIC_MODEL && requestedModel !== VENDOR_MODEL) throw new Error("unsupported Yueqi video model");
+  if (ctx.files?.length) throw new Error(PUBLIC_MODEL + " only supports text-to-video without uploaded files");
   const input = ctx.requestBody;
   if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("request body must be an object");
-  const scopes = [{ ...input }];
-  let seconds, resolution, ratio;
+  const scopes = [input];
+  const body = { model: ctx.upstream?.kind === "new_api" ? requestedModel : VENDOR_MODEL };
   for (let i = 0; i < scopes.length; i++) {
-    const scope = scopes[i];
-    for (const container of CONTAINERS) {
-      if (scope[container] === undefined) continue;
-      if (!scope[container] || typeof scope[container] !== "object" || Array.isArray(scope[container])) throw new Error(container + " must be an object");
-      scope[container] = { ...scope[container] };
-      scopes.push(scope[container]);
-      if (scopes.length > 64) throw new Error("too many video parameter containers");
-    }
-    if (i > 0 && scope.model !== undefined && scope.model !== model) throw new Error("nested model must match the channel model");
-    for (const field of ["seconds", "duration"]) {
-      if (scope[field] === undefined) continue;
-      const value = secondsValue(scope[field]);
-      if (seconds !== undefined && seconds !== value) throw new Error("seconds conflicts with duration");
-      seconds = value;
-    }
-    // Video clients use size for either a resolution label or an aspect
-    // ratio. Rewrite only parameter containers, leaving media metadata intact.
-    const sizeIsRatio = typeof scope.size === "string" && scope.size.includes(":");
-    let scopeResolution, scopeRatio;
-    for (const field of ["size", "resolution", "resolution_name"]) {
-      if (scope[field] === undefined) continue;
-      if (field === "size" && sizeIsRatio) continue;
-      const value = typeof scope[field] === "string" ? scope[field].trim().toLowerCase() : scope[field];
-      if (typeof value !== "string" || !/^(?:[1-9]\d{1,3}p|2k)$/.test(value)) throw new Error("resolution must be a label such as 480p, 720p, 1080p or 2k");
-      if (resolution !== undefined && resolution !== value) throw new Error("conflicting video resolution parameters");
-      scopeResolution = resolution = value;
-    }
-    for (const field of sizeIsRatio ? ["aspect_ratio", "ratio", "size"] : ["aspect_ratio", "ratio"]) {
-      if (scope[field] === undefined) continue;
-      const value = typeof scope[field] === "string" ? scope[field].trim() : scope[field];
-      if (typeof value !== "string" || !/^\d{1,2}:\d{1,2}$/.test(value) || value.split(":").some((part) => Number(part) === 0))
-        throw new Error("aspect_ratio must be a positive width:height ratio");
-      if (ratio !== undefined && ratio !== value) throw new Error("ratio conflicts with aspect_ratio");
-      scopeRatio = ratio = value;
-    }
-    if (scopeResolution !== undefined) scope.resolution = scopeResolution;
-    if (scopeRatio !== undefined) scope.aspect_ratio = scopeRatio;
-    delete scope.resolution_name;
-    delete scope.size;
-    delete scope.ratio;
-    // Canvas clients wrap image URLs in input_reference; Yueqi's reference
-    // requests take an images array. Keep signed URLs byte-for-byte intact.
-    const reference = scope.input_reference;
-    if (reference && typeof reference === "object" && !Array.isArray(reference) && reference.image_url !== undefined) {
-      const image = reference.image_url;
-      const url = image && typeof image === "object" && !Array.isArray(image) ? image.url : image;
-      if (typeof url !== "string" || !/^https?:\/\/[^\s]+$/.test(url)) throw new Error("input_reference.image_url must be a public image URL");
-      if (scope.images !== undefined && !Array.isArray(scope.images)) throw new Error("images must be an array");
-      const images = [...(scope.images || [])];
-      if (!images.includes(url)) images.unshift(url);
-      scope.images = images;
-      delete scope.input_reference;
-    }
-    for (const field of ["n", "count", "batch_size", "batch_count", "num_videos"]) {
-      if (scope[field] !== undefined && scope[field] !== 1 && scope[field] !== "1") throw new Error("Yueqi video requests must generate exactly one video");
-    }
-    for (const field of ["quality", "max_tokens", "max_output_tokens", "max_completion_tokens"]) {
-      if (scope[field] !== undefined) throw new Error(field + " is not supported by this video plugin");
+    for (const [field, inputValue] of Object.entries(scopes[i])) {
+      let value = inputValue;
+      let target = field;
+      if (CONTAINERS.includes(field)) {
+        if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(field + " must be an object");
+        scopes.push(value);
+        if (scopes.length > 64) throw new Error("too many video parameter containers");
+        continue;
+      }
+      if (field === "model") {
+        if (i > 0 && value !== ctx.model && value !== requestedModel && value !== body.model) throw new Error("nested model must match the channel model");
+        continue;
+      }
+      if (["n", "count", "batch_size", "batch_count", "num_videos"].includes(field)) {
+        if (value !== 1 && value !== "1") throw new Error("Yueqi video requests must generate exactly one video");
+        continue;
+      }
+      if (field === "mode" && ["text", "text_to_video"].includes(value)) continue;
+      if (field === "seconds") target = "duration";
+      if (field === "resolution_name") target = "resolution";
+      if (field === "ratio") target = "aspect_ratio";
+      if (field === "size") target = typeof value === "string" && value.includes(":") ? "aspect_ratio" : "resolution";
+      switch (target) {
+        case "prompt":
+          if (typeof value !== "string" || !value.trim()) throw new Error("prompt is required");
+          break;
+        case "duration":
+          value = secondsValue(value);
+          break;
+        case "resolution":
+          value = typeof value === "string" ? value.trim().toLowerCase() : value;
+          if (value !== "720p") throw new Error(PUBLIC_MODEL + " only supports 720p resolution");
+          break;
+        case "aspect_ratio":
+          value = typeof value === "string" ? value.trim() : value;
+          if (typeof value !== "string" || !/^\d{1,2}:\d{1,2}$/.test(value) || value.split(":").some((part) => Number(part) === 0))
+            throw new Error("aspect_ratio must be a positive width:height ratio");
+          break;
+        default:
+          throw new Error(field + " is not supported by this text-to-video model");
+      }
+      if (body[target] !== undefined && body[target] !== value) throw new Error("conflicting " + target + " parameters");
+      body[target] = value;
     }
   }
-  const prompt = scopes.find((scope) => scope.prompt !== undefined)?.prompt;
-  if (typeof prompt !== "string" || !prompt.trim()) throw new Error("prompt is required");
-  const body = Object.assign({}, scopes[0], {
-    model: model,
-    prompt: prompt,
-    seconds: seconds === undefined ? 5 : seconds,
-    resolution: resolution || profile.defaultResolution,
-  });
-  if (ratio !== undefined) body.aspect_ratio = ratio;
-  let action = "text_to_video";
-  for (const scope of scopes) {
-    if (MEDIA_FIELDS.some((field) => scope[field] !== undefined)) action = "reference_to_video";
-    if (["first_image", "last_image", "first_frame_url", "last_frame_url"].some((field) => scope[field] !== undefined)) {
-      action = "frames_to_video";
-      break;
-    }
-  }
-  const files = ctx.files || [];
-  for (const file of files) {
-    const field = file.field.replace(/\[\]$/, "");
-    if (!MEDIA_FIELDS.includes(field)) throw new Error("unsupported video file field: " + file.field);
-    if (!(file.size > 0)) throw new Error("video reference files must not be empty");
-    if (["first_image", "last_image", "first_frame_url", "last_frame_url"].includes(field)) action = "frames_to_video";
-    else if (action === "text_to_video") action = "reference_to_video";
-  }
-  return { body: body, action: action };
+  if (body.prompt === undefined) throw new Error("prompt is required");
+  body.duration ??= 5;
+  body.resolution ??= "720p";
+  return body;
 }
 
 export function buildSubmitRequest(ctx) {
-  const submission = videoSubmission(ctx);
-  const headers = { Authorization: "Bearer " + ctx.apiKey };
-  const url = ctx.baseUrl.replace(/\/$/, "") + "/v1/videos";
-  if ((ctx.files || []).length) {
-    const parts = [];
-    for (const name of Object.keys(submission.body)) {
-      const value = submission.body[name];
-      if (value === undefined) continue;
-      parts.push({ name: name, value: value !== null && typeof value === "object" ? JSON.stringify(value) : String(value) });
-    }
-    for (const file of ctx.files) parts.push({ name: file.field, fileRef: file.ref, filename: file.filename });
-    return { url: url, method: "POST", headers: headers, bodyType: "multipart", parts: parts, action: submission.action };
-  }
-  headers["Content-Type"] = "application/json";
-  return { url: url, method: "POST", headers: headers, body: submission.body, action: submission.action };
+  return {
+    url: ctx.baseUrl.replace(/\/$/, "") + "/v1/videos",
+    method: "POST",
+    headers: { Authorization: "Bearer " + ctx.apiKey, "Content-Type": "application/json" },
+    body: videoSubmission(ctx),
+    action: "text_to_video",
+  };
 }
 
 export function extractUsage(ctx) {
-  const body = videoSubmission(ctx).body;
-  // Legacy per-call pricing must stay per call rather than multiplying every
-  // numeric fact. Task expressions select requests, seconds, or both explicitly.
-  if (ctx.usagePurpose === "billing_ratios") return { requests: 1 };
-  const referenceSeconds = (ctx.usageKeys || []).includes("reference_seconds") ? referenceVideoSeconds(ctx, body) : 0;
-  return { requests: 1, seconds: body.seconds, resolution: body.resolution, reference_seconds: referenceSeconds };
-}
-
-function referenceVideoSeconds(ctx, body) {
-  const scopes = [body];
-  const references = [];
-  for (let i = 0; i < scopes.length; i++) {
-    const scope = scopes[i];
-    for (const container of CONTAINERS) {
-      if (scope[container]) scopes.push(scope[container]);
-      if (scopes.length > 64) throw new Error("too many video parameter containers");
-    }
-    for (const field of VIDEO_FIELDS) {
-      if (scope[field] === undefined) continue;
-      references.push(...(Array.isArray(scope[field]) ? scope[field] : [scope[field]]));
-    }
-    for (const reference of Array.isArray(scope.references) ? scope.references : []) {
-      if (
-        reference &&
-        typeof reference === "object" &&
-        (String(reference.type || "").includes("video") || String(reference.mime_type || reference.mimeType || "").startsWith("video/"))
-      )
-        references.push(reference);
-    }
-  }
-  const sources = [];
-  for (const reference of references) {
-    let url = reference;
-    if (reference && typeof reference === "object") url = reference.url || reference.video_url || reference.videoUrl;
-    if (url && typeof url === "object") url = url.url;
-    if (typeof url !== "string" || !/^https?:\/\/[^\s]+$/.test(url)) throw new Error("reference video billing requires a public video URL or uploaded file");
-    if (!sources.some((source) => source.url === url)) sources.push({ url: url });
-  }
-  for (const file of ctx.files || []) {
-    const field = file.field.replace(/\[\]$/, "");
-    if (VIDEO_FIELDS.includes(field) || (field === "input_reference" && String(file.mimeType || "").startsWith("video/"))) sources.push({ fileRef: file.ref });
-  }
-  if (sources.length > 16) throw new Error("reference video billing supports at most 16 videos");
-  let seconds = 0;
-  for (const source of sources) {
-    const measured = utils.mediaDuration(source);
-    if (typeof measured !== "number" || !Number.isFinite(measured) || measured <= 0 || measured > 3600)
-      throw new Error("reference video has an invalid measured duration");
-    seconds += measured;
-    if (seconds > 3600) throw new Error("reference video duration total must not exceed 3600 seconds");
-  }
-  return seconds;
+  videoSubmission(ctx);
+  return { requests: 1 };
 }
 
 function videoObject(body) {
@@ -396,11 +206,11 @@ export function parseTaskResult(ctx, response) {
 
 export function extractUsageOnComplete(ctx, result, response) {
   if (result.status !== "SUCCESS") return null;
+  const model = ctx.upstreamModel || ctx.model;
+  if (!model || model === PUBLIC_MODEL || model === VENDOR_MODEL) return null;
+  // Only older tasks need actual output duration and resolution for settlement.
   const body = videoObject(response);
   const facts = {};
-  // Only output video duration replaces seconds; generation wall time and
-  // reference duration never replace it. Measured reference_seconds stays frozen.
-  // A per-call expression ignores this fact and continues charging once.
   if (body.seconds !== undefined) facts.seconds = secondsValue(body.seconds);
   else if (body.duration !== undefined) facts.seconds = secondsValue(body.duration);
   let resolution = body.resolution || body.resolution_name || body.size;
@@ -441,12 +251,13 @@ export const protocols = {
         body = ctx.body.value;
         if (!body || typeof body !== "object" || Array.isArray(body)) throw new Error("JSON object required");
       } else {
+        if (ctx.body.files?.length) throw new Error(PUBLIC_MODEL + " only supports text-to-video without uploaded files");
         body = {};
         for (const name of Object.keys(ctx.body.fields || {})) {
           const values = ctx.body.fields[name];
-          if (values.length !== 1 && !MEDIA_FIELDS.includes(name)) throw new Error(name + " must be provided once");
-          let value = values.length === 1 ? values[0] : values;
-          if (typeof value === "string" && (CONTAINERS.includes(name) || MEDIA_FIELDS.includes(name)) && /^[[{]/.test(value.trim())) {
+          if (values.length !== 1) throw new Error(name + " must be provided once");
+          let value = values[0];
+          if (CONTAINERS.includes(name)) {
             try {
               value = JSON.parse(value);
             } catch {
