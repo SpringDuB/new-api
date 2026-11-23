@@ -73,6 +73,7 @@ func TestLecAPISeedanceCatalogPreservesNonmatchingAndHistoricalModels(t *testing
 	}
 	assert.Contains(t, routes, "lec-mj-seedance-2-5-fd-720p")
 	assert.NotContains(t, routes, "lec-zy-seedance-2-5-discount")
+	assert.NotContains(t, routes, "lec-shuikule-seedance-2-5-bd", "the same 720p price does not imply the same request contract")
 	defaults, found := plugin.Meta.DefaultsForModel(pooled)
 	require.True(t, found)
 	for _, text := range []string{"支持 4–30 秒", "可选 720p", "images：参考图片", "最多 30 张", "videos：参考视频", "最多 10 段", "audios：参考音频"} {
@@ -117,6 +118,16 @@ func TestLecAPICurrentVideoModelsExposePricingAndRequestContracts(t *testing.T) 
 		{"md-seedance-2-0-900-720p", "lec-md-seedance-2-0-900-720p", map[string]any{"prompt": "boat", "duration": 10}, 1.5},
 		{"vw-seedance-2-0-fast", "lec-vw-seedance-2-0-fast", map[string]any{"prompt": "boat", "images": []any{"https://media.example/ref.png"}}, 1.6},
 		{"vp-wan-3-0-native", "lec-vp-wan-3-0-native", map[string]any{"prompt": "boat", "duration": 5, "resolution": "1080p"}, 6},
+		{"ap-kling-4-yz", "lec-ap-kling-4-yz", map[string]any{"prompt": "boat"}, 0.72},
+		{"ap-wan-3-0-720p", "lec-ap-wan-3-0-720p", map[string]any{"prompt": "boat", "duration": 2}, 4.2},
+		{"qs-wan-3-0-cc-720p", "lec-qs-wan-3-0-cc-720p", map[string]any{"prompt": "boat", "duration": 30}, 3},
+		{"haya-seedance-2-5-vc-480p", "lec-haya-seedance-2-5-vc-480p", map[string]any{"prompt": "boat", "images": []any{"data:image/png;base64,YQ=="}}, 3.6},
+		{"shuikule-seedance-2-5-bd", "lec-shuikule-seedance-2-5-bd", map[string]any{"prompt": "boat", "duration": 4}, 6.6},
+		{"shuikule-seedance-2-5-u", "lec-shuikule-seedance-2-5-u", map[string]any{"prompt": "boat", "duration": 5, "resolution": "480p"}, 1.2},
+		{"shuikule-seedance-2-5-u", "lec-shuikule-seedance-2-5-u", map[string]any{"prompt": "boat", "duration": 5}, 1.95},
+		{"vp-seedance-2-5-bd", "lec-vp-seedance-2-5-bd", map[string]any{"prompt": "boat", "resolution": "480p"}, 4.5},
+		{"vp-seedance-2-5-bd", "lec-vp-seedance-2-5-bd", map[string]any{"prompt": "boat"}, 6},
+		{"vp-seedance-2-5-flash-t", "lec-vp-seedance-2-5-flash-t", map[string]any{"prompt": "boat"}, 3.6},
 	} {
 		t.Run(tc.model+"/"+tc.upstream, func(t *testing.T) {
 			assert.Contains(t, plugin.Meta.Models, tc.model)
@@ -130,9 +141,13 @@ func TestLecAPICurrentVideoModelsExposePricingAndRequestContracts(t *testing.T) 
 			assert.Equal(t, tc.upstream, body["model"])
 			facts := lecAPIHook(t, plugin, "extractUsage", ctx)
 			switch tc.model {
-			case "vg-seedance-2-0-fast-cc", "vg-seedance-2-5-op", "md-seedance-2-5-900-720p", "md-seedance-2-0-900-720p", "vw-seedance-2-0-fast":
+			case "vg-seedance-2-0-fast-cc", "vg-seedance-2-5-op", "md-seedance-2-5-900-720p", "md-seedance-2-0-900-720p", "vw-seedance-2-0-fast",
+				"ap-kling-4-yz", "ap-wan-3-0-720p", "qs-wan-3-0-cc-720p", "shuikule-seedance-2-5-bd":
 				assert.NotContains(t, body, "resolution", "upstream fixes the resolution")
 				assert.Equal(t, "720p", facts["resolution"])
+			case "haya-seedance-2-5-vc-480p", "vp-seedance-2-5-flash-t":
+				assert.NotContains(t, body, "resolution", "upstream fixes the resolution")
+				assert.Equal(t, "480p", facts["resolution"])
 			}
 			switch tc.model {
 			case "md-seedance-2-5-900-720p":
@@ -369,7 +384,7 @@ func TestLecAPIBindsCatalogModelsToTheirMediaProtocol(t *testing.T) {
 	registry := jsplugin.NewRegistry()
 	plugin, err := registry.RegisterFactory(source, jsplugin.Options{Key: "lecapi"})
 	require.NoError(t, err)
-	assert.Len(t, plugin.Meta.Models, 70)
+	assert.Len(t, plugin.Meta.Models, 78)
 	assert.Contains(t, plugin.Meta.RequiredCapabilities, "submit-no-retry@1")
 	assert.True(t, plugin.Meta.SupportsUpstream(jsplugin.UpstreamKindNewAPI))
 	priced := 0
@@ -730,6 +745,9 @@ func TestLecAPIEnforcesModelSpecificMaterialsAndOptions(t *testing.T) {
 		{"ap-seedance-2-0-ot", map[string]any{"prompt": "boat", "first_frame": "https://media.example/first.png", "videos": []any{"https://media.example/source.mp4"}}},
 		{"ap-seedance-2-0-ot", map[string]any{"prompt": "boat", "first_frame": "https://media.example/first.png", "last_frame": "https://media.example/last.png", "images": []any{"https://media.example/source.png"}}},
 		{"ap-seedance-2-0-ot", map[string]any{"prompt": "boat", "draft": true}},
+		{"ap-kling-4-yz", map[string]any{"prompt": "boat", "metadata": map[string]any{"duration": 31}}},
+		{"shuikule-seedance-2-5-u", map[string]any{"prompt": "boat", "videos": []any{"https://media.example/ref.mp4"}}},
+		{"vp-seedance-2-5-flash-t", map[string]any{"prompt": "boat", "images": slices.Repeat([]any{"https://media.example/ref.png"}, 11)}},
 
 		{"ty-seedream-5-pro", map[string]any{"prompt": "boat", "images": []any{"https://media.example/1.png", "https://media.example/2.png", "https://media.example/3.png", "https://media.example/4.png", "https://media.example/5.png", "https://media.example/6.png", "https://media.example/7.png", "https://media.example/8.png", "https://media.example/9.png"}}},
 	} {
@@ -781,6 +799,24 @@ func TestLecAPIVideoReferenceLimitsMatchTheCatalog(t *testing.T) {
 			assert.Equal(t, tc.model, lecAPIHook(t, plugin, "buildSubmitRequest", ctx)["body"].(map[string]any)["model"])
 		})
 	}
+	t.Run("qs-wan-3-0-cc-720p", func(t *testing.T) {
+		const ref = "https://media.example/source.mp4"
+		driver := lecAPIContext("qs-wan-3-0-cc-720p", map[string]any{"prompt": "boat", "videos": []any{ref}})
+		for _, duration := range []string{"15", "15.01"} {
+			ctx := jsplugin.WithMediaProber(t.Context(), func(_ context.Context, request jsplugin.FetchRequest) (jsplugin.FetchResponse, error) {
+				assert.Equal(t, ref, request.URL)
+				return jsplugin.FetchResponse{Status: http.StatusOK, Body: []byte(duration)}, nil
+			})
+			for _, hook := range []string{"buildSubmitRequest", "extractUsage"} {
+				_, err := plugin.Engine.Call(ctx, hook, driver)
+				if duration == "15" {
+					require.NoError(t, err)
+				} else {
+					require.ErrorContains(t, err, "combined reference video duration exceeds")
+				}
+			}
+		}
+	})
 }
 
 func TestLecAPICurrentModelParametersAndDescriptions(t *testing.T) {

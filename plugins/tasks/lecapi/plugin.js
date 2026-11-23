@@ -1,8 +1,8 @@
-// LecAPI public media catalog and pricing snapshot: 2026-11-22.
+// LecAPI public media catalog and pricing snapshot: 2026-11-23.
 // Sources: https://api.lecapi.net/api/media-models/catalog and /api/pricing.
-// Catalog version: sha256:90ad999605ec6e5c311a8c903f53ebe71344fcb9e52d5f4cb73e248f0bb4adc2.
+// Catalog version: sha256:ed46634a94690bca26502f20f17bbd3f08c66e141b12d37c98cc5a133e4b6e3b.
 // Pricing version: a42d372ccf0b5dd13ecf71203521f9d2.
-// Cross-checked 76 catalog entries and 86 pricing entries against the authenticated /v1/models list.
+// New routes were cross-checked against public pricing and the authenticated /v1/models list.
 // The catalog determines media kinds; this plugin serves only image and video generation.
 // User pricing policy: published CNY price +20%, platform CNY/USD units 1:1.
 // Each expression contains the final marked-up numeric coefficient, with no FX
@@ -2303,10 +2303,142 @@ const MODELS = {
     },
     billing: { billing_unit: "request", price_per_request: 3.5, resolution_prices: { "720p": 3.5, "1080p": 5 } },
   },
+  "lec-ap-kling-4-yz": {
+    kind: "video",
+    name: "Kling 4.0 YZ (AP)",
+    icon: "Kling.Color",
+    tags: ["720p", "image", "per_second"],
+    parameters: {
+      prompt: { type: "string", required: true, maxLength: 10000 },
+      duration: { type: "integer", default: 3, min: 3, max: 30, step: 1 },
+      aspect_ratio: { type: "enum", default: "16:9", values: ["16:9", "9:16", "1:1", "21:9"] },
+      resolution: { type: "enum", default: "720p", values: ["720p"] },
+      images: { type: "array", constraints: { max_items: 10, url_schemes: ["https"], mime_types: ["image/jpeg", "image/png", "image/webp", "image/bmp", "image/tiff", "image/gif"] } },
+    },
+    billing: { billing_unit: "second", equivalent_second_price: 0.2 },
+  },
+  "lec-ap-wan-3-0-720p": {
+    kind: "video",
+    name: "Wan 3.0 (AP)",
+    icon: "AlibabaCloud.Color",
+    tags: ["720p", "image", "video", "audio", "per_request"],
+    parameters: {
+      prompt: { type: "string", required: true, maxLength: 10000 },
+      duration: { type: "integer", default: 30, min: 2, max: 30, step: 1 },
+      aspect_ratio: { type: "enum", default: "16:9", values: ["16:9", "9:16", "4:3", "1:1", "3:4", "21:9"] },
+      resolution: { type: "enum", default: "720p", values: ["720p"] },
+      images: { type: "array", constraints: { max_items: 10, url_schemes: ["https"], mime_types: ["image/jpeg", "image/png", "image/webp", "image/bmp", "image/tiff", "image/gif"] } },
+      videos: { type: "array", constraints: { max_items: 5, url_schemes: ["https"] } },
+      audios: { type: "array", constraints: { max_items: 5, url_schemes: ["https"] } },
+    },
+    billing: { billing_unit: "request", price_per_request: 3.5 },
+  },
+  "lec-qs-wan-3-0-cc-720p": {
+    kind: "video",
+    name: "Wan 3.0 CC (QS)",
+    icon: "AlibabaCloud.Color",
+    tags: ["720p", "image", "video", "audio", "per_request"],
+    parameters: {
+      prompt: { type: "string", required: true },
+      duration: { type: "integer", default: 30, min: 2, max: 30, step: 1 },
+      aspect_ratio: { type: "enum", default: "16:9", values: ["16:9", "9:16", "1:1"] },
+      resolution: { type: "enum", default: "720p", values: ["720p"] },
+      images: { type: "array", constraints: { max_items: 10, url_schemes: ["https"] } },
+      videos: { type: "array", constraints: { max_items: 5, url_schemes: ["https"] } },
+      audios: { type: "array", constraints: { max_items: 5, url_schemes: ["https"] } },
+    },
+    billing: { billing_unit: "request", price_per_request: 2.5 },
+    max_reference_video_total_seconds: 15,
+  },
+  "lec-haya-seedance-2-5-vc-480p": {
+    kind: "video",
+    name: "Seedance 2.5 VC (HAYA)",
+    icon: "Doubao.Color",
+    tags: ["480p", "image", "video", "audio", "native", "per_request"],
+    parameters: {
+      prompt: { type: "string", required: true, maxLength: 10000 },
+      duration: { type: "integer", default: 5, min: 4, max: 30, step: 1 },
+      aspect_ratio: { type: "enum", default: "16:9", values: ["16:9", "9:16", "4:3", "3:4", "1:1"] },
+      resolution: { type: "enum", default: "480p", values: ["480p"] },
+      images: { type: "array", constraints: { max_items: 30, url_schemes: ["https"], allow_data_url: true, mime_types: ["image/png", "image/jpeg", "image/webp", "image/gif"], max_bytes: 20971520 } },
+      videos: { type: "array", constraints: { max_items: 10, url_schemes: ["https"], allow_data_url: true, mime_types: ["video/mp4", "video/webm", "video/quicktime"], max_bytes: 20971520 } },
+      audios: { type: "array", constraints: { max_items: 10, url_schemes: ["https"], allow_data_url: true, mime_types: ["audio/aac", "audio/flac", "audio/mp4", "audio/mpeg", "audio/ogg", "audio/wav", "audio/x-wav"], max_bytes: 20971520 } },
+    },
+    billing: { billing_unit: "request", price_per_request: 3 },
+  },
+  "lec-shuikule-seedance-2-5-bd": {
+    kind: "video",
+    name: "Seedance 2.5 BD (SKL)",
+    icon: "Doubao.Color",
+    tags: ["720p", "image", "video", "audio", "per_request"],
+    parameters: {
+      prompt: { type: "string", required: true, maxLength: 45000 },
+      duration: { type: "integer", default: 5, min: 4, max: 30, step: 1 },
+      aspect_ratio: { type: "enum", default: "16:9", values: ["auto", "21:9", "16:9", "4:3", "1:1", "3:4", "9:16"] },
+      resolution: { type: "enum", default: "720p", values: ["720p"] },
+      images: { type: "array", constraints: { max_items: 30, url_schemes: ["https"] } },
+      videos: { type: "array", constraints: { max_items: 10, url_schemes: ["https"] } },
+      audios: { type: "array", constraints: { max_items: 10, url_schemes: ["https"] } },
+    },
+    billing: { billing_unit: "request", price_per_request: 5.5 },
+  },
+  "lec-shuikule-seedance-2-5-u": {
+    kind: "video",
+    name: "Seedance 2.5 U (SKL)",
+    icon: "Doubao.Color",
+    tags: ["image", "audio", "per_second"],
+    parameters: {
+      prompt: { type: "string", required: true, maxLength: 10000 },
+      duration: { type: "integer", default: 5, min: 4, max: 30, step: 1 },
+      aspect_ratio: { type: "enum", default: "16:9", values: ["21:9", "16:9", "4:3", "1:1", "3:4", "9:16"] },
+      resolution: { type: "enum", default: "720p", values: ["480p", "720p"] },
+      images: { type: "array", constraints: { max_items: 30, url_schemes: ["https"] } },
+      audios: { type: "array", constraints: { max_items: 10, url_schemes: ["https"] } },
+    },
+    billing: { billing_unit: "second", resolution_prices: { "480p": 0.2, "720p": 0.32 } },
+  },
+  "lec-vp-seedance-2-5-bd": {
+    kind: "video",
+    name: "Seedance 2.5 BD (VP)",
+    icon: "Doubao.Color",
+    tags: ["image", "video", "audio", "native", "per_request"],
+    parameters: {
+      prompt: { type: "string", required: true },
+      duration: { type: "integer", required: true, default: 5, min: 5, max: 30, step: 1 },
+      aspect_ratio: { type: "enum", default: "16:9", values: ["16:9", "9:16", "4:3", "3:4", "1:1"] },
+      resolution: { type: "enum", default: "720p", values: ["480p", "720p"] },
+      images: { type: "array", constraints: { max_items: 30, url_schemes: ["https"] } },
+      videos: { type: "array", constraints: { max_items: 10, url_schemes: ["https"] } },
+      audios: { type: "array", constraints: { max_items: 10, url_schemes: ["https"] } },
+    },
+    billing: { billing_unit: "request", resolution_prices: { "480p": 3.7, "720p": 5 } },
+  },
+  "lec-vp-seedance-2-5-flash-t": {
+    kind: "video",
+    name: "Seedance 2.5 Flash T (VP)",
+    icon: "Doubao.Color",
+    tags: ["fast", "480p", "image", "video", "audio", "native", "per_request"],
+    parameters: {
+      prompt: { type: "string", required: true },
+      duration: { type: "integer", required: true, default: 4, min: 4, max: 30, step: 1 },
+      aspect_ratio: { type: "enum", default: "16:9", values: ["16:9", "9:16", "1:1", "3:4", "4:3", "21:9", "auto"] },
+      resolution: { type: "enum", default: "480p", values: ["480p"] },
+      images: { type: "array", constraints: { max_items: 10, url_schemes: ["https"] } },
+      videos: { type: "array", constraints: { max_items: 5, url_schemes: ["https"] } },
+      audios: { type: "array", constraints: { max_items: 5, url_schemes: ["https"] } },
+    },
+    billing: { billing_unit: "request", price_per_request: 3 },
+  },
 };
 
 // These fixed output settings are omitted from the upstream JSON contract.
 const FIXED_VIDEO_OUTPUTS = {
+  "lec-ap-kling-4-yz": { resolution: "720p" },
+  "lec-ap-wan-3-0-720p": { resolution: "720p" },
+  "lec-qs-wan-3-0-cc-720p": { resolution: "720p" },
+  "lec-haya-seedance-2-5-vc-480p": { resolution: "480p" },
+  "lec-shuikule-seedance-2-5-bd": { resolution: "720p" },
+  "lec-vp-seedance-2-5-flash-t": { resolution: "480p" },
   "lec-haya-seedance-2-5-xg-480p": { resolution: "480p" },
   "lec-hc-seedance-2-0-903": { resolution: "720p" },
   "lec-md-seedance-2-0-900-720p": { resolution: "720p" },
@@ -2333,8 +2465,9 @@ const FIXED_VIDEO_OUTPUTS = {
 const INTERNAL_VIDEO_MODELS = new Set();
 // Published IDs and established route affinities survive catalog refreshes.
 // Known siblings may replace a removed anchor without renaming the pool.
+// Add new siblings only after verifying the full request contract and price schedule match.
 const VIDEO_POOLS = {
-  "seedance-2-5-01": ["seedance-2-5-request-660", "lec-mm-seedance-2-5", "lec-mm-seedance-2-5-full", "lec-mg-seedance-2-5", "lec-vp-seedance-2-5-301010-49", "lec-mj-seedance-2-5-bd-720p", "lec-mj-seedance-2-5-qn", "lec-zy-seedance-2-5-discount"],
+  "seedance-2-5-01": ["seedance-2-5-request-660", "lec-mm-seedance-2-5", "lec-mm-seedance-2-5-full", "lec-mg-seedance-2-5", "lec-vp-seedance-2-5-301010-49", "lec-mj-seedance-2-5-bd-720p", "lec-mj-seedance-2-5-qn", "lec-zy-seedance-2-5-discount", "lec-mj-seedance-2-5-fd-720p"],
   "seedance-2-5-02": ["seedance-2-5-request-720", "lec-mf-seedance-2-5-30ref", "lec-hc-seedance-2-5-3010", "lec-ty-seedance-2-5-1050-flxd"],
   "seedance-2-5-03": ["seedance-2-5-request-600-480p-480-1080p-960-4k-1080", "lec-mf-seedance-2-5-std", "lec-seedance-2-5-301010", "lec-zy-seedance-2-5-discount2"],
   "seedance-2-5-04": ["seedance-2-5-request-600-480p-600", "lec-mf-seedance-2-5-x", "lec-haya-seedance-2-5-xg-480p"],
@@ -2378,15 +2511,13 @@ function compareVideoCapabilities(left, right) {
   return b.length - a.length || (leftDurations && rightDurations ? rightDurations.length - leftDurations.length : 0) || breadth(b) - breadth(a);
 }
 
-// A pool may add new resolutions. At every shared resolution, compare against
-// the original anchor, never the running mean. Only per-request rates can vary.
-for (const [family, pattern] of [
-  ["seedance-2-5", /-seedance-2-5(?:-|$)/],
-  ["seedance-2-0", /-seedance-2-0(?:-|$)/],
-]) {
-  const candidates = new Map();
-  for (const [vendorModel, profile] of Object.entries(MODELS)) {
-    if (!pattern.test(vendorModel) || profile.retired || profile.kind !== "video") continue;
+// Preserve legacy price compatibility only among explicitly listed siblings.
+// A catalog refresh must not attach an unreviewed route based on price alone.
+for (const [model, [legacy, ...siblings]] of Object.entries(VIDEO_POOLS)) {
+  const pool = { unit: "request", durationKey: undefined, anchors: {}, prices: {}, routes: [] };
+  for (const vendorModel of siblings) {
+    const profile = MODELS[vendorModel];
+    if (!profile || profile.retired || profile.kind !== "video") continue;
     const billing = profile.billing;
     const unit = billing.billing_unit;
     if (!["request", "second"].includes(unit)) continue;
@@ -2401,60 +2532,48 @@ for (const [family, pattern] of [
     // representative's contract. Exclude extra charges and mismatched limits.
     if (unit === "second" && !duration) continue;
     const durationKey = unit === "second" ? JSON.stringify([duration.min, duration.max, duration.values]) : "";
-    candidates.set(vendorModel, { vendorModel, unit, durationKey, rates });
-  }
-  const pools = [];
-  for (const [model, [legacy, ...siblings]] of Object.entries(VIDEO_POOLS)) {
-    if (!model.startsWith(family + "-")) continue;
-    const knownRoutes = siblings.map((route) => candidates.get(route)).filter(Boolean);
-    const anchor = knownRoutes[0];
-    const pool = { model, legacy, unit: anchor?.unit ?? "request", durationKey: anchor?.durationKey, anchors: {}, prices: {}, routes: [] };
-    for (const candidate of knownRoutes) {
-      if (!pool.routes.length || compatibleVideoRates(pool, candidate)) addVideoRoute(pool, candidate);
-      // A repriced sibling remains a standalone model, not a member of a different pool.
-      candidates.delete(candidate.vendorModel);
-    }
-    pools.push(pool);
-  }
-  for (const candidate of candidates.values()) {
-    const compatible = pools.filter((pool) => compatibleVideoRates(pool, candidate));
-    const exact = compatible.filter((pool) => candidate.rates.some(([res, rate]) => pool.anchors[res] === rate));
-    const matches = exact.length ? exact : compatible;
-    if (matches.length === 1) addVideoRoute(matches[0], candidate);
-  }
-  for (const { model, legacy, unit, anchors, prices, routes } of pools) {
-    if (!routes.length) {
-      MODELS[model] = { kind: "video", poolUnavailable: true, historicalPool: true, parameters: { duration: { min: 4, max: 30 } }, billing: { billing_unit: unit }, tags: [] };
-      MODELS[legacy] = { ...MODELS[model], legacyPool: true };
+    const candidate = { vendorModel, unit, durationKey, rates };
+    if (!pool.routes.length) {
+      pool.unit = unit;
+      pool.durationKey = durationKey;
+    } else if (!compatibleVideoRates(pool, candidate)) {
+      // A repriced sibling that falls outside the legacy tolerance stays standalone.
       continue;
     }
-    const resolutions = Object.keys(prices).sort((a, b) => parseInt(a, 10) * (a.endsWith("k") ? 1000 : 1) - parseInt(b, 10) * (b.endsWith("k") ? 1000 : 1));
-    const resolution = anchors["720p"] !== undefined ? "720p" : resolutions[0];
-    const resolutionPrices = Object.fromEntries(resolutions.map((res) => {
-      const rates = prices[res];
-      return [res, rates.reduce((sum, rate) => sum + rate, 0) / rates.length];
-    }));
-    routes.sort(compareVideoCapabilities);
-    const preferred = MODELS[routes[0]];
-    const parameters = { ...preferred.parameters, resolution: { type: "enum", default: resolution, values: resolutions } };
-    for (const field of ["images", "videos", "audios"]) {
-      const supported = routes.map((route) => MODELS[route].parameters[field]).filter((parameter) => parameter && parameter.constraints?.max_items !== 0);
-      if (!supported.length) continue;
-      const best = supported.reduce((a, b) => (b.constraints?.max_items ?? 0) > (a.constraints?.max_items ?? 0) ? b : a);
-      const required = routes.every((route) => MODELS[route].parameters[field]?.required);
-      parameters[field] = { ...best, required, constraints: { ...best.constraints, min_items: required ? best.constraints?.min_items : undefined } };
-    }
-    MODELS[model] = {
-      ...preferred,
-      parameters,
-      billing: { billing_unit: unit, resolution_prices: resolutionPrices },
-      tags: routes.flatMap((route) => MODELS[route].tags).filter((tag) => ["image", "video", "audio", "per_request", "per_second"].includes(tag)),
-      routes,
-    };
-    // Legacy names are only advertised as channel mappings, not plugin models.
-    MODELS[legacy] = { ...MODELS[model], legacyPool: true };
-    for (const route of routes) INTERNAL_VIDEO_MODELS.add(route);
+    addVideoRoute(pool, candidate);
   }
+  const { unit, anchors, prices, routes } = pool;
+  if (!routes.length) {
+    MODELS[model] = { kind: "video", poolUnavailable: true, historicalPool: true, parameters: { duration: { min: 4, max: 30 } }, billing: { billing_unit: unit }, tags: [] };
+    MODELS[legacy] = { ...MODELS[model], legacyPool: true };
+    continue;
+  }
+  const resolutions = Object.keys(prices).sort((a, b) => parseInt(a, 10) * (a.endsWith("k") ? 1000 : 1) - parseInt(b, 10) * (b.endsWith("k") ? 1000 : 1));
+  const resolution = anchors["720p"] !== undefined ? "720p" : resolutions[0];
+  const resolutionPrices = Object.fromEntries(resolutions.map((res) => {
+    const rates = prices[res];
+    return [res, rates.reduce((sum, rate) => sum + rate, 0) / rates.length];
+  }));
+  routes.sort(compareVideoCapabilities);
+  const preferred = MODELS[routes[0]];
+  const parameters = { ...preferred.parameters, resolution: { type: "enum", default: resolution, values: resolutions } };
+  for (const field of ["images", "videos", "audios"]) {
+    const supported = routes.map((route) => MODELS[route].parameters[field]).filter((parameter) => parameter && parameter.constraints?.max_items !== 0);
+    if (!supported.length) continue;
+    const best = supported.reduce((a, b) => (b.constraints?.max_items ?? 0) > (a.constraints?.max_items ?? 0) ? b : a);
+    const required = routes.every((route) => MODELS[route].parameters[field]?.required);
+    parameters[field] = { ...best, required, constraints: { ...best.constraints, min_items: required ? best.constraints?.min_items : undefined } };
+  }
+  MODELS[model] = {
+    ...preferred,
+    parameters,
+    billing: { billing_unit: unit, resolution_prices: resolutionPrices },
+    tags: routes.flatMap((route) => MODELS[route].tags).filter((tag) => ["image", "video", "audio", "per_request", "per_second"].includes(tag)),
+    routes,
+  };
+  // Legacy names are only advertised as channel mappings, not plugin models.
+  MODELS[legacy] = { ...MODELS[model], legacyPool: true };
+  for (const route of routes) INTERNAL_VIDEO_MODELS.add(route);
 }
 
 // Previous pooled names remain resolvable for polling, not new work.
@@ -2913,6 +3032,14 @@ function modelDescription(profile) {
 
 // Catalog titles belong to public API IDs, not the vendor's route labels.
 const PUBLIC_DISPLAY_NAMES = {
+  "ap-kling-4-yz": "Kling 4.0 YZ · AP",
+  "ap-wan-3-0-720p": "Wan 3.0 · AP 720p",
+  "qs-wan-3-0-cc-720p": "Wan 3.0 CC · QS",
+  "haya-seedance-2-5-vc-480p": "Seedance 2.5 VC · HAYA 480p",
+  "shuikule-seedance-2-5-bd": "Seedance 2.5 BD · SKL",
+  "shuikule-seedance-2-5-u": "Seedance 2.5 U · SKL",
+  "vp-seedance-2-5-bd": "Seedance 2.5 BD · VP",
+  "vp-seedance-2-5-flash-t": "Seedance 2.5 Flash T · VP",
   "vg-seedance-2-0-fast-cc": "Seedance 2.0 Fast · VG",
   "vg-seedance-2-5-op": "Seedance 2.5 OP · VG",
   "md-seedance-2-5-900-720p": "Seedance 2.5 900 · MD",
@@ -3001,6 +3128,7 @@ const MODEL_DEFAULTS = Object.fromEntries(
       if (/seedance|seedream|face-processing/.test(name)) defaults.vendor = "ByteDance";
       else if (/minimax|h3video/.test(name)) defaults.vendor = "Minimax";
       else if (/wan-/.test(name)) defaults.vendor = "Wan";
+      else if (/kling-/.test(name)) defaults.vendor = "Kling";
       else if (/vidu/.test(name)) defaults.vendor = "Vidu";
       else if (/banana|gemini|omni/.test(name)) defaults.vendor = "Google";
       else if (/midjourney/.test(name)) defaults.vendor = "Midjourney";
@@ -3016,7 +3144,7 @@ export const meta = {
   key: "lecapi",
   name: "LecAPI",
   icon: "text:LE",
-  version: "1.11.0",
+  version: "1.12.0",
   author: { name: "QuantumNous" },
   website: "https://api.lecapi.net/docs",
   baseUrl: "https://api.lecapi.net",
