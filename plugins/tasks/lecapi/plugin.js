@@ -4,7 +4,7 @@
 // Pricing version: a42d372ccf0b5dd13ecf71203521f9d2.
 // New routes were cross-checked against public pricing and the authenticated /v1/models list.
 // The catalog determines media kinds; this plugin serves only image and video generation.
-// User pricing policy: published CNY price +20%, platform CNY/USD units 1:1.
+// User pricing policy: published CNY price +20%, with a temporary ¥0.50 per-request markup cap; second/token rates remain +20%.
 // Each expression contains the final marked-up numeric coefficient, with no FX
 // conversion or hidden multiplier. Rounding only removes binary float noise.
 // Retired profiles remain readable for historical tasks but cannot accept new submissions.
@@ -2429,6 +2429,74 @@ const MODELS = {
     },
     billing: { billing_unit: "request", price_per_request: 3 },
   },
+  "lec-mf-seedance-2-5-special": {
+    kind: "video",
+    name: "Seedance 2.5 (MF)",
+    icon: "Doubao.Color",
+    tags: ["special", "multi", "image", "video", "audio", "native", "per_request"],
+    parameters: {
+      prompt: { type: "string", required: true, maxLength: 10000 },
+      duration: { type: "integer", default: 4, min: 4, max: 30, step: 1 },
+      aspect_ratio: { type: "enum", default: "16:9", values: ["16:9", "9:16", "4:3", "3:4", "1:1", "21:9"] },
+      resolution: { type: "enum", default: "480p", values: ["480p", "720p"] },
+      images: { type: "array", constraints: { max_items: 30, url_schemes: ["https"] } },
+      videos: { type: "array", constraints: { max_items: 10, url_schemes: ["https"] } },
+      audios: { type: "array", constraints: { max_items: 10, url_schemes: ["https"] } },
+    },
+    billing: { billing_unit: "request", price_per_request: 2.5, resolution_prices: { "480p": 2.5, "720p": 3 } },
+    max_reference_total: 50,
+  },
+  "lec-mw-seedance-2-0-full": {
+    kind: "video",
+    name: "Seedance 2.0 Full (MW)",
+    icon: "Doubao.Color",
+    tags: ["full", "multi", "image", "video", "audio", "per_request"],
+    parameters: {
+      prompt: { type: "string", required: true, maxLength: 5000 },
+      duration: { type: "integer", default: 5, min: 4, max: 15, step: 1 },
+      resolution: { type: "enum", default: "720p", values: ["480p", "720p", "1080p", "4k"] },
+      aspect_ratio: { type: "enum", default: "16:9", values: ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"] },
+      images: { type: "array", constraints: { max_items: 9, url_schemes: ["http", "https"] } },
+      videos: { type: "array", constraints: { max_items: 3, url_schemes: ["http", "https"] } },
+      audios: { type: "array", constraints: { max_items: 3, url_schemes: ["http", "https"] } },
+    },
+    billing: { billing_unit: "request", price_per_request: 2, resolution_prices: { "480p": 1.5, "720p": 2, "1080p": 4.5, "4k": 10 } },
+    max_reference_total: 15,
+  },
+  "lec-mw-seedance-2-0-mini": {
+    kind: "video",
+    name: "Seedance 2.0 Mini (MW)",
+    icon: "Doubao.Color",
+    tags: ["mini", "multi", "image", "video", "audio", "per_request"],
+    parameters: {
+      prompt: { type: "string", required: true, maxLength: 5000 },
+      duration: { type: "integer", default: 5, min: 4, max: 15, step: 1 },
+      resolution: { type: "enum", default: "720p", values: ["480p", "720p"] },
+      aspect_ratio: { type: "enum", default: "16:9", values: ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"] },
+      images: { type: "array", constraints: { max_items: 9, url_schemes: ["http", "https"] } },
+      videos: { type: "array", constraints: { max_items: 3, url_schemes: ["http", "https"] } },
+      audios: { type: "array", constraints: { max_items: 3, url_schemes: ["http", "https"] } },
+    },
+    billing: { billing_unit: "request", price_per_request: 0.9, resolution_prices: { "480p": 0.7, "720p": 0.9 } },
+    max_reference_total: 15,
+  },
+  "lec-vp-seedance-2-5-vip-37": {
+    kind: "video",
+    name: "Seedance 2.5 VIP (VP)",
+    icon: "Doubao.Color",
+    tags: ["vip", "multi", "image", "video", "audio", "per_request"],
+    parameters: {
+      prompt: { type: "string", required: true },
+      duration: { type: "integer", required: true, default: 5, min: 5, max: 30, step: 1 },
+      aspect_ratio: { type: "enum", default: "16:9", values: ["16:9", "9:16", "4:3", "3:4", "1:1"] },
+      resolution: { type: "enum", default: "720p", values: ["480p", "720p"] },
+      images: { type: "array", constraints: { max_items: 30, url_schemes: ["https"] } },
+      videos: { type: "array", constraints: { max_items: 10, url_schemes: ["https"] } },
+      audios: { type: "array", constraints: { max_items: 10, url_schemes: ["https"] } },
+    },
+    billing: { billing_unit: "request", price_per_request: 2.8, resolution_prices: { "480p": 2.5, "720p": 2.8 } },
+    max_reference_total: 50,
+  },
 };
 
 // These fixed output settings are omitted from the upstream JSON contract.
@@ -2476,6 +2544,7 @@ const VIDEO_POOLS = {
 };
 
 const PRICE_MARKUP = 1.2;
+const TEMP_REQUEST_MARKUP_CAP = 0.5;
 
 function roundedSalePrice(markedUpPrice, unit) {
   const scale = unit === "second" ? 100 : 10;
@@ -2662,9 +2731,13 @@ function defaultExpression(profile) {
           : "requests";
   const priceWithFee = (price) => {
     const markedUp = price * PRICE_MARKUP;
-    return profile.kind === "video" && ["request", "second"].includes(billing.billing_unit)
-      ? roundedSalePrice(markedUp, billing.billing_unit)
-      : Number(markedUp.toFixed(12));
+    const salePrice =
+      profile.kind === "video" && ["request", "second"].includes(billing.billing_unit)
+        ? roundedSalePrice(markedUp, billing.billing_unit)
+        : Number(markedUp.toFixed(12));
+    return billing.billing_unit === "request" && billing.price_per_image === undefined
+      ? Math.min(salePrice, Number((price + TEMP_REQUEST_MARKUP_CAP).toFixed(12)))
+      : salePrice;
   };
   const leaf = (name, price) =>
     "tier(" +
@@ -3056,6 +3129,10 @@ const PUBLIC_DISPLAY_NAMES = {
   "vp-seedance-2-5-flash": "Seedance 2.5 Flash · 720p",
   "vp-seedance-2-5-flash-m": "Seedance 2.5 Flash M",
   "vp-wan-3-0-native": "Wan 3.0 满参 · VP",
+  "mf-seedance-2-5-special": "Seedance 2.5 · MF 特价",
+  "mw-seedance-2-0-full": "Seedance 2.0 满血 · MW",
+  "mw-seedance-2-0-mini": "Seedance 2.0 Mini · MW",
+  "vp-seedance-2-5-vip-37": "Seedance 2.5 VIP · VP",
   "seedance-2-5-01": "Seedance 2.5 · 多参考",
   "seedance-2-5-02": "Seedance 2.5 · 人像参考",
   "seedance-2-5-03": "Seedance 2.5 · 4K",
