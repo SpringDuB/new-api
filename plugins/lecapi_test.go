@@ -201,6 +201,61 @@ func TestLecAPIMLWan3FrameInputsAndReferenceVideoLimit(t *testing.T) {
 	require.ErrorContains(t, err, "combined reference video duration exceeds the supported range")
 }
 
+func TestLecAPIOpenAIVideoFrameRoles(t *testing.T) {
+	plugin := loadLecAPIPlugin(t)
+	const first, last = "https://media.example/a.png", "https://media.example/b.png"
+	for _, name := range []string{"ap-seedance-2-0-ot", "ap-seedance-2-0-ot-fast", "ap-seedance-2-0-ot-mini", "ap-seedance-2-5-ot", "ap-muse-video-720-10s", "am-minimax-h3-official", "ml-wan-3", "gt-seedance-2-0-full", "ms-minimax-h3"} {
+		t.Run(name, func(t *testing.T) {
+			for _, pair := range [][2]string{{first, ""}, {first, last}, {last, first}} {
+				fields := map[string]any{"model": name, "prompt": "transition", "first_frame": pair[0]}
+				if pair[1] != "" {
+					fields["last_frame"] = pair[1]
+				}
+				decoded, err := plugin.Engine.CallPath(t.Context(), "protocols", []string{"openai_video", "decodeRequest"}, map[string]any{"body": map[string]any{"kind": "json", "value": fields}})
+				require.NoError(t, err)
+				request := lecAPIHook(t, plugin, "buildSubmitRequest", lecAPIContext(name, decoded.(map[string]any)["requestBody"].(map[string]any)))
+				body := request["body"].(map[string]any)
+				if name == "gt-seedance-2-0-full" || name == "ms-minimax-h3" {
+					want, mode := []any{pair[0]}, "singleImage2video"
+					if pair[1] != "" {
+						want, mode = append(want, pair[1]), "frames2video"
+					}
+					assert.Equal(t, want, body["images"])
+					if name == "gt-seedance-2-0-full" {
+						assert.Equal(t, mode, body["mode"])
+					} else {
+						assert.NotContains(t, body, "mode")
+					}
+					assert.NotContains(t, body, "first_frame")
+					continue
+				}
+				startKey, endKey := "first_frame", "last_frame"
+				if name == "ml-wan-3" {
+					startKey, endKey = "start_image", "end_image"
+				}
+				assert.Equal(t, pair[0], body[startKey])
+				if pair[1] == "" {
+					assert.NotContains(t, body, endKey)
+				} else {
+					assert.Equal(t, pair[1], body[endKey])
+				}
+				assert.NotContains(t, body, "images")
+			}
+			refs := []any{first, last}
+			body := lecAPIHook(t, plugin, "buildSubmitRequest", lecAPIContext(name, map[string]any{"prompt": "reference", "images": refs}))["body"].(map[string]any)
+			assert.Equal(t, refs, body["images"])
+			assert.NotContains(t, body, "first_frame")
+			assert.NotContains(t, body, "start_image")
+			assert.NotContains(t, body, "mode")
+		})
+	}
+	for _, fields := range []map[string]any{{"last_frame": last}, {"first_frame": first, "images": []any{last}}, {"first_frame": first, "mode": "mixed2video"}, {"first_frame": first, "metadata": map[string]any{"first_frame_url": last}}} {
+		fields["prompt"] = "transition"
+		_, err := plugin.Engine.Call(t.Context(), "buildSubmitRequest", lecAPIContext("gt-seedance-2-0-full", fields))
+		require.Error(t, err)
+	}
+}
+
 func TestLecAPITemporaryMarkupCapAppliesOnlyToPerRequestPricing(t *testing.T) {
 	plugin := loadLecAPIPlugin(t)
 	for _, tc := range []struct {

@@ -19,6 +19,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/oauth"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
+	builtinplugins "github.com/QuantumNous/new-api/plugins"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
@@ -167,6 +168,21 @@ func TestCanvasModelCatalogDatabaseMatrix(t *testing.T) {
 			assert.Equal(t, http.StatusUnauthorized, read(token.Key, secret).Code)
 		})
 	}
+}
+
+func TestCanvasLecAPIVideoFramesFollowUpstreamModel(t *testing.T) {
+	source, err := builtinplugins.Source("lecapi")
+	require.NoError(t, err)
+	plugin, err := jsplugin.NewRegistry().RegisterFactory(source, jsplugin.Options{Key: "lecapi"})
+	require.NoError(t, err)
+	for _, name := range []string{"ap-seedance-2-0-ot", "ap-seedance-2-0-ot-fast", "ap-seedance-2-0-ot-mini", "ap-seedance-2-5-ot", "ap-muse-video-720-10s", "am-minimax-h3-official", "ml-wan-3", "gt-seedance-2-0-full", "ms-minimax-h3"} {
+		assert.Equal(t, 2, canvasLecAPIFrameCapacity(plugin.Meta, name, &model.Channel{}), name)
+	}
+	mapping := `{"custom":"route","route":"lec-ml-wan-3","ml-wan-3":"ap-wan-3-0-720p"}`
+	channel := &model.Channel{ModelMapping: &mapping}
+	assert.Equal(t, 2, canvasLecAPIFrameCapacity(plugin.Meta, "custom", channel))
+	assert.Zero(t, canvasLecAPIFrameCapacity(plugin.Meta, "ml-wan-3", channel))
+	assert.Zero(t, canvasLecAPIFrameCapacity(plugin.Meta, "seedance-2-5-01", channel))
 }
 
 func TestCanvasModelCatalogPriceSummary(t *testing.T) {

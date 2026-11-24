@@ -81,7 +81,15 @@ func canvasDocumentedParameters(description, kind string) map[string]canvasMedia
 			if param.Max == 0 && len(param.Values) == 0 {
 				continue
 			}
-		case "images", "videos", "audios", "first_frame", "last_frame":
+		case "first_frame", "last_frame":
+			if kind != "video" {
+				continue
+			}
+			param.Max = 1
+			if param.Required {
+				param.Min = 1
+			}
+		case "images", "videos", "audios":
 			if kind == "image" && name != "images" {
 				continue
 			}

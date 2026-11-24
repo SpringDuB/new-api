@@ -93,7 +93,7 @@ func CanvasModelCatalog(c *gin.Context) {
 	// Keep callable aliases in the allowlist for existing Canvas mappings. An
 	// alias is not made a recommendation simply because its target is featured.
 	for _, item := range candidates {
-		capabilities, documented, plugins := canvasMediaCapabilities(generation, item.ModelName, channels[item.ModelName])
+		capabilities, parameters, plugins := canvasMediaCapabilities(generation, item.ModelName, item.Description, channels[item.ModelName])
 		if len(capabilities) == 0 {
 			continue
 		}
@@ -102,10 +102,7 @@ func CanvasModelCatalog(c *gin.Context) {
 		entry := canvasCatalogModel{
 			ID: item.ModelName, DisplayName: item.DisplayName, Description: canvasCatalogDescription(item.Description), Tags: canvasCatalogTags(decoration), Icon: canvasModelIcon(family, item.Icon),
 			Family:       family,
-			Capabilities: capabilities, Featured: decoration.Highlight,
-		}
-		if documented && len(capabilities) == 1 {
-			entry.Parameters = canvasDocumentedParameters(item.Description, capabilities[0])
+			Capabilities: capabilities, Parameters: parameters, Featured: decoration.Highlight,
 		}
 		entry.Price = canvasPriceSummary(item, groups, plugins, entry.Parameters["resolution"].Values)
 		result = append(result, entry)
@@ -173,9 +170,9 @@ func canvasModelFamily(id, name, series string) string {
 
 // The model library's endpoints aggregate across channels (including plugin
 // channel types). Determine what the user's enabled routes actually serve.
-func canvasMediaCapabilities(generation *jsplugin.RoutingGeneration, name string, routes []*model.Channel) ([]string, bool, map[string]bool) {
+func canvasMediaCapabilities(generation *jsplugin.RoutingGeneration, name, description string, routes []*model.Channel) ([]string, map[string]canvasMediaParameter, map[string]bool) {
 	if len(routes) == 0 {
-		return nil, false, nil
+		return nil, nil, nil
 	}
 	lookup := name
 	if declared, ok := generation.CanonicalModel(name); ok {
@@ -186,6 +183,7 @@ func canvasMediaCapabilities(generation *jsplugin.RoutingGeneration, name string
 	priced := helper.HasModelBillingConfig(name)
 	var capabilities []string
 	documented := true
+	maxFrames := 2
 	plugins := make(map[string]bool)
 	for _, media := range []struct{ kind, path string }{
 		{"image", "/v1/images/generations"},
@@ -214,6 +212,9 @@ func canvasMediaCapabilities(generation *jsplugin.RoutingGeneration, name string
 					plugins[meta.Key] = true
 					pluginRoute, supported = true, true
 					documented = documented && meta.Key == "lecapi"
+					if documented && media.kind == "video" && maxFrames > 0 {
+						maxFrames = min(maxFrames, canvasLecAPIFrameCapacity(meta, name, route))
+					}
 				}
 			}
 			nativeImage := media.kind == "image" && priced && route.Type != constant.ChannelTypeTaskPlugin && common.IsImageGenerationModel(name)
@@ -225,5 +226,43 @@ func canvasMediaCapabilities(generation *jsplugin.RoutingGeneration, name string
 			capabilities = append(capabilities, media.kind)
 		}
 	}
-	return capabilities, documented, plugins
+	var params map[string]canvasMediaParameter
+	if documented && len(capabilities) == 1 {
+		params = canvasDocumentedParameters(description, capabilities[0])
+		if capabilities[0] == "video" {
+			// A display description can be edited independently of the active routes.
+			for i, field := range []string{"first_frame", "last_frame"} {
+				if i < maxFrames {
+					param := params[field]
+					param.Max, param.Inline = 1, false // LecAPI frame inputs use public HTTPS URLs.
+					params[field] = param
+				} else {
+					delete(params, field)
+				}
+			}
+		}
+	}
+	return capabilities, params, plugins
+}
+
+func canvasLecAPIFrameCapacity(meta jsplugin.Meta, name string, route *model.Channel) int {
+	if raw := route.GetModelMapping(); raw != "" && raw != "{}" {
+		var mapping map[string]string
+		if common.UnmarshalJsonStr(raw, &mapping) != nil {
+			return 0
+		}
+		name, _ = model.FollowChannelModelMapping(mapping, name)
+	}
+	defaults, ok := meta.DefaultsForModel(name, strings.TrimPrefix(name, "lec-"))
+	if !ok {
+		return 0
+	}
+	params := canvasDocumentedParameters(defaults.Description["en"], "video")
+	if params["first_frame"].Max == 0 {
+		return 0
+	}
+	if params["last_frame"].Max > 0 {
+		return 2
+	}
+	return 1
 }

@@ -1271,6 +1271,7 @@ const MODELS = {
   },
   "lec-ms-minimax-h3": {
     kind: "video",
+    ordered_frame_images: true,
     name: "MiniMax-H3 生成（MS）",
     icon: "Minimax.Color",
     tags: ["full", "per_second"],
@@ -3173,6 +3174,13 @@ function modelDescription(profile) {
     english.push("Resolution, duration, aspect ratio and references must be supported together");
     chinese.push("分辨率、时长、画幅和参考素材须有可用的组合");
   }
+  if (profile.parameters.start_image || profile.ordered_frame_images || profile.parameters.mode?.values.includes("frames2video")) {
+    // Publish the gateway fields alongside the native model parameters.
+    for (const field of ["first_frame", "last_frame"]) {
+      english.push(field + ": " + PARAMETER_LABELS[field][0] + ", public HTTPS URL");
+      chinese.push(field + "：" + PARAMETER_LABELS[field][1] + "，公网 HTTPS 地址");
+    }
+  }
   if (profile.billing.billing_unit === "million_tokens") {
     english.push("First and last frames allow at most two images including reference images, and cannot be combined with reference videos");
     chinese.push("启用首尾帧时，首尾帧与参考图合计最多两张，且不能同时使用参考视频");
@@ -3306,7 +3314,7 @@ export const meta = {
   key: "lecapi",
   name: "LecAPI",
   icon: "text:LE",
-  version: "1.14.0",
+  version: "1.15.0",
   author: { name: "QuantumNous" },
   website: "https://api.lecapi.net/docs",
   baseUrl: "https://api.lecapi.net",
@@ -3505,6 +3513,7 @@ function submission(ctx, profile = modelProfile(ctx)) {
   if (profile.retired) throw new Error(profile.publicModel + " is no longer available on LecAPI");
   const media = {},
     files = [];
+  const orderedFrames = {};
   let requestedCount;
   const aliases = {
     seconds: "duration",
@@ -3546,6 +3555,15 @@ function submission(ctx, profile = modelProfile(ctx)) {
       }
       let target = field === "audio" && !profile.parameters.audio ? "audios" : aliases[field] || field;
       if (profile.vendorModel === "lec-vw-seedance-2-0-fast" && target === "last_frame") throw new Error("last_frame is not supported by this model");
+      if (target === "first_frame" || target === "last_frame") {
+        const nativeField = target === "first_frame" ? "start_image" : "end_image";
+        if (profile.parameters[nativeField]) target = nativeField;
+        else if (profile.ordered_frame_images || profile.parameters.mode?.values.includes("frames2video")) {
+          if (orderedFrames[target] !== undefined) throw new Error("duplicate " + target);
+          orderedFrames[target] = materialValue(value, profile.parameters.images, target);
+          continue;
+        }
+      }
       if (!profile.poolRoute && ["first_frame", "last_frame"].includes(target) && !profile.parameters[target]) target = "images";
       if (target === "size" && !profile.parameters.size && typeof value === "string") {
         value = value.trim();
@@ -3594,6 +3612,16 @@ function submission(ctx, profile = modelProfile(ctx)) {
     const referenceCount = media.images?.length || 0;
     body.action = referenceCount === 0 ? "imagine" : referenceCount === 1 ? "edits" : "blend";
   }
+  if (orderedFrames.first_frame || orderedFrames.last_frame) {
+    if (!orderedFrames.first_frame) throw new Error("last_frame requires first_frame");
+    if (media.images?.length || media.videos?.length || media.audios?.length) throw new Error("frame inputs cannot be combined with other reference materials");
+    if (profile.parameters.mode) {
+      const mode = orderedFrames.last_frame ? "frames2video" : "singleImage2video";
+      if (body.mode !== undefined && body.mode !== mode) throw new Error("mode conflicts with frame inputs");
+      body.mode = parameterValue(mode, profile.parameters.mode, "mode");
+    }
+    media.images = orderedFrames.last_frame ? [orderedFrames.first_frame, orderedFrames.last_frame] : [orderedFrames.first_frame];
+  }
   for (const [field, parameter] of Object.entries(profile.parameters)) {
     if (MEDIA_FIELDS.includes(field)) {
       if (media[field]?.length)
@@ -3612,6 +3640,8 @@ function submission(ctx, profile = modelProfile(ctx)) {
   const imageCount = media.images?.length || 0,
     videoCount = media.videos?.length || 0,
     audioCount = media.audios?.length || 0;
+  if (profile.vendorModel === "lec-ap-muse-video-720-10s" && imageCount + (media.first_frame?.length || 0) + (media.last_frame?.length || 0) > 4)
+    throw new Error("reference images and frames support at most four combined images");
   if (profile.billing.billing_unit === "million_tokens") {
     const frameCount = (body.first_frame ? 1 : 0) + (body.last_frame ? 1 : 0);
     if (frameCount && (videoCount || imageCount + frameCount > 2))
