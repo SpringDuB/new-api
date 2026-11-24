@@ -2,9 +2,11 @@ package controller
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
@@ -190,10 +192,21 @@ func archiveTaskArtifact(ctx context.Context, task *model.Task, artifact relaych
 		defer release()
 		var descriptor *relaychannel.TaskContentRequest
 		for _, image := range task.PrivateData.ImageArtifacts {
-			if image.Key == artifact.Key {
-				descriptor = &relaychannel.TaskContentRequest{URL: image.SourceURL, Method: http.MethodGet, Credentialless: true}
-				break
+			if image.Key != artifact.Key {
+				continue
 			}
+			if strings.HasPrefix(image.SourceURL, "data:") {
+				header, encoded, ok := strings.Cut(image.SourceURL, ",")
+				mediaType, isDataURL := strings.CutPrefix(header, "data:")
+				mediaType, isBase64 := strings.CutSuffix(mediaType, ";base64")
+				if !ok || !isDataURL || !isBase64 || mediaType != image.MimeType {
+					return nil, errors.New("invalid inline image artifact")
+				}
+				content := base64.NewDecoder(base64.StdEncoding, strings.NewReader(encoded))
+				return store.Persist(bounded, task, artifact, content)
+			}
+			descriptor = &relaychannel.TaskContentRequest{URL: image.SourceURL, Method: http.MethodGet, Credentialless: true}
+			break
 		}
 		if descriptor == nil {
 			adaptor, err := initTaskArtifactAdaptor(task)

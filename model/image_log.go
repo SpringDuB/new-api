@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/QuantumNous/new-api/constant"
 	"gorm.io/gorm"
 )
 
@@ -48,7 +49,8 @@ func UpdateTaskImageLog(ctx context.Context, task *Task) error {
 		if err := lockForUpdate(tx).First(&current, task.ID).Error; err != nil {
 			return err
 		}
-		if current.Status != TaskStatusSuccess && current.Status != TaskStatusFailure {
+		if current.Status != TaskStatusSuccess && current.Status != TaskStatusFailure &&
+			!(task.Platform == constant.TaskPlatformAsyncImage && task.PrivateData.ImageRequestMode == "asynchronous" && current.Status == task.Status) {
 			return nil
 		}
 		if current.PrivateData.Response == nil {
@@ -64,6 +66,13 @@ func UpdateTaskImageLog(ctx context.Context, task *Task) error {
 				}
 			}
 			current.PrivateData.ImageArtifacts = task.PrivateData.ImageArtifacts
+		}
+		if task.Platform == constant.TaskPlatformAsyncImage && task.PrivateData.ImageRequestMode == "asynchronous" && current.Status == task.Status {
+			if task.PrivateData.ArtifactArchive != nil {
+				current.PrivateData.ArtifactArchive = task.PrivateData.ArtifactArchive
+			}
+			current.Quota = task.Quota
+			return tx.Model(&current).Updates(map[string]any{"private_data": current.PrivateData, "quota": current.Quota}).Error
 		}
 		return tx.Model(&current).Update("private_data", current.PrivateData).Error
 	})

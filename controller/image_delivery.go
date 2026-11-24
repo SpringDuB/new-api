@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relay"
@@ -92,6 +93,11 @@ func relayStoredImages(c *gin.Context, info *relaycommon.RelayInfo) *types.NewAP
 			}
 			if !failed {
 				task := &model.Task{TaskID: model.GenerateTaskID(), Platform: "image", UserId: c.GetInt("id"), ChannelId: info.ChannelId}
+				if value, ok := c.Get(imageLogTaskContextKey); ok {
+					if asyncTask, ok := value.(*model.Task); ok && asyncTask.Platform == constant.TaskPlatformAsyncImage {
+						task = asyncTask
+					}
+				}
 				request, _ := info.Request.(*dto.ImageRequest)
 				format = imageDeliveryFormat{stream: writer.capture.stream, jsonAsStream: c.GetBool(relaycommon.ImageJSONAsStreamKey), inlineBase64: request != nil && strings.EqualFold(strings.TrimSpace(request.ResponseFormat), "b64_json")}
 				var deliveryErr error
@@ -256,7 +262,7 @@ func prepareStoredImages(c *gin.Context, task *model.Task, store service.TaskArt
 		artifact.MimeType = ref.MimeType
 		archive.Artifacts = append(archive.Artifacts, taskArchivedArtifact(artifact, ref))
 	}
-	if task.Platform == "image" || task.PrivateData.ResultDiscarded {
+	if task.Platform == "image" || task.Platform == constant.TaskPlatformAsyncImage || task.PrivateData.ResultDiscarded {
 		c.Set(imageDeliveryManifestContextKey, imageDeliveryManifest{taskID: task.TaskID, archive: archive})
 	}
 	return response, nil

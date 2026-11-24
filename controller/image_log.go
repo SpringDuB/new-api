@@ -178,7 +178,7 @@ func beginImageLogCapture(c *gin.Context) func() {
 		taskValue, _ := c.Get(imageLogTaskContextKey)
 		task, _ := taskValue.(*model.Task)
 		intent := imageLogRequestIntent(c) || task != nil && model.IsImageTaskAction(task.Action)
-		if task != nil && (!intent || task.Status != model.TaskStatusSuccess && task.Status != model.TaskStatusFailure) {
+		if task != nil && (!intent || task.Status != model.TaskStatusSuccess && task.Status != model.TaskStatusFailure) && !(task.Platform == constant.TaskPlatformAsyncImage && task.PrivateData.ImageRequestMode == "asynchronous") {
 			snapshot := service.BuildTaskResponseSnapshot(c, body, writer.Status(), writer.Header().Get("Content-Type"), kind)
 			if writer.omitted {
 				snapshot.Body = nil
@@ -245,7 +245,14 @@ func beginImageLogCapture(c *gin.Context) func() {
 				task.FailReason = "Image generation failed"
 			}
 		}
-		task.PrivateData.ImageRequestMode = "synchronous"
+		if delivered && manifest.taskID == task.TaskID {
+			task.PrivateData.ArtifactArchive = &manifest.archive
+		}
+		if task.Platform == constant.TaskPlatformAsyncImage && task.PrivateData.ImageRequestMode == "asynchronous" {
+			task.Quota = c.GetInt(service.SettledQuotaContextKey)
+		} else {
+			task.PrivateData.ImageRequestMode = "synchronous"
+		}
 		task.PrivateData.Response = service.BuildTaskResponseSnapshot(c, body, writer.Status(), writer.Header().Get("Content-Type"), kind)
 		if writer.omitted {
 			task.PrivateData.Response.BodyOmitted = "size_limit"

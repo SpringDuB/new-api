@@ -16,6 +16,7 @@ func SetRouter(router *gin.Engine, assets WebAssets) {
 	SetApiRouter(router)
 	SetDashboardRouter(router)
 	SetRelayRouter(router)
+	SetAsyncImageRouter(router)
 	SetTaskPluginProtocolRouter(router)
 	SetVideoRouter(router)
 	SetTaskRouter(router)

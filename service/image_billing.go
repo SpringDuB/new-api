@@ -13,6 +13,25 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+const ImageBillingReservationHookContextKey = "image_billing_reservation_hook"
+
+type ImageBillingReservationHook func(*relaycommon.RelayInfo) error
+
+func RunImageBillingReservationHook(c *gin.Context, info *relaycommon.RelayInfo) *types.NewAPIError {
+	hookValue, exists := c.Get(ImageBillingReservationHookContextKey)
+	if !exists {
+		return nil
+	}
+	hook, ok := hookValue.(ImageBillingReservationHook)
+	if !ok || hook == nil {
+		return types.NewErrorWithStatusCode(errors.New("invalid image billing reservation hook"), types.ErrorCodeInvalidRequest, http.StatusInternalServerError, types.ErrOptionWithSkipRetry())
+	}
+	if err := hook(info); err != nil {
+		return types.NewErrorWithStatusCode(err, types.ErrorCodeQueryDataError, http.StatusInternalServerError, types.ErrOptionWithSkipRetry())
+	}
+	return nil
+}
+
 // PrepareImageBillingForRequest reserves the effective outbound image quantity
 // before each attempt, including channel retries and parameter overrides. The
 // client request body stays frozen; only the independent quantity is refreshed.
@@ -21,12 +40,15 @@ func PrepareImageBillingForRequest(c *gin.Context, info *relaycommon.RelayInfo, 
 		return types.NewErrorWithStatusCode(fmt.Errorf("image_count must be an integer between 1 and %d", dto.MaxImageN), types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 	}
 	info.ImageRequestCount = count
+	if _, exists := c.Get(ImageBillingReservationHookContextKey); exists {
+		info.ForcePreConsume = true
+	}
 	var quota int
 	var err error
 	if snap := info.TieredBillingSnapshot; snap != nil && snap.BillingMode == "tiered_expr" {
 		// Token-only image expressions must not acquire a quantity multiplier.
 		if snap.EstimatedImageCount == nil {
-			return nil
+			return RunImageBillingReservationHook(c, info)
 		}
 		request := billingexpr.RequestInput{}
 		if info.BillingRequestInput != nil {
@@ -72,19 +94,22 @@ func PrepareImageBillingForRequest(c *gin.Context, info *relaycommon.RelayInfo, 
 	}
 	info.PriceData.QuotaToPreConsume = quota
 	if quota == 0 && info.Billing == nil {
-		return nil
+		return RunImageBillingReservationHook(c, info)
 	}
 	info.PriceData.FreeModel = false
 	if info.Billing == nil {
-		return PreConsumeBilling(c, quota, info)
-	}
-	if err := info.Billing.Reserve(quota); err != nil {
-		var apiErr *types.NewAPIError
-		if errors.As(err, &apiErr) {
+		if apiErr := PreConsumeBilling(c, quota, info); apiErr != nil {
 			return apiErr
 		}
-		return types.NewErrorWithStatusCode(err, types.ErrorCodeInsufficientUserQuota, http.StatusForbidden, types.ErrOptionWithSkipRetry())
+	} else {
+		if err := info.Billing.Reserve(quota); err != nil {
+			var apiErr *types.NewAPIError
+			if errors.As(err, &apiErr) {
+				return apiErr
+			}
+			return types.NewErrorWithStatusCode(err, types.ErrorCodeInsufficientUserQuota, http.StatusForbidden, types.ErrOptionWithSkipRetry())
+		}
+		info.FinalPreConsumedQuota = info.Billing.GetPreConsumedQuota()
 	}
-	info.FinalPreConsumedQuota = info.Billing.GetPreConsumedQuota()
-	return nil
+	return RunImageBillingReservationHook(c, info)
 }

@@ -94,6 +94,15 @@ func serveTaskPluginImageProtocol(c *gin.Context, pinned pluginruntime.PinnedEnd
 		return
 	}
 	task := outcome.Task
+	if wrapper, ok := clientRequest.Context().Value(asyncImageTaskContextKey{}).(*model.Task); ok && wrapper != nil {
+		linked, err := model.LinkAsyncImageSourceTask(wrapper.UserId, wrapper.TaskID, task.TaskID)
+		if err != nil || !linked {
+			logger.LogError(c, common.LogText("link async image task to upstream task failed task_id=%s", wrapper.TaskID))
+			respondPluginProtocolError(c, http.StatusInternalServerError, "task_protocol_error", "Task protocol request failed")
+			return
+		}
+		wrapper.PrivateData.AsyncImageSourceTaskID = task.TaskID
+	}
 	if task.Status != model.TaskStatusSuccess && task.Status != model.TaskStatusFailure {
 		if taskErr = waitTaskPluginImageTask(c, task, deps); taskErr != nil {
 			if c.Request.Context().Err() == nil {

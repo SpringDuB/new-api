@@ -377,6 +377,7 @@ func newAccessTokenScopeTestEngine(t *testing.T) *gin.Engine {
 		SetApiRouter(engine)
 		SetDashboardRouter(engine)
 		SetRelayRouter(engine)
+		SetAsyncImageRouter(engine)
 		SetTaskPluginProtocolRouter(engine)
 		SetVideoRouter(engine)
 		SetTaskRouter(engine)

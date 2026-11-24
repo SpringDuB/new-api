@@ -120,11 +120,12 @@ type TaskPrivateData struct {
 	// ClientRequest is captured before plugin decoding. It is independent of
 	// mutable upstream Data/state, private by default, and retained only for
 	// the lifetime of this task row (including its normal deletion/backups).
-	ClientRequest      *TaskClientRequestSnapshot `json:"client_request,omitempty"`
-	Response           *TaskResponseSnapshot      `json:"response,omitempty"`
-	SubmissionResponse *TaskResponseSnapshot      `json:"submission_response,omitempty"`
-	ImageRequestMode   string                     `json:"image_request_mode,omitempty"`
-	// ImageArtifacts are host-managed results of synchronous image relays.
+	ClientRequest          *TaskClientRequestSnapshot `json:"client_request,omitempty"`
+	Response               *TaskResponseSnapshot      `json:"response,omitempty"`
+	SubmissionResponse     *TaskResponseSnapshot      `json:"submission_response,omitempty"`
+	ImageRequestMode       string                     `json:"image_request_mode,omitempty"`
+	AsyncImageSourceTaskID string                     `json:"async_image_source_task_id,omitempty"`
+	// ImageArtifacts are host-managed results of image relays and async image tasks.
 	// Source URLs stay private; inline image binaries are only kept in OSS.
 	ImageArtifacts  []TaskImageArtifact  `json:"image_artifacts,omitempty"`
 	ArtifactArchive *TaskArtifactArchive `json:"artifact_archive,omitempty"`
@@ -310,7 +311,7 @@ func (p *TaskPrivateData) Scan(val any) error {
 }
 
 func (p TaskPrivateData) Value() (driver.Value, error) {
-	if p.Key == "" && p.UpstreamTaskID == "" && p.ResultURL == "" &&
+	if p.Key == "" && p.UpstreamTaskID == "" && p.ResultURL == "" && p.AsyncImageSourceTaskID == "" &&
 		p.Execution == nil && p.ClientRequest == nil && p.Response == nil && p.ImageRequestMode == "" && len(p.ImageArtifacts) == 0 && p.ArtifactArchive == nil && p.BillingSource == "" && p.SubscriptionId == 0 &&
 		p.TokenId == 0 && p.NodeName == "" && p.BillingContext == nil &&
 		!p.ResponsesBackground && len(p.PluginState) == 0 && p.PollFailures == 0 &&
@@ -481,17 +482,116 @@ func GetAllUnFinishSyncTasks(limit int) []*Task {
 	var tasks []*Task
 	var err error
 	// get all tasks progress is not 100%
-	err = DB.Where("progress != ?", "100%").Where("status != ?", TaskStatusFailure).Where("status != ?", TaskStatusSuccess).Limit(limit).Order("id").Find(&tasks).Error
+	err = DB.Where("progress != ?", "100%").Where("status != ?", TaskStatusFailure).Where("status != ?", TaskStatusSuccess).Where("platform != ?", constant.TaskPlatformAsyncImage).Limit(limit).Order("id").Find(&tasks).Error
 	if err != nil {
 		return nil
 	}
 	return tasks
 }
 
-// HasUnfinishedSyncTasks reports whether at least one async (Suno/video) task is
+// HasUnfinishedSyncTasks reports whether at least one asynchronous task is
 // still in progress. It is a cheap existence check (LIMIT 1) used to decide
 // whether the async_task_poll system task needs to run; when no task is pending
 // the scheduler skips creating a row entirely.
+func GetPendingAsyncImageTasks(limit int) ([]*Task, error) {
+	if limit <= 0 {
+		limit = 1
+	}
+	var tasks []*Task
+	err := DB.Where("platform = ? AND action = ? AND status = ?", constant.TaskPlatformAsyncImage, "image_generation", TaskStatusNotStart).
+		Order("id").Limit(limit).Find(&tasks).Error
+	return tasks, err
+}
+
+func HasPendingAsyncImageTasks() bool {
+	var id int64
+	err := DB.Model(&Task{}).
+		Where("platform = ? AND action = ? AND status = ?", constant.TaskPlatformAsyncImage, "image_generation", TaskStatusNotStart).
+		Limit(1).Pluck("id", &id).Error
+	return err == nil && id != 0
+}
+
+// PersistAsyncImageTaskBillingReservation stores the refundable reservation
+// before an asynchronous image worker sends the upstream request. The status
+// guard prevents a timed-out task from acquiring new billing state.
+func PersistAsyncImageTaskBillingReservation(task *Task) (bool, error) {
+	if task == nil || task.ID == 0 {
+		return false, errors.New("async image task must be persisted before billing reservation")
+	}
+	updated := false
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		var current Task
+		if err := lockForUpdate(tx).Select("id", "status", "platform").First(&current, task.ID).Error; err != nil {
+			return err
+		}
+		if current.Platform != constant.TaskPlatformAsyncImage || current.Status != TaskStatusInProgress {
+			return nil
+		}
+		result := tx.Model(&Task{}).Where("id = ? AND status = ?", task.ID, TaskStatusInProgress).Updates(map[string]any{
+			"quota":        task.Quota,
+			"channel_id":   task.ChannelId,
+			"group":        task.Group,
+			"properties":   task.Properties,
+			"private_data": task.PrivateData,
+		})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			var status TaskStatus
+			if err := tx.Model(&Task{}).Select("status").Where("id = ?", task.ID).Scan(&status).Error; err != nil {
+				return err
+			}
+			if status != TaskStatusInProgress {
+				return nil
+			}
+		}
+		updated = true
+		return nil
+	})
+	return updated, err
+}
+
+// LinkAsyncImageSourceTask durably links an image task wrapper to the native
+// task created by a task-protocol upstream, so queries can recover its result
+// after the wrapper worker is interrupted.
+func LinkAsyncImageSourceTask(userID int, taskID, sourceTaskID string) (bool, error) {
+	if userID <= 0 || taskID == "" || sourceTaskID == "" || taskID == sourceTaskID {
+		return false, errors.New("invalid async image source task link")
+	}
+	linked := false
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		var source Task
+		if err := tx.Select("id").Where("user_id = ? AND task_id = ?", userID, sourceTaskID).First(&source).Error; err != nil {
+			return err
+		}
+		var wrapper Task
+		if err := lockForUpdate(tx).Where("user_id = ? AND task_id = ? AND platform = ?", userID, taskID, constant.TaskPlatformAsyncImage).First(&wrapper).Error; err != nil {
+			return err
+		}
+		if wrapper.Status != TaskStatusInProgress {
+			return nil
+		}
+		wrapper.PrivateData.AsyncImageSourceTaskID = sourceTaskID
+		result := tx.Model(&Task{}).Where("id = ? AND status = ?", wrapper.ID, TaskStatusInProgress).Update("private_data", wrapper.PrivateData)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			var status TaskStatus
+			if err := tx.Model(&Task{}).Select("status").Where("id = ?", wrapper.ID).Scan(&status).Error; err != nil {
+				return err
+			}
+			if status != TaskStatusInProgress {
+				return nil
+			}
+		}
+		linked = true
+		return nil
+	})
+	return linked, err
+}
+
 func HasUnfinishedSyncTasks() bool {
 	var id int64
 	err := DB.Model(&Task{}).

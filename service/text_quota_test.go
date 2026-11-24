@@ -195,6 +195,12 @@ func runFixedPriceAccountingCases(t *testing.T, db, logDB *gorm.DB) {
 				require.NoError(t, err)
 				assert.Equal(t, quota-reservation, held)
 				if tc.outboundImages > 0 {
+					persistedReservation := false
+					ctx.Set(ImageBillingReservationHookContextKey, ImageBillingReservationHook(func(reservedInfo *relaycommon.RelayInfo) error {
+						persistedReservation = true
+						assert.Equal(t, reservedInfo.Billing.GetPreConsumedQuota(), reservedInfo.FinalPreConsumedQuota)
+						return nil
+					}))
 					reserveErr := PrepareImageBillingForRequest(ctx, info, tc.outboundImages)
 					if tc.reserveInsufficient {
 						require.NotNil(t, reserveErr)
@@ -202,6 +208,7 @@ func runFixedPriceAccountingCases(t *testing.T, db, logDB *gorm.DB) {
 						assert.Equal(t, reservation, info.Billing.GetPreConsumedQuota())
 					} else {
 						require.Nil(t, reserveErr)
+						assert.True(t, persistedReservation)
 						assert.Equal(t, tc.want, info.Billing.GetPreConsumedQuota())
 					}
 				}

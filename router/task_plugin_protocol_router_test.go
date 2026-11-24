@@ -31,3 +31,14 @@ func TestHostProtocolRegistryDrivesProtocolRoutesOnce(t *testing.T) {
 	sort.Strings(actual)
 	assert.Equal(t, expected, actual)
 }
+
+func TestAsyncImageTaskRouterRegistersCreateAndQuery(t *testing.T) {
+	engine := gin.New()
+	SetAsyncImageRouter(engine)
+	actual := make([]string, 0, len(engine.Routes()))
+	for _, route := range engine.Routes() {
+		actual = append(actual, fmt.Sprintf("%s %s", route.Method, route.Path))
+	}
+	sort.Strings(actual)
+	assert.Equal(t, []string{"GET /v1/images/tasks/:task_id", "POST /v1/images/tasks"}, actual)
+}

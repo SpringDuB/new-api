@@ -428,3 +428,99 @@ func TestLecAPIRouteReplacementDatabaseMatrix(t *testing.T) {
 		})
 	}
 }
+
+func TestAsyncImageTaskQueriesExcludeGenerationJobsFromProviderPolling(t *testing.T) {
+	truncateTables(t)
+	imageTask := &Task{
+		TaskID: "task_async_image", Platform: constant.TaskPlatformAsyncImage,
+		Action: "image_generation", Status: TaskStatusNotStart, Progress: "0%",
+	}
+	insertTask(t, imageTask)
+	providerTask := &Task{
+		TaskID: "task_provider", Platform: constant.TaskPlatformSuno,
+		Action: constant.TaskActionTextToVideo, Status: TaskStatusInProgress, Progress: "30%",
+	}
+	insertTask(t, providerTask)
+
+	pending, err := GetPendingAsyncImageTasks(10)
+	require.NoError(t, err)
+	require.Len(t, pending, 1)
+	assert.Equal(t, imageTask.TaskID, pending[0].TaskID)
+	assert.True(t, HasPendingAsyncImageTasks())
+
+	forPolling := GetAllUnFinishSyncTasks(10)
+	require.Len(t, forPolling, 1)
+	assert.Equal(t, providerTask.TaskID, forPolling[0].TaskID)
+	assert.True(t, HasUnfinishedSyncTasks())
+
+	imageTask.Status = TaskStatusSuccess
+	imageTask.Progress = "100%"
+	require.NoError(t, imageTask.Update())
+	assert.False(t, HasPendingAsyncImageTasks())
+}
+
+func TestPersistAsyncImageTaskBillingReservation(t *testing.T) {
+	truncateTables(t)
+	task := &Task{
+		TaskID:     "task_async_image_billing",
+		Platform:   constant.TaskPlatformAsyncImage,
+		Action:     "image_generation",
+		Status:     TaskStatusInProgress,
+		Progress:   "1%",
+		Quota:      2400,
+		ChannelId:  19,
+		Group:      "premium",
+		Properties: Properties{OriginModelName: "image-model", UpstreamModelName: "provider-image-model"},
+		PrivateData: TaskPrivateData{
+			TokenId:        23,
+			BillingSource:  "subscription",
+			SubscriptionId: 29,
+			BillingContext: &TaskBillingContext{ModelPrice: 0.02, GroupRatio: 1.5, ModelRatio: 2, OtherRatios: map[string]float64{"n": 3}, OriginModelName: "image-model", PerCallBilling: true},
+		},
+	}
+	insertTask(t, task)
+
+	updated, err := PersistAsyncImageTaskBillingReservation(task)
+	require.NoError(t, err)
+	require.True(t, updated)
+
+	var stored Task
+	require.NoError(t, DB.First(&stored, task.ID).Error)
+	assert.Equal(t, task.Quota, stored.Quota)
+	assert.Equal(t, task.ChannelId, stored.ChannelId)
+	assert.Equal(t, task.Group, stored.Group)
+	assert.Equal(t, task.Properties, stored.Properties)
+	assert.Equal(t, task.PrivateData.TokenId, stored.PrivateData.TokenId)
+	assert.Equal(t, task.PrivateData.BillingSource, stored.PrivateData.BillingSource)
+	assert.Equal(t, task.PrivateData.SubscriptionId, stored.PrivateData.SubscriptionId)
+	require.NotNil(t, stored.PrivateData.BillingContext)
+	assert.Equal(t, task.PrivateData.BillingContext, stored.PrivateData.BillingContext)
+
+	task.Status = TaskStatusFailure
+	require.NoError(t, task.Update())
+	updated, err = PersistAsyncImageTaskBillingReservation(task)
+	require.NoError(t, err)
+	assert.False(t, updated)
+}
+
+func TestLinkAsyncImageSourceTask(t *testing.T) {
+	truncateTables(t)
+	wrapper := &Task{TaskID: "task_async_image_wrapper", UserId: 7, Platform: constant.TaskPlatformAsyncImage, Action: "image_generation", Status: TaskStatusInProgress}
+	source := &Task{TaskID: "task_lecapi_source", UserId: 7, Platform: "lecapi", Action: "image_generation", Status: TaskStatusSubmitted}
+	insertTask(t, wrapper)
+	insertTask(t, source)
+
+	linked, err := LinkAsyncImageSourceTask(wrapper.UserId, wrapper.TaskID, source.TaskID)
+	require.NoError(t, err)
+	require.True(t, linked)
+
+	var stored Task
+	require.NoError(t, DB.First(&stored, wrapper.ID).Error)
+	assert.Equal(t, source.TaskID, stored.PrivateData.AsyncImageSourceTaskID)
+
+	wrapper.Status = TaskStatusFailure
+	require.NoError(t, wrapper.Update())
+	linked, err = LinkAsyncImageSourceTask(wrapper.UserId, wrapper.TaskID, source.TaskID)
+	require.NoError(t, err)
+	assert.False(t, linked)
+}
