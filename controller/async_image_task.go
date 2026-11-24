@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -155,6 +156,9 @@ func CreateAsyncImageTask(c *gin.Context) {
 	if snapshot, ok := c.Get(service.TaskClientRequestContextKey); ok {
 		task.PrivateData.ClientRequest, _ = snapshot.(*model.TaskClientRequestSnapshot)
 	}
+	if ip := net.ParseIP(c.ClientIP()); ip != nil {
+		task.PrivateData.AsyncImageClientIP = ip.String()
+	}
 	if err := task.InsertWithContext(c.Request.Context()); err != nil {
 		logger.LogError(c, common.LogText("failed to persist asynchronous image task: %v", err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{"code": "task_create_failed", "message": "Failed to create image task"}})
@@ -181,7 +185,7 @@ func GetAsyncImageTask(c *gin.Context) {
 		return
 	}
 	responseTask := task
-	if task.PrivateData.AsyncImageSourceTaskID != "" {
+	if task.PrivateData.AsyncImageSourceTaskID != "" && (task.Status != model.TaskStatusSuccess || len(hostImageTaskArtifacts(task)) == 0) {
 		sourceTask, sourceExists, sourceErr := model.GetByTaskId(task.UserId, task.PrivateData.AsyncImageSourceTaskID)
 		if sourceErr != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{"code": "task_query_failed", "message": "Failed to query image task"}})
@@ -202,9 +206,17 @@ func GetAsyncImageTask(c *gin.Context) {
 		response.Error = &asyncImageTaskError{Code: "image_generation_failed", Message: "Image generation failed"}
 	}
 	if responseTask.Status == model.TaskStatusSuccess {
-		response.Data = make([]asyncImageTaskData, 0, len(responseTask.PrivateData.ImageArtifacts))
-		for _, artifact := range responseTask.PrivateData.ImageArtifacts {
-			if !artifact.Stored && artifact.SourceURL == "" {
+		artifacts := hostImageTaskArtifacts(responseTask)
+		if len(artifacts) == 0 {
+			artifacts, err = projectTaskArtifacts(responseTask)
+			if err != nil {
+				logger.LogTaskArtifactFailure(c.Request.Context(), task.TaskID, "projection", 0)
+				writeTaskArtifactProjectionError(c, err)
+				return
+			}
+		}
+		for _, artifact := range artifacts {
+			if artifact.Type != "image" {
 				continue
 			}
 			contentURL, err := service.BuildTaskArtifactContentURL(responseTask.TaskID, artifact.Key)
@@ -214,6 +226,15 @@ func GetAsyncImageTask(c *gin.Context) {
 				return
 			}
 			response.Data = append(response.Data, asyncImageTaskData{URL: contentURL})
+		}
+		if len(response.Data) == 0 {
+			if responseTask != task && task.Status == model.TaskStatusInProgress {
+				response.Status = asyncImageStatus(task.Status)
+				response.Progress = task.Progress
+			} else {
+				c.JSON(http.StatusBadGateway, gin.H{"error": gin.H{"code": "image_delivery_failed", "message": "Image delivery failed"}})
+				return
+			}
 		}
 	}
 	c.JSON(http.StatusOK, response)
@@ -285,6 +306,12 @@ func processAsyncImageTaskWithHandler(ctx context.Context, task *model.Task, han
 	}
 	result := &asyncImageRunResult{}
 	request := httptest.NewRequest(http.MethodPost, "/v1/images/generations", bytes.NewReader(task.Data))
+	// Recheck the token against the address accepted at submission. A legacy
+	// task without an address cannot satisfy an IP-restricted token.
+	request.RemoteAddr = ""
+	if ip := net.ParseIP(task.PrivateData.AsyncImageClientIP); ip != nil {
+		request.RemoteAddr = net.JoinHostPort(ip.String(), "0")
+	}
 	request.Header.Set("Authorization", "Bearer "+token.Key)
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set(common.RequestIdKey, task.TaskID)
@@ -343,10 +370,10 @@ func persistAsyncImageBillingReservation(task *model.Task, info *relaycommon.Rel
 		return errors.New("async image billing reservation is missing task context")
 	}
 	task.Quota = info.FinalPreConsumedQuota
-	task.ChannelId = info.ChannelId
+	task.ChannelId = info.GetChannelID()
 	task.Group = info.UsingGroup
 	task.Properties.OriginModelName = info.OriginModelName
-	task.Properties.UpstreamModelName = info.UpstreamModelName
+	task.Properties.UpstreamModelName = info.GetUpstreamModelName()
 	task.PrivateData.BillingSource = info.BillingSource
 	task.PrivateData.SubscriptionId = info.SubscriptionId
 	task.PrivateData.TokenId = info.TokenId
@@ -426,7 +453,9 @@ var (
 func asyncImageRelayHandler() http.Handler {
 	asyncImageRelayOnce.Do(func() {
 		engine := gin.New()
+		engine.ForwardedByClientIP = false
 		engine.POST("/v1/images/generations",
+			middleware.BodyStorageCleanup(),
 			middleware.RouteTag("relay"),
 			middleware.TokenAuth(),
 			middleware.RouteTaskPluginEndpoint(),
@@ -454,7 +483,7 @@ func asyncImageRelayHandler() http.Handler {
 				result.Quota = c.GetInt(service.SettledQuotaContextKey)
 				if value, ok := c.Get(imageLogRelayInfoContextKey); ok {
 					if info, ok := value.(*relaycommon.RelayInfo); ok && info != nil {
-						result.Model = info.UpstreamModelName
+						result.Model = info.GetUpstreamModelName()
 					}
 				}
 				if value, ok := c.Get(imageLogTaskContextKey); ok {
@@ -466,6 +495,7 @@ func asyncImageRelayHandler() http.Handler {
 				}
 			},
 		)
+		asyncImageRelay = engine
 	})
 	return asyncImageRelay
 }

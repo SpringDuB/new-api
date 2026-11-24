@@ -2,14 +2,20 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/i18n"
+	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -19,6 +25,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 func TestNormalizeAsyncImageRequest(t *testing.T) {
@@ -457,6 +464,30 @@ func TestGetAsyncImageTaskFollowsLinkedUpstreamTask(t *testing.T) {
 	assert.Equal(t, "completed", response.Status)
 	require.Len(t, response.Data, 1)
 	assert.Contains(t, response.Data[0].URL, "/v1/tasks/"+source.TaskID+"/artifacts/image-1/content")
+
+	// A retained plugin result can live in the provider payload while the
+	// worker has already published the images under the wrapper's task ID.
+	source.PrivateData.ImageArtifacts = nil
+	source.SetData(map[string]any{"data": []map[string]string{{"url": "https://cdn.example/image.png"}}})
+	require.NoError(t, model.DB.Save(source).Error)
+	wrapper, exists, err := model.GetByTaskId(wrapper.UserId, wrapper.TaskID)
+	require.NoError(t, err)
+	require.True(t, exists)
+	wrapper.Status, wrapper.Progress = model.TaskStatusSuccess, "100%"
+	wrapper.PrivateData.ImageArtifacts = []model.TaskImageArtifact{{Key: "outer-image", SourceURL: "https://cdn.example/image.png"}}
+	require.NoError(t, model.DB.Save(wrapper).Error)
+	recorder = httptest.NewRecorder()
+	c, _ = gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/images/tasks/"+wrapper.TaskID, nil)
+	c.Params = gin.Params{{Key: "task_id", Value: wrapper.TaskID}}
+	c.Set("id", wrapper.UserId)
+	GetAsyncImageTask(c)
+	require.Equal(t, http.StatusOK, recorder.Code)
+	response = asyncImageTaskResponse{}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	require.Equal(t, "completed", response.Status)
+	require.Len(t, response.Data, 1)
+	assert.Contains(t, response.Data[0].URL, "/v1/tasks/"+wrapper.TaskID+"/artifacts/outer-image/content")
 }
 
 func TestAsyncImageTaskBillingPersistenceDatabase(t *testing.T) {
@@ -521,4 +552,120 @@ func TestAsyncImageTaskFailureRefundsPersistedReservation(t *testing.T) {
 	var user model.User
 	require.NoError(t, model.DB.First(&user, task.UserId).Error)
 	assert.Equal(t, 500, user.Quota)
+}
+
+func TestAsyncImageQueueExecution(t *testing.T) {
+	require.NoError(t, i18n.Init())
+	const initialQuota = 100000
+	const price = 5000
+	const modelName = "async-image-test"
+	for _, tc := range []struct {
+		name, clientIP, updatedAllowIP                        string
+		expire, revoke, legacy, failUpstream, failReservation bool
+		wantCalls, wantCharge                                 int
+	}{
+		{name: "allowed IPv4", clientIP: "198.51.100.42", wantCalls: 1, wantCharge: price},
+		{name: "allowed IPv6", clientIP: "2001:db8::42", wantCalls: 1, wantCharge: price},
+		{name: "allowlist changed", clientIP: "198.51.100.42", updatedAllowIP: "198.51.100.43"},
+		{name: "legacy restricted token", clientIP: "192.0.2.1", legacy: true},
+		{name: "expired after enqueue", clientIP: "198.51.100.42", expire: true},
+		{name: "disabled after enqueue", clientIP: "198.51.100.42", revoke: true},
+		{name: "upstream failure", clientIP: "198.51.100.42", failUpstream: true, wantCalls: 1},
+		{name: "reservation persistence failure", clientIP: "198.51.100.42", failReservation: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			owner := setupGenericTaskTest(t)
+			oldLog, oldMaster := model.LOG_DB, common.IsMasterNode
+			oldMemory, oldBatch, oldRetries, oldUpdate := common.MemoryCacheEnabled, common.BatchUpdateEnabled, common.RetryTimes, constant.UpdateTask
+			t.Cleanup(func() {
+				model.LOG_DB, common.IsMasterNode = oldLog, oldMaster
+				common.MemoryCacheEnabled, common.BatchUpdateEnabled, common.RetryTimes, constant.UpdateTask = oldMemory, oldBatch, oldRetries, oldUpdate
+			})
+			common.IsMasterNode, common.MemoryCacheEnabled, common.BatchUpdateEnabled, common.RetryTimes, constant.UpdateTask = false, false, false, 0, true
+			t.Setenv("LOG_SQL_DSN", "")
+			t.Setenv("TASK_ARTIFACT_STORE_MODE", "upstream")
+			require.NoError(t, model.InitLogDB())
+			require.NoError(t, model.DB.AutoMigrate(&model.Token{}, &model.Ability{}, &model.Log{}))
+			t.Cleanup(func() { require.NoError(t, model.DB.Migrator().DropTable(&model.Token{}, &model.Ability{}, &model.Log{})) })
+			service.InitHttpClient()
+			withTieredBillingConfig(t, map[string]string{modelName: "tiered_expr"}, map[string]string{modelName: `tier("image", fixed(0.01))`})
+			require.NoError(t, model.DB.Model(&model.User{}).Where("id = ?", owner.UserId).Updates(map[string]any{
+				"quota": initialQuota, "setting": `{"billing_preference":"wallet_only"}`,
+			}).Error)
+			token := &model.Token{UserId: owner.UserId, Key: "asyncimagetesttoken", Status: common.TokenStatusEnabled, ExpiredTime: -1, RemainQuota: initialQuota, AllowIps: &tc.clientIP}
+			require.NoError(t, model.DB.Create(token).Error)
+			var calls atomic.Int32
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				w.Header().Set("Content-Type", "application/json")
+				if tc.failUpstream {
+					w.WriteHeader(http.StatusBadRequest)
+					_, _ = io.WriteString(w, `{"error":{"message":"image rejected","type":"invalid_request_error"}}`)
+					return
+				}
+				_, _ = io.WriteString(w, `{"created":1,"data":[{"url":"https://cdn.example/image.png"}]}`)
+			}))
+			t.Cleanup(upstream.Close)
+			var ch model.Channel
+			require.NoError(t, model.DB.First(&ch, owner.ChannelId).Error)
+			ch.Type, ch.BaseURL, ch.Models, ch.Group = constant.ChannelTypeOpenAI, &upstream.URL, modelName, "default"
+			require.NoError(t, model.DB.Save(&ch).Error)
+			require.NoError(t, ch.AddAbilities(model.DB))
+			engine := gin.New()
+			require.NoError(t, engine.SetTrustedProxies(nil))
+			engine.POST("/v1/images/tasks", middleware.TokenAuth(), CreateAsyncImageTask)
+			req := httptest.NewRequest(http.MethodPost, "/v1/images/tasks", strings.NewReader(`{"model":"async-image-test","prompt":"a square"}`))
+			req.RemoteAddr = net.JoinHostPort(tc.clientIP, "1234")
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Authorization", "Bearer "+token.Key)
+			recorder := httptest.NewRecorder()
+			engine.ServeHTTP(recorder, req)
+			require.Equal(t, http.StatusAccepted, recorder.Code, recorder.Body.String())
+			var queued asyncImageTaskResponse
+			require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &queued))
+			job, exists, err := model.GetByTaskId(owner.UserId, queued.ID)
+			require.NoError(t, err)
+			require.True(t, exists)
+			require.Equal(t, tc.clientIP, job.PrivateData.AsyncImageClientIP)
+			switch {
+			case tc.updatedAllowIP != "":
+				require.NoError(t, model.DB.Model(token).Update("allow_ips", tc.updatedAllowIP).Error)
+			case tc.expire:
+				require.NoError(t, model.DB.Model(token).Update("expired_time", 1).Error)
+			case tc.revoke:
+				require.NoError(t, model.DB.Model(token).Update("status", common.TokenStatusDisabled).Error)
+			case tc.legacy:
+				job.PrivateData.AsyncImageClientIP = ""
+				require.NoError(t, model.DB.Model(job).Update("private_data", job.PrivateData).Error)
+			case tc.failReservation:
+				require.NoError(t, model.DB.Callback().Update().Before("gorm:update").Register("test:reject_reservation", func(tx *gorm.DB) {
+					updates, ok := tx.Statement.Dest.(map[string]any)
+					if _, isTask := tx.Statement.Model.(*model.Task); isTask && ok && updates["properties"] != nil && updates["quota"] != nil {
+						tx.AddError(errors.New("test reservation write failed"))
+					}
+				}))
+			}
+			ProcessPendingAsyncImageTasks(t.Context())
+			ProcessPendingAsyncImageTasks(t.Context())
+			stored, exists, err := model.GetByTaskId(owner.UserId, queued.ID)
+			require.NoError(t, err)
+			require.True(t, exists)
+			wantStatus := model.TaskStatus(model.TaskStatusFailure)
+			if tc.wantCharge > 0 {
+				wantStatus = model.TaskStatusSuccess
+				require.Len(t, stored.PrivateData.ImageArtifacts, 1)
+			}
+			assert.Equal(t, wantStatus, stored.Status)
+			assert.EqualValues(t, tc.wantCalls, calls.Load())
+			assert.Equal(t, tc.wantCharge, stored.Quota)
+			require.EventuallyWithT(t, func(c *assert.CollectT) {
+				wallet, err := model.GetUserQuota(owner.UserId, true)
+				require.NoError(c, err)
+				remaining, err := model.GetTokenById(token.Id)
+				require.NoError(c, err)
+				assert.Equal(c, initialQuota-tc.wantCharge, wallet)
+				assert.Equal(c, initialQuota-tc.wantCharge, remaining.RemainQuota)
+			}, 3*time.Second, 10*time.Millisecond)
+		})
+	}
 }

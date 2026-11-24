@@ -125,6 +125,7 @@ type TaskPrivateData struct {
 	SubmissionResponse     *TaskResponseSnapshot      `json:"submission_response,omitempty"`
 	ImageRequestMode       string                     `json:"image_request_mode,omitempty"`
 	AsyncImageSourceTaskID string                     `json:"async_image_source_task_id,omitempty"`
+	AsyncImageClientIP     string                     `json:"async_image_client_ip,omitempty"`
 	// ImageArtifacts are host-managed results of image relays and async image tasks.
 	// Source URLs stay private; inline image binaries are only kept in OSS.
 	ImageArtifacts  []TaskImageArtifact  `json:"image_artifacts,omitempty"`
@@ -311,7 +312,7 @@ func (p *TaskPrivateData) Scan(val any) error {
 }
 
 func (p TaskPrivateData) Value() (driver.Value, error) {
-	if p.Key == "" && p.UpstreamTaskID == "" && p.ResultURL == "" && p.AsyncImageSourceTaskID == "" &&
+	if p.Key == "" && p.UpstreamTaskID == "" && p.ResultURL == "" && p.AsyncImageSourceTaskID == "" && p.AsyncImageClientIP == "" &&
 		p.Execution == nil && p.ClientRequest == nil && p.Response == nil && p.ImageRequestMode == "" && len(p.ImageArtifacts) == 0 && p.ArtifactArchive == nil && p.BillingSource == "" && p.SubscriptionId == 0 &&
 		p.TokenId == 0 && p.NodeName == "" && p.BillingContext == nil &&
 		!p.ResponsesBackground && len(p.PluginState) == 0 && p.PollFailures == 0 &&

@@ -70,7 +70,12 @@ func PrepareRequestBilling(c *gin.Context, info *relaycommon.RelayInfo) *types.N
 	if apiErr := service.PreConsumeBilling(c, priceData.QuotaToPreConsume, info); apiErr != nil {
 		return apiErr
 	}
-	return service.RunImageBillingReservationHook(c, info)
+	// The caller installs its failure refund only after preparation succeeds.
+	if apiErr := service.RunImageBillingReservationHook(c, info); apiErr != nil {
+		info.Billing.Refund(c)
+		return apiErr
+	}
+	return nil
 }
 
 // RefundFailedRequestBilling applies the common final-failure policy after all
