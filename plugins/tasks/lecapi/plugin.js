@@ -1,6 +1,6 @@
 // LecAPI public media catalog and pricing snapshot: 2026-11-23.
 // Sources: https://api.lecapi.net/api/media-models/catalog and /api/pricing.
-// Catalog version: sha256:ed46634a94690bca26502f20f17bbd3f08c66e141b12d37c98cc5a133e4b6e3b.
+// Catalog version: sha256:84ac4543ff852f98cd016387d6b33cfc125304882e690652642b94611676d892.
 // Pricing version: a42d372ccf0b5dd13ecf71203521f9d2.
 // New routes were cross-checked against public pricing and the authenticated /v1/models list.
 // The catalog determines media kinds; this plugin serves only image and video generation.
@@ -103,6 +103,7 @@ const MODELS = {
     },
   },
   "lec-vp-seedance-2-5-fp": {
+    retired: true,
     kind: "video",
     name: "Seedance 2.5 FP（VP）",
     icon: "Doubao.Color",
@@ -165,6 +166,7 @@ const MODELS = {
     billing: { billing_unit: "request", price_per_request: 1.3 },
   },
   "lec-vg-seedance-2-5-op": {
+    retired: true,
     kind: "video",
     name: "Seedance 2.5 OP（VG）",
     icon: "Doubao.Color",
@@ -207,9 +209,10 @@ const MODELS = {
       images: { type: "array", constraints: { max_items: 9, url_schemes: ["http", "https"] } },
       resolution: { type: "enum", default: "720p", values: ["720p"] },
     },
-    billing: { billing_unit: "request", price_per_request: 1.3, resolution_prices: { "720p": 1.3 } },
+    billing: { billing_unit: "request", price_per_request: 1, resolution_prices: { "720p": 1 } },
   },
   "lec-mj-seedance-2-5-fd-720p": {
+    retired: true,
     kind: "video",
     name: "Seedance 2.5（MJ）",
     icon: "Doubao.Color",
@@ -294,7 +297,7 @@ const MODELS = {
     kind: "video",
     name: "Seedance 2.5 M（HAYA）",
     icon: "Doubao.Color",
-    tags: ["M", "multi", "image", "video", "audio", "supported", "per_second"],
+    tags: ["M", "multi", "image", "audio", "supported", "per_second"],
     parameters: {
       prompt: { type: "string", required: true, maxLength: 5000 },
       duration: { type: "integer", required: true, default: 4, min: 4, max: 30, step: 1 },
@@ -307,17 +310,6 @@ const MODELS = {
           url_schemes: ["https"],
           allow_data_url: true,
           mime_types: ["image/png", "image/jpeg", "image/webp", "image/gif"],
-          max_bytes: 20971520,
-          allow_files: true,
-        },
-      },
-      videos: {
-        type: "array",
-        constraints: {
-          max_items: 10,
-          url_schemes: ["https"],
-          allow_data_url: true,
-          mime_types: ["video/mp4", "video/webm", "video/quicktime"],
           max_bytes: 20971520,
           allow_files: true,
         },
@@ -953,17 +945,49 @@ const MODELS = {
     max_reference_video_seconds: 15,
   },
   "lec-mf-video-upscale": {
-    retired: true,
     kind: "video",
     name: "火山-视频超分（MF）",
     icon: "Doubao.Color",
     tags: ["per_second", "multi", "video"],
     parameters: {
-      resolution: { type: "enum", default: "720p", values: ["720p", "1080p", "2k", "4k"] },
-      fps: { type: "enum", default: 30, values: [30, 60, 120, 240] },
+      tier: { type: "enum", default: "fast", values: ["fast", "standard", "professional", "generative"] },
+      resolution: { type: "enum", default: "720p", values: ["720p", "1080p", "2k", "4k", "6k", "8k"] },
+      fps: { type: "enum", default: 30, values: [30, 60, 120] },
       videos: { type: "array", required: true, constraints: { min_items: 1, max_items: 1, url_schemes: ["http", "https"] } },
     },
-    billing: { billing_unit: "second", resolution_prices: { "1080p": 0.06, "2k": 0.14, "4k": 0.22, "720p": 0.04 }, equivalent_second_price: 0.04 },
+    billing: {
+      billing_unit: "second",
+      upscale_prices: {
+        fast: {
+          "720p": { 30: 0.0052, 60: 0.0104, 120: 0.0208 },
+          "1080p": { 30: 0.0104, 60: 0.0208, 120: 0.0415 },
+          "2k": { 30: 0.0208, 60: 0.0415, 120: 0.083 },
+          "4k": { 30: 0.0415, 60: 0.083, 120: 0.166 },
+        },
+        standard: {
+          "720p": { 30: 0.0181, 60: 0.0362, 120: 0.0723 },
+          "1080p": { 30: 0.0362, 60: 0.0723, 120: 0.1445 },
+          "2k": { 30: 0.0723, 60: 0.1445, 120: 0.2889 },
+          "4k": { 30: 0.1445, 60: 0.2889, 120: 0.5778 },
+          "6k": { 30: 0.2889, 60: 0.5778, 120: 1.1556 },
+          "8k": { 30: 0.5778, 60: 1.1556, 120: 2.3112 },
+        },
+        professional: {
+          "720p": { 30: 0.1598, 60: 0.3195, 120: 0.6389 },
+          "1080p": { 30: 0.3195, 60: 0.6389, 120: 1.2778 },
+          "2k": { 30: 0.6389, 60: 1.2778, 120: 2.5556 },
+          "4k": { 30: 1.2778, 60: 2.5556, 120: 5.1112 },
+          "6k": { 30: 2.5556, 60: 5.1112, 120: 10.2223 },
+          "8k": { 30: 5.1112, 60: 10.2223, 120: 20.4445 },
+        },
+        generative: {
+          "720p": { 30: 0.0556, 60: 0.1112, 120: 0.2223 },
+          "1080p": { 30: 0.1112, 60: 0.2223, 120: 0.4445 },
+          "2k": { 30: 0.2223, 60: 0.4445, 120: 0.8889 },
+          "4k": { 30: 0.4445, 60: 0.8889, 120: 1.7778 },
+        },
+      },
+    },
     source_duration: true,
   },
   "lec-mg-seedance-2-5-6": {
@@ -1225,6 +1249,25 @@ const MODELS = {
       resolution: { type: "enum", default: "720p", values: ["720p"] },
     },
     billing: { billing_unit: "request", resolution_prices: { "720p": 5.5 }, price_per_request: 5.5 },
+  },
+  "lec-am-minimax-h3-official": {
+    kind: "video",
+    name: "MiniMax H3 官方版（AM）",
+    icon: "Minimax.Color",
+    tags: ["multi", "image", "video", "audio", "first_frame", "last_frame", "per_request"],
+    parameters: {
+      prompt: { type: "string", required: true, maxLength: 5000 },
+      duration: { type: "integer", default: 5, min: 5, max: 15, step: 1 },
+      aspect_ratio: { type: "enum", default: "16:9", values: ["21:9", "16:9", "4:3", "1:1", "3:4", "9:16"] },
+      resolution: { type: "enum", default: "768p", values: ["768p", "1440p"] },
+      images: { type: "array", constraints: { max_items: 9, url_schemes: ["https"] } },
+      videos: { type: "array", constraints: { max_items: 3, url_schemes: ["https"] } },
+      audios: { type: "array", constraints: { max_items: 3, url_schemes: ["https"] } },
+      first_frame: { type: "string", constraints: { url_schemes: ["https"] } },
+      last_frame: { type: "string", constraints: { url_schemes: ["https"] } },
+    },
+    billing: { billing_unit: "request", price_per_request: 1.5, resolution_prices: { "768p": 1.5, "1440p": 1.5 } },
+    max_reference_total: 15,
   },
   "lec-ms-minimax-h3": {
     kind: "video",
@@ -1657,7 +1700,7 @@ const MODELS = {
     parameters: {
       prompt: { type: "string", required: true },
       aspect_ratio: { type: "enum", default: "16:9", values: ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"] },
-      resolution: { type: "enum", default: "1K", values: ["1K", "2K", "4K"] },
+      resolution: { type: "enum", default: "1K", values: ["1K", "2K"] },
       output_format: { type: "enum", default: "jpeg", values: ["jpeg", "png"] },
       images: {
         type: "array",
@@ -1671,7 +1714,7 @@ const MODELS = {
         },
       },
     },
-    billing: { billing_unit: "request", resolution_prices: { "1K": 0.15, "2K": 0.15, "4K": 0.15 }, price_per_request: 0.15 },
+    billing: { billing_unit: "request", resolution_prices: { "1K": 0.15, "2K": 0.15 }, price_per_request: 0.15 },
   },
   "lec-ty-seedream-5-pro": {
     kind: "image",
@@ -2073,6 +2116,7 @@ const MODELS = {
     unverified: true,
   },
   "lec-omni-video-redraw": {
+    retired: true,
     kind: "video",
     name: "Omni Video Redraw",
     icon: "Gemini.Color",
@@ -2351,6 +2395,7 @@ const MODELS = {
     max_reference_video_total_seconds: 15,
   },
   "lec-haya-seedance-2-5-vc-480p": {
+    retired: true,
     kind: "video",
     name: "Seedance 2.5 VC (HAYA)",
     icon: "Doubao.Color",
@@ -2382,7 +2427,25 @@ const MODELS = {
     },
     billing: { billing_unit: "request", price_per_request: 5.5 },
   },
+  "lec-shuikule-seedance-2-5-m": {
+    kind: "video",
+    name: "Seedance 2.5 M (SKL)",
+    icon: "Doubao.Color",
+    tags: ["multi", "image", "video", "audio", "per_second"],
+    parameters: {
+      prompt: { type: "string", required: true, maxLength: 10000 },
+      duration: { type: "integer", default: 10, min: 5, max: 30, step: 1 },
+      aspect_ratio: { type: "enum", default: "16:9", values: ["16:9", "9:16"] },
+      resolution: { type: "enum", default: "720p", values: ["480p", "720p", "1080p"] },
+      images: { type: "array", constraints: { max_items: 30, url_schemes: ["https"] } },
+      videos: { type: "array", constraints: { max_items: 10, url_schemes: ["https"] } },
+      audios: { type: "array", constraints: { max_items: 10, url_schemes: ["https"] } },
+    },
+    billing: { billing_unit: "second", resolution_prices: { "480p": 0.2, "720p": 0.32, "1080p": 0.6 } },
+    max_reference_total: 50,
+  },
   "lec-shuikule-seedance-2-5-u": {
+    retired: true,
     kind: "video",
     name: "Seedance 2.5 U (SKL)",
     icon: "Doubao.Color",
@@ -2430,6 +2493,7 @@ const MODELS = {
     billing: { billing_unit: "request", price_per_request: 3 },
   },
   "lec-mf-seedance-2-5-special": {
+    retired: true,
     kind: "video",
     name: "Seedance 2.5 (MF)",
     icon: "Doubao.Color",
@@ -2447,6 +2511,7 @@ const MODELS = {
     max_reference_total: 50,
   },
   "lec-mw-seedance-2-0-full": {
+    retired: true,
     kind: "video",
     name: "Seedance 2.0 Full (MW)",
     icon: "Doubao.Color",
@@ -2481,6 +2546,7 @@ const MODELS = {
     max_reference_total: 15,
   },
   "lec-vp-seedance-2-5-vip-37": {
+    retired: true,
     kind: "video",
     name: "Seedance 2.5 VIP (VP)",
     icon: "Doubao.Color",
@@ -2535,7 +2601,7 @@ const INTERNAL_VIDEO_MODELS = new Set();
 // Known siblings may replace a removed anchor without renaming the pool.
 // Add new siblings only after verifying the full request contract and price schedule match.
 const VIDEO_POOLS = {
-  "seedance-2-5-01": ["seedance-2-5-request-660", "lec-mm-seedance-2-5", "lec-mm-seedance-2-5-full", "lec-mg-seedance-2-5", "lec-vp-seedance-2-5-301010-49", "lec-mj-seedance-2-5-bd-720p", "lec-mj-seedance-2-5-qn", "lec-zy-seedance-2-5-discount", "lec-mj-seedance-2-5-fd-720p"],
+  "seedance-2-5-01": ["seedance-2-5-request-660", "lec-mm-seedance-2-5", "lec-mm-seedance-2-5-full", "lec-mg-seedance-2-5", "lec-vp-seedance-2-5-301010-49", "lec-mj-seedance-2-5-bd-720p", "lec-mj-seedance-2-5-qn", "lec-zy-seedance-2-5-discount"],
   "seedance-2-5-02": ["seedance-2-5-request-720", "lec-mf-seedance-2-5-30ref", "lec-hc-seedance-2-5-3010", "lec-ty-seedance-2-5-1050-flxd"],
   "seedance-2-5-03": ["seedance-2-5-request-600-480p-480-1080p-960-4k-1080", "lec-mf-seedance-2-5-std", "lec-seedance-2-5-301010", "lec-zy-seedance-2-5-discount2"],
   "seedance-2-5-04": ["seedance-2-5-request-600-480p-600", "lec-mf-seedance-2-5-x", "lec-haya-seedance-2-5-xg-480p"],
@@ -2749,6 +2815,22 @@ function defaultExpression(profile) {
     (billing.billing_unit === "million_tokens" ? " / 1000000" : "") +
     (profile.bill_reference_videos ? ' + u("reference_seconds") * ' + priceWithFee(price) : "") +
     ")";
+  if (billing.upscale_prices) {
+    const branches = [];
+    for (const [algorithm, resolutions] of Object.entries(billing.upscale_prices)) {
+      for (const [resolution, rates] of Object.entries(resolutions)) {
+        for (const [fps, rate] of Object.entries(rates)) {
+          const condition = 'u("upscale_tier") == ' + JSON.stringify(algorithm) +
+            ' && u("resolution") == ' + JSON.stringify(resolution) + ' && u("fps") == ' + JSON.stringify(fps);
+          branches.push(condition + " ? " + leaf(algorithm + "-" + resolution + "-" + fps, rate));
+        }
+      }
+    }
+    // Submission rejects every combination missing from the rate schedule.
+    const final = branches.pop();
+    branches.push(final.slice(final.indexOf(" ? ") + 3));
+    return branches.join(" : ");
+  }
   if (billing.token_prices_per_million) {
     const resolutions = Object.keys(billing.token_prices_per_million),
       branches = [];
@@ -2847,6 +2929,7 @@ const PARAMETER_LABELS = {
   size: ["Output dimensions", "输出尺寸"],
   quality: ["Image quality", "图片质量"],
   audio: ["Generate audio", "是否生成音频"],
+  tier: ["Upscaling algorithm", "超分算法"],
   fps: ["Frame rate", "输出帧率"],
   action: ["Image operation", "图片操作"],
   version: ["Model version", "模型版本"],
@@ -3110,6 +3193,7 @@ const PUBLIC_DISPLAY_NAMES = {
   "qs-wan-3-0-cc-720p": "Wan 3.0 CC · QS",
   "haya-seedance-2-5-vc-480p": "Seedance 2.5 VC · HAYA 480p",
   "shuikule-seedance-2-5-bd": "Seedance 2.5 BD · SKL",
+  "shuikule-seedance-2-5-m": "Seedance 2.5 M · SKL",
   "shuikule-seedance-2-5-u": "Seedance 2.5 U · SKL",
   "vp-seedance-2-5-bd": "Seedance 2.5 BD · VP",
   "vp-seedance-2-5-flash-t": "Seedance 2.5 Flash T · VP",
@@ -3118,6 +3202,7 @@ const PUBLIC_DISPLAY_NAMES = {
   "md-seedance-2-5-900-720p": "Seedance 2.5 900 · MD",
   "md-seedance-2-0-900-720p": "Seedance 2.0 Mini 900 · MD",
   "vw-seedance-2-0-fast": "Seedance 2.0 Fast · VW",
+  "am-minimax-h3-official": "MiniMax H3 · 官方版",
   "ap-minimax-h3": "MiniMax H3 933 · 30秒",
   "ap-seedance-2-0-image-audio": "Seedance 2.0 903 · 图音",
   "mf-seedance-2-0-fast-gz": "Seedance 2.0 Fast · 官转",
@@ -3164,7 +3249,7 @@ const PUBLIC_DISPLAY_NAMES = {
   "gt-seedance-2-0-full": "Seedance 2.0 满血 · 智能时长",
   "ty-seedream-5-5": "Seedream 5.5",
   "ac-seedream-5-0-lite": "Seedream 5.0 Lite",
-  "ac-seedream-5-0-pro": "Seedream 5.0 Pro · 4K",
+  "ac-seedream-5-0-pro": "Seedream 5.0 Pro · AC",
   "ty-seedream-5-pro": "Seedream 5.0 Pro · 2K",
   "ac-image-2-5-flare": "Image 2.5 Flare · 格式可选",
   "ac-image-2-5-sunburst": "Image 2.5 Sunburst · 格式可选",
@@ -3221,7 +3306,7 @@ export const meta = {
   key: "lecapi",
   name: "LecAPI",
   icon: "text:LE",
-  version: "1.12.0",
+  version: "1.14.0",
   author: { name: "QuantumNous" },
   website: "https://api.lecapi.net/docs",
   baseUrl: "https://api.lecapi.net",
@@ -3242,6 +3327,11 @@ export const meta = {
       const resolution = profile.parameters.resolution;
       const resolutions = resolution?.values || [];
       schema.resolution = { ...schema.resolution, enum: resolution?.default ? resolutions : ["unspecified", ...resolutions] };
+      if (profile.billing.upscale_prices) {
+        schema.seconds = { ...schema.seconds, description: { en: "Video upscaling unit price", zh: "视频超分单价" } };
+        schema.upscale_tier = { enum: profile.parameters.tier.values, description: { en: "Upscaling algorithm", zh: "超分算法" } };
+        schema.fps = { enum: profile.parameters.fps.values.map(String), description: { en: "Output frame rate", zh: "输出帧率" } };
+      }
       const usageProfile = { models: [publicModel], schema };
       if (tokenPriced) {
         usageProfile.examples = [
@@ -3552,10 +3642,17 @@ function submission(ctx, profile = modelProfile(ctx)) {
     if (body.action === "hd_upscale" && (body.original_task_id === undefined || body.index === undefined))
       throw new Error("hd_upscale requires original_task_id and index");
   }
+  if (profile.vendorModel === "lec-am-minimax-h3-official") {
+    if (body.last_frame && !body.first_frame) throw new Error("last_frame requires first_frame");
+    if (body.first_frame && (imageCount || videoCount || audioCount))
+      throw new Error("frame inputs cannot be combined with other reference materials");
+  }
   if (profile.vendorModel === "lec-ms-minimax-h3") {
     if (body.resolution === "2K" && body.duration > 15) throw new Error("2K supports at most 15 seconds");
     if (body.resolution === "480p" && videoCount) throw new Error("480p does not support reference videos");
   }
+  if (profile.billing.upscale_prices && profile.billing.upscale_prices[body.tier]?.[body.resolution]?.[body.fps] === undefined)
+    throw new Error("unsupported upscaling algorithm, resolution and frame rate combination");
   // Smart duration reserves the longest supported output while preserving -1 upstream.
   let seconds = body.duration === -1 ? profile.parameters.duration.max : body.duration || 0,
     referenceSeconds = 0;
@@ -3731,6 +3828,10 @@ export function extractUsage(ctx) {
     duration_tier: request.seconds > 15 ? "long" : "short",
     video_input: request.videoCount > 0 ? "video" : "none",
   };
+  if (request.profile.billing.upscale_prices) {
+    facts.upscale_tier = request.body.tier;
+    facts.fps = String(request.body.fps);
+  }
   if (request.profile.billing.billing_unit === "million_tokens") facts.tokens = request.tokens;
   return facts;
 }
@@ -3889,6 +3990,7 @@ export function parseSubmitResponse(ctx, response) {
     kind: profile.kind,
     queryable: hasUpstreamTaskId && (profile.kind === "video" || ASYNC_IMAGE_MODELS.includes(profile.vendorModel)),
   };
+  if (profile.billing.upscale_prices) state.settleOutputDuration = true;
   if (profile.routes?.includes(ctx.lecapiSubmitRoute)) {
     state.lecapiSubmitRoute = ctx.lecapiSubmitRoute;
     if (typeof ctx.lecapiRetryURL === "string" && Array.isArray(ctx.lecapiRetryCandidates)) {
@@ -3940,7 +4042,12 @@ export function extractUsageOnComplete(ctx, result, response) {
     // real usage, and completion cannot change the frozen input or resolution.
     return Number.isSafeInteger(tokens) && tokens >= 0 && tokens <= 2147483647 ? { tokens: tokens } : {};
   }
-  const seconds = Number(body.seconds ?? body.duration);
+  const duration = body.seconds ?? body.duration;
+  const seconds = Number(duration);
+  if (profile.billing.upscale_prices && ctx.state?.settleOutputDuration) {
+    if (typeof duration !== "number" && (typeof duration !== "string" || !/^\d+(?:\.\d+)?$/.test(duration))) return {};
+    return Number.isFinite(seconds) && seconds > 0 && seconds <= 3600 ? { seconds } : {};
+  }
   // Output seconds may replace the reservation, while reference measurements
   // and extra-image charges stay frozen from the submitted body.
   if (profile.source_duration || profile.vendorModel === "lec-ms-minimax-h3-upscale") return {};
