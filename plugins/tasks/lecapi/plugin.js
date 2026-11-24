@@ -3884,7 +3884,11 @@ export function parseSubmitResponse(ctx, response) {
   const id = response.body.object === "lecapi.task" ? response.body.id : body.id || body.task_id || body.metadata?.task_id;
   const profile = modelProfile(ctx);
   const images = imageEntries(response.body, profile.kind === "image");
-  const state = { kind: profile.kind, queryable: profile.kind === "video" || ASYNC_IMAGE_MODELS.includes(profile.vendorModel) };
+  const hasUpstreamTaskId = typeof id === "string" && !!id.trim();
+  const state = {
+    kind: profile.kind,
+    queryable: hasUpstreamTaskId && (profile.kind === "video" || ASYNC_IMAGE_MODELS.includes(profile.vendorModel)),
+  };
   if (profile.routes?.includes(ctx.lecapiSubmitRoute)) {
     state.lecapiSubmitRoute = ctx.lecapiSubmitRoute;
     if (typeof ctx.lecapiRetryURL === "string" && Array.isArray(ctx.lecapiRetryCandidates)) {
@@ -3978,10 +3982,21 @@ export function buildContentRequest(ctx) {
   const image = /^image-(b64-)?([1-9]\d*)$/.exec(ctx.artifactKey);
   if (!image && ctx.artifactKey !== "video") throw new Error("artifact_not_found");
   let data = ctx.data;
-  // Before state was persisted, synchronous images used a locally generated
-  // id. Only models with an asynchronous task API can refresh those old rows.
+  // Before state was persisted, synchronous images could inherit the gateway ID.
+  // Legacy rows need a distinct provider ID or a matching stored task ID to refresh.
   const profile = modelProfile(ctx);
-  const queryable = ctx.state?.queryable ?? (profile.kind === "video" || ASYNC_IMAGE_MODELS.includes(profile.vendorModel));
+  const storedResponse = data && typeof data === "object" && !Array.isArray(data) ? data : {};
+  const storedTaskId =
+    storedResponse.object === "lecapi.task"
+      ? storedResponse.id
+      : storedResponse.id || storedResponse.task_id || storedResponse.metadata?.task_id;
+  const hasRealImageTaskId =
+    typeof ctx.upstreamTaskId === "string" &&
+    !!ctx.upstreamTaskId &&
+    (ctx.upstreamTaskId !== ctx.publicTaskId || storedTaskId === ctx.upstreamTaskId);
+  const queryable =
+    ctx.state?.queryable ??
+    (profile.kind === "video" || (ASYNC_IMAGE_MODELS.includes(profile.vendorModel) && hasRealImageTaskId));
   // Prefer the signed URL's actual expiration; completion age alone can cause
   // unnecessary queries and rate limits while OSS archives a still-valid URL.
   const completedAt = Number(responseObject(data).completed_at);

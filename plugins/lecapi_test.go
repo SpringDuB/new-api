@@ -1004,6 +1004,57 @@ func TestLecAPIImageRoutesRetainOnlyAsyncJobs(t *testing.T) {
 	content := map[string]any{"model": "ac-image-2", "upstreamModel": "ac-image-2", "baseUrl": "https://lec.example", "artifactKey": "image-1", "upstreamTaskId": parsed["taskId"], "state": parsed["state"], "data": parsed["taskData"]}
 	descriptor := lecAPIHook(t, plugin, "buildContentRequest", content)
 	assert.Equal(t, "https://media.example/image.png", descriptor["url"], "a synchronous request UUID is not a queryable upstream job")
+
+	for _, tc := range []struct {
+		name, artifactKey, expectedURL string
+		image                          map[string]any
+	}{
+		{"URL result", "image-1", "https://media.example/seedream.png", map[string]any{"url": "https://media.example/seedream.png"}},
+		{"Base64 result", "image-b64-1", "data:image/png;base64,YWJj", map[string]any{"b64_json": "YWJj"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			submitCtx := lecAPIContext("ty-seedream-5-5", map[string]any{"prompt": "boat"})
+			submitCtx["publicTaskId"] = "task_gateway-generated"
+			parsed := lecAPIHook(t, plugin, "parseSubmitResponse", submitCtx, map[string]any{"body": map[string]any{"completed_at": time.Now().Add(-126 * time.Second).Unix(), "data": []any{tc.image}}})
+			require.Equal(t, "task_gateway-generated", parsed["taskId"])
+			assert.Equal(t, false, parsed["state"].(map[string]any)["queryable"])
+			assert.Equal(t, "SUCCESS", parsed["immediate"].(map[string]any)["status"])
+
+			for _, withState := range []bool{true, false} {
+				contentCtx := lecAPIContext("ty-seedream-5-5", nil)
+				contentCtx["artifactKey"] = tc.artifactKey
+				contentCtx["upstreamTaskId"] = parsed["taskId"]
+				contentCtx["publicTaskId"] = parsed["taskId"]
+				contentCtx["data"] = parsed["taskData"]
+				if withState {
+					contentCtx["state"] = parsed["state"]
+				}
+				queries := 0
+				callCtx := jsplugin.WithFetcher(t.Context(), func(context.Context, jsplugin.FetchRequest) (jsplugin.FetchResponse, error) {
+					queries++
+					return jsplugin.FetchResponse{Status: 400, Body: []byte(`{"error":"invented task id"}`)}, nil
+				})
+				value, err := plugin.Engine.Call(callCtx, "buildContentRequest", contentCtx)
+				require.NoError(t, err)
+				assert.Zero(t, queries)
+				assert.Equal(t, tc.expectedURL, value.(map[string]any)["url"])
+			}
+		})
+	}
+
+	asyncCtx := lecAPIContext("ty-seedream-5-5", nil)
+	asyncCtx["upstream"] = map[string]any{"kind": "new_api"}
+	asyncCtx["upstreamTaskId"] = "seedream-job"
+	asyncCtx["artifactKey"] = "image-1"
+	asyncCtx["state"] = map[string]any{"kind": "image", "queryable": true}
+	asyncCtx["data"] = map[string]any{"id": "seedream-job", "status": "queued"}
+	asyncCallCtx := jsplugin.WithFetcher(t.Context(), func(_ context.Context, request jsplugin.FetchRequest) (jsplugin.FetchResponse, error) {
+		assert.Equal(t, "https://lec.example/lecapi/v1/images/seedream-job", request.URL)
+		return jsplugin.FetchResponse{Status: 200, Body: []byte(`{"object":"lecapi.task","id":"seedream-job","status":"completed","output":{"data":[{"url":"https://media.example/refreshed-seedream.png"}]}}`)}, nil
+	})
+	value, err := plugin.Engine.Call(asyncCallCtx, "buildContentRequest", asyncCtx)
+	require.NoError(t, err)
+	assert.Equal(t, "https://media.example/refreshed-seedream.png", value.(map[string]any)["url"])
 }
 
 func TestLecAPICompletionDurationsStayWithinTheModelContract(t *testing.T) {
