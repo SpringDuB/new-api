@@ -18,23 +18,22 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useTranslation } from 'react-i18next'
 
-const artworkPairs = [
-  [
-    { name: 'garden-portrait', alt: 'Woman on a bench in a sunlit garden' },
-    { name: 'meadow-rabbit', alt: 'White rabbit among daisies' },
-  ],
-  [
-    { name: 'window-portrait', alt: 'Woman sitting by a blue window' },
-    { name: 'window-cat', alt: 'White cat on a blue windowsill' },
-  ],
-  [
-    { name: 'wisteria-reader', alt: 'Woman reading beneath wisteria' },
-    { name: 'autumn-fox', alt: 'Red fox beside an autumn stream' },
-  ],
-] as const
-
 export function InspirationGallery() {
   const { t } = useTranslation()
+  const artworkPairs = [
+    [
+      { name: 'butterfly', alt: t('Blue and gold butterfly') },
+      { name: 'feather', alt: t('Blue and gold feather') },
+    ],
+    [
+      { name: 'nautilus', alt: t('Spiral nautilus shell') },
+      { name: 'nebula', alt: t('Blue and gold nebula') },
+    ],
+    [
+      { name: 'lighthouse', alt: t('Lighthouse on a rocky coast') },
+      { name: 'hourglass', alt: t('Hourglass with a starry sky') },
+    ],
+  ]
 
   return (
     <section
@@ -53,10 +52,10 @@ export function InspirationGallery() {
             {pair.map((artwork) => (
               <img
                 key={artwork.name}
-                src={`/stolas/art/${artwork.name}.webp`}
-                width={640}
-                height={360}
-                alt={t(artwork.alt)}
+                src={`/stolas/art/collection/home/${artwork.name}.webp`}
+                width={384}
+                height={384}
+                alt={artwork.alt}
                 loading='lazy'
                 decoding='async'
               />

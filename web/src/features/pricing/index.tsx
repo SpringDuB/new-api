@@ -186,6 +186,14 @@ export function Pricing() {
     <PublicLayout showMainContainer={false}>
       <PageTransition className='stolas-catalog'>
         <header className='stolas-catalog-header'>
+          <img
+            src='/stolas/art/collection/catalog-banner.webp'
+            alt=''
+            width={960}
+            height={320}
+            decoding='async'
+            className='stolas-catalog-banner'
+          />
           <div className='stolas-catalog-introduction'>
             <div className='stolas-catalog-heading'>
               <h1 className='stolas-editorial stolas-catalog-title'>

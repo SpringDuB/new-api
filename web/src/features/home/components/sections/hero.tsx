@@ -130,9 +130,9 @@ export function Hero(props: HeroProps) {
               )}
             </p>
             <img
-              src='/stolas/art/garden-cottage.webp'
-              width={880}
-              height={495}
+              src='/stolas/art/collection/home/ink-bridge.webp'
+              width={960}
+              height={320}
               loading='lazy'
               decoding='async'
               alt=''
@@ -156,7 +156,7 @@ export function Hero(props: HeroProps) {
               )}
             </p>
             <img
-              src='/stolas/art/blue-canal-wide.webp'
+              src='/stolas/art/collection/home/birds-in-flight.webp'
               width={960}
               height={320}
               loading='lazy'

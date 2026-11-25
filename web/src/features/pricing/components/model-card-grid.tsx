@@ -27,6 +27,7 @@ import { requireServerSuccess } from '@/lib/server-error-message'
 import { cn } from '@/lib/utils'
 
 import { DEFAULT_PRICING_PAGE_SIZE, DEFAULT_TOKEN_UNIT } from '../constants'
+import { assignCatalogPageCovers } from '../lib/catalog-covers'
 import type { PricingModel, TokenUnit } from '../types'
 import { ModelCard } from './model-card'
 import type { ModelPerfBadgeData } from './model-perf-badge'
@@ -57,6 +58,10 @@ export const ModelCardGrid = memo(function ModelCardGrid(
     const start = (currentPage - 1) * pageSize
     return props.models.slice(start, start + pageSize)
   }, [currentPage, pageSize, props.models])
+  const pageCovers = useMemo(
+    () => props.covers && assignCatalogPageCovers(pagedModels, props.covers),
+    [pagedModels, props.covers]
+  )
   const recentModels = pagedModels.map((model) => model.model_name || '')
   const perfQuery = useQuery({
     queryKey: ['perf-metrics-summary', 24, recentModels],
@@ -115,7 +120,7 @@ export const ModelCardGrid = memo(function ModelCardGrid(
             <ModelCard
               presentation={props.presentation}
               model={model}
-              cover={props.covers?.get(model.model_name)}
+              cover={pageCovers?.get(model.model_name)}
               tokenUnit={tokenUnit}
               priceRate={props.priceRate}
               usdExchangeRate={props.usdExchangeRate}

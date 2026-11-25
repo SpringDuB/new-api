@@ -84,7 +84,7 @@ export function LoadingSkeleton(props: LoadingSkeletonProps) {
                   </>
                 ) : (
                   <>
-                    <Skeleton className='h-32 w-full rounded-none' />
+                    <Skeleton className='stolas-model-artwork-frame rounded-none' />
                     <div className='flex flex-col gap-4 p-6'>
                       <Skeleton className='h-6 w-3/4' />
                       <Skeleton className='h-3 w-24' />

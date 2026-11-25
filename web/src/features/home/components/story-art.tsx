@@ -23,12 +23,12 @@ export function StoryArt() {
   return (
     <figure className='stolas-story-art'>
       <img
-        src='/stolas/art/sunlit-courtyard.webp'
-        srcSet='/stolas/art/sunlit-courtyard-720.webp 720w, /stolas/art/sunlit-courtyard.webp 1280w'
+        src='/stolas/art/collection/home/mountains-1200.webp'
+        srcSet='/stolas/art/collection/home/mountains-720.webp 720w, /stolas/art/collection/home/mountains-1200.webp 1200w'
         sizes='(min-width: 1280px) 520px, (min-width: 1024px) 44vw, calc(100vw - 3rem)'
-        width={1280}
-        height={720}
-        alt={t('Sunlit courtyard with a blue door')}
+        width={1200}
+        height={675}
+        alt={t('Watercolor mountains in mist')}
         fetchPriority='high'
         className='h-auto w-full'
       />

@@ -43,30 +43,30 @@ import { getLobeIcon } from '@/lib/lobe-icon'
 
 import { StolasNavigationIcon } from './stolas-navigation-icon'
 
-const artRoot = '/stolas/art/model-library'
+const artRoot = '/stolas/art/collection/covers'
 const categoryArt: Record<ModelCategory, string> = {
-  video: 'campfire',
-  image: 'ice-palace',
-  chat: 'rain-market',
-  other: 'desert-gate',
+  video: 'whale',
+  image: 'butterfly',
+  chat: 'teapot',
+  other: 'compass',
 }
 const familyCoverArt: Partial<Record<ModelCategory, readonly string[]>> = {
   video: [
-    'storm-crew',
-    'mountain-dusk',
-    'winter-visit',
-    'lava-valley',
-    'sea-vortex',
-    'frozen-citadel',
-  ].map((name) => `${artRoot}/${name}.webp`),
+    'birds-in-flight',
+    'mountains',
+    'lighthouse',
+    'glass-arch',
+    'nebula',
+    'planet',
+  ],
   image: [
-    'wisteria-courtyard',
-    'paris-sketch',
-    'temple-lotus',
-    'blue-brushwork',
-    'autumn-lake',
-    'garden-window',
-  ].map((name) => `/stolas/art/catalog-covers/${name}.webp`),
+    'hummingbird',
+    'feather',
+    'glass-flower',
+    'ginkgo-leaf',
+    'nautilus',
+    'bonsai',
+  ],
 }
 const previewSize = 6
 
@@ -173,7 +173,7 @@ export function ModelLibraryNavigation({
                   src={`${artRoot}/${categoryArt[item]}.webp`}
                   alt=''
                   width={640}
-                  height={360}
+                  height={480}
                   decoding='async'
                 />
                 <span className='stolas-library-category-copy'>
@@ -247,13 +247,11 @@ export function ModelLibraryNavigation({
                       >
                         <img
                           className='stolas-library-cover'
-                          src={
-                            familyCoverArt[category]?.[index] ??
-                            `${artRoot}/${categoryArt[category]}.webp`
-                          }
+                          src={`${artRoot}/${familyCoverArt[category]?.[index] ?? categoryArt[category]}.webp`}
                           alt=''
                           width={640}
-                          height={360}
+                          height={480}
+                          loading='lazy'
                           decoding='async'
                         />
                         <div className='stolas-library-card-copy'>

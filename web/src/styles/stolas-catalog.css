@@ -31,23 +31,24 @@ For commercial licensing, please contact support@quantumnous.com
   isolation: isolate;
   margin-bottom: 2.5rem;
 }
-.stolas-catalog-header::before {
+.stolas-catalog-banner {
   position: absolute;
   z-index: -1;
-  inset: -0.75rem 0 -0.75rem 43%;
-  background: url('../assets/stolas-art/spring-paint.webp') center 56% / cover
-    no-repeat;
-  opacity: 0.78;
+  inset-block: -0.75rem;
+  inset-inline-end: 0;
+  width: 57%;
+  height: calc(100% + 1.5rem);
+  object-fit: cover;
+  object-position: center 56%;
+  opacity: 0.7;
   mask-image:
     linear-gradient(90deg, transparent, #000 36%, #000 86%, transparent),
     linear-gradient(180deg, transparent, #000 23%, #000 76%, transparent);
   mask-composite: intersect;
   pointer-events: none;
-  content: '';
 }
-.dark .stolas-catalog-header::before {
-  background-image: url('../assets/stolas-art/blue-paint.webp');
-  opacity: 0.7;
+.dark .stolas-catalog-banner {
+  opacity: 0.32;
 }
 .stolas-catalog-heading {
   display: flex;
@@ -270,9 +271,13 @@ For commercial licensing, please contact support@quantumnous.com
   );
   border-bottom: 1px solid var(--border);
 }
+.stolas-model-artwork-frame {
+  flex: none;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+}
 .stolas-model-tile[data-artwork] .stolas-model-cover {
   min-height: 0;
-  aspect-ratio: 16 / 9;
   overflow: hidden;
   background: var(--muted);
 }
@@ -367,20 +372,12 @@ For commercial licensing, please contact support@quantumnous.com
   grid-column: 1 / -1;
 }
 @media (min-width: 900px) {
-  .stolas-model-gallery {
-    /* Reserve room for two card bodies, the row gap and some breathing room. */
-    --model-cover-max-height: max(
+  .stolas-model-tile:not([data-artwork]) .stolas-model-cover {
+    min-height: clamp(
       6rem,
-      calc((100dvh - var(--stolas-public-header-offset, 5rem) - 20rem) / 2)
+      calc((100dvh - var(--stolas-public-header-offset, 5rem) - 20rem) / 2),
+      8rem
     );
-  }
-  .stolas-model-tile .stolas-model-cover {
-    min-height: min(8rem, var(--model-cover-max-height));
-  }
-  .stolas-model-tile[data-artwork] .stolas-model-cover {
-    width: 100%;
-    min-height: 0;
-    max-height: var(--model-cover-max-height);
   }
 }
 @media (max-width: 899px) {
@@ -426,8 +423,9 @@ For commercial licensing, please contact support@quantumnous.com
   .stolas-catalog-header {
     padding-bottom: 2.75rem;
   }
-  .stolas-catalog-header::before {
+  .stolas-catalog-banner {
     inset: auto 0 0 14%;
+    width: 86%;
     height: 3.25rem;
   }
   .stolas-catalog-discovery {

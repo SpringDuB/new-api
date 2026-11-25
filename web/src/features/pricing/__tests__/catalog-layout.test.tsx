@@ -183,14 +183,18 @@ describe('model library layout', () => {
       .getByRole('article', { name: 'image-2' })
       .querySelector('[data-slot="model-cover"] img')
     expect(videoArtwork?.getAttribute('src')).toMatch(
-      /^\/stolas\/art\/.+\.webp$/
+      /^\/stolas\/art\/collection\/covers\/.+\.webp$/
     )
     expect(imageArtwork?.getAttribute('src')).toMatch(
-      /^\/stolas\/art\/.+\.webp$/
+      /^\/stolas\/art\/collection\/covers\/.+\.webp$/
     )
     expect(videoArtwork?.getAttribute('src')).not.toBe(
       imageArtwork?.getAttribute('src')
     )
+    for (const image of [videoArtwork, imageArtwork]) {
+      expect(image).toHaveAttribute('width', '640')
+      expect(image).toHaveAttribute('height', '480')
+    }
     const textModel = within(directory).getByRole('article', {
       name: 'studio-chat',
     })

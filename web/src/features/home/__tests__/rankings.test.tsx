@@ -344,7 +344,7 @@ describe('home rankings access and data', () => {
 })
 
 describe('default home rankings placement', () => {
-  it('places the inspiration gallery after rankings and keeps the courtyard in the hero', async () => {
+  it('loads the hero artwork first and defers the inspiration gallery after rankings', async () => {
     await renderHome(Home)
     const rankings = await screen.findByRole('region', { name: 'Rankings' })
     const hero = screen.getByRole('main')
@@ -361,11 +361,13 @@ describe('default home rankings placement', () => {
     expect(
       gallery.compareDocumentPosition(footer) & Node.DOCUMENT_POSITION_FOLLOWING
     ).not.toBe(0)
-    expect(
-      within(hero).getByRole('img', {
-        name: 'Sunlit courtyard with a blue door',
-      })
-    ).toHaveAttribute('fetchpriority', 'high')
+    const heroImage = within(hero).getByRole('img', {
+      name: 'Watercolor mountains in mist',
+    })
+    expect(heroImage).toHaveAttribute('fetchpriority', 'high')
+    expect(heroImage.getAttribute('srcset')).toMatch(
+      /\.webp 720w,.+\.webp 1200w$/
+    )
     const galleryImages = within(gallery).getAllByRole('img')
     expect(galleryImages).toHaveLength(6)
     for (const image of galleryImages) {

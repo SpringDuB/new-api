@@ -42,8 +42,7 @@ export function assignCatalogCovers(models: PricingModel[]) {
     }
   }
 
-  // Assign new entries against the full directory so changes to filters or
-  // pagination never replace their covers.
+  // Use the full directory to give new entries a consistent preferred cover.
   for (const name of unassigned.sort()) {
     let cover = artwork[0]
     for (const candidate of artwork) {
@@ -54,5 +53,35 @@ export function assignCatalogCovers(models: PricingModel[]) {
     covers.set(name, cover)
     coverUses.set(cover, (coverUses.get(cover) ?? 0) + 1)
   }
+  return covers
+}
+
+export function assignCatalogPageCovers(
+  models: PricingModel[],
+  preferred: ReadonlyMap<string, string>
+) {
+  const covers = new Map<string, string>()
+  const reserved = new Set<string>()
+  const duplicates: string[] = []
+
+  // Reserve each preferred cover before filling gaps, including for later cards.
+  for (const { model_name: name } of models) {
+    const cover = preferred.get(name)
+    if (!cover) continue
+    if (reserved.has(cover)) {
+      duplicates.push(name)
+    } else {
+      reserved.add(cover)
+      covers.set(name, cover)
+    }
+  }
+
+  const available = artwork.filter((cover) => !reserved.has(cover))
+  for (const [index, name] of duplicates.entries()) {
+    const cover = available[index]
+    if (!cover) break
+    covers.set(name, cover)
+  }
+
   return covers
 }

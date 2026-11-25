@@ -424,14 +424,20 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
       )}
     >
       {isDirectory && (
-        <div data-slot='model-cover' className='stolas-model-cover'>
+        <div
+          data-slot='model-cover'
+          className={cn(
+            'stolas-model-cover',
+            artwork && 'stolas-model-artwork-frame'
+          )}
+        >
           {artwork ? (
             <img
               className='stolas-model-cover-image'
               src={artwork}
               alt=''
               width={640}
-              height={360}
+              height={480}
               loading='lazy'
               decoding='async'
             />

@@ -38,6 +38,7 @@ import {
 import { CachedPriceCell } from '../components/cached-price-cell'
 import { ModelCard } from '../components/model-card'
 import { ModelCardGrid } from '../components/model-card-grid'
+import { assignCatalogCovers } from '../lib/catalog-covers'
 import { filterBySearch } from '../lib/filters'
 import { applyModelSquareDisplay } from '../lib/model-square-display'
 import type { PricingModel } from '../types'
@@ -839,6 +840,37 @@ describe('model cards', () => {
     const user = userEvent.setup()
     await user.click(screen.getByRole('button', { name: 'Details' }))
     expect(onModelClick).toHaveBeenCalledWith('example-model')
+  })
+
+  it('replaces repeated artwork without taking a later card’s cover', () => {
+    vi.spyOn(api, 'get').mockResolvedValue({
+      data: { success: true, data: { models: [] } },
+    })
+    const models = [
+      'haya-seedance-2-5-m',
+      'ty-seedance-2-5-1050-flxd',
+      'mj-seedance-2-5-fd-720p',
+    ].map((model_name, index) =>
+      pricingModel({ id: index + 1, model_name, square_category: 'video' })
+    )
+    const covers = assignCatalogCovers(models)
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ModelCardGrid
+          presentation='directory'
+          models={models}
+          covers={covers}
+          onModelClick={vi.fn()}
+        />
+      </QueryClientProvider>
+    )
+    const grid = screen.getByRole('list', { name: 'Models' })
+    const images = [...grid.querySelectorAll('[data-slot="model-cover"] img')]
+    expect(images).toHaveLength(3)
+    const sources = images.map((image) => image.getAttribute('src'))
+    expect(new Set(sources).size).toBe(3)
+    expect(sources[0]).toBe(covers.get(models[0].model_name))
+    expect(sources[2]).toBe(covers.get(models[2].model_name))
   })
 
   it('paginates the model cards and disables navigation at both boundaries', async () => {
