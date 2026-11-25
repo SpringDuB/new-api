@@ -56,7 +56,6 @@ import {
 } from '../lib/model-categories'
 import { getModelFamily } from '../lib/model-families'
 import { isTokenBasedModel } from '../lib/model-helpers'
-import { withPluginPricing } from '../lib/plugin-pricing'
 import { formatFixedPrice, formatGroupPrice } from '../lib/price'
 import { getTaskEnumFields, getTaskNumberFields } from '../lib/task-expr'
 import { getTaskPricingDisplayTiers } from '../lib/task-matrix-display'
@@ -351,42 +350,29 @@ function PriceSection(props: {
     }
 
     const variants = props.model.billing_plugin_variants
+    const pricedVariants = variants?.filter(
+      (variant) => variant.billing_expr && variant.billing_usage_schema
+    )
     if (
-      dynamicSummary.tierCount > 1 &&
-      variants?.length &&
-      variants.every(
-        (variant) =>
-          variant.billing_mode !== 'ratio' && variant.billing_usage_schema
-      )
+      pricedVariants?.length &&
+      variants?.every((variant) => variant.billing_mode !== 'ratio')
     ) {
       return (
         <section aria-label={t('Base Price')}>
           <SectionTitle>{t('Base Price')}</SectionTitle>
           <div className='space-y-3'>
-            {variants.map((variant) => (
-              <div key={variant.plugin_key}>
-                {variants.length > 1 && (
-                  <p className='text-muted-foreground mb-2 text-xs'>
-                    {variant.plugin_name}
-                  </p>
-                )}
-                {variant.billing_expr ? (
-                  <DynamicPricingBreakdown
-                    billingExpr={variant.billing_expr}
-                    usageSchema={variant.billing_usage_schema}
-                    compact
-                    taskPriceOptions={{
-                      showRechargePrice: props.showRechargePrice,
-                      priceRate: props.priceRate,
-                      usdExchangeRate: props.usdExchangeRate,
-                    }}
-                  />
-                ) : (
-                  <UnconfiguredTaskPricingNotice
-                    model={withPluginPricing(props.model, variant)}
-                  />
-                )}
-              </div>
+            {pricedVariants.map((variant) => (
+              <DynamicPricingBreakdown
+                key={variant.plugin_key}
+                billingExpr={variant.billing_expr}
+                usageSchema={variant.billing_usage_schema}
+                compact
+                taskPriceOptions={{
+                  showRechargePrice: props.showRechargePrice,
+                  priceRate: props.priceRate,
+                  usdExchangeRate: props.usdExchangeRate,
+                }}
+              />
             ))}
           </div>
         </section>
@@ -396,13 +382,6 @@ function PriceSection(props: {
     return (
       <section>
         <SectionTitle>{t('Base Price')}</SectionTitle>
-        {dynamicSummary.providerCount && (
-          <p className='text-muted-foreground mb-2 text-xs'>
-            {t('{{count}} providers', { count: dynamicSummary.providerCount })}
-            {dynamicSummary.hasUnconfiguredProviders &&
-              ` · ${t('Not configured for some providers')}`}
-          </p>
-        )}
         {dynamicSummary.isMixedBilling && (
           <p className='text-muted-foreground mb-2 text-xs'>
             {t('Token or per-call pricing')}

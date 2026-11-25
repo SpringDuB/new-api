@@ -486,6 +486,7 @@ it.each([
     expression:
       'u("resolution") == "1080p" ? tier("1080p", u("seconds") * 2.1) : u("resolution") == "480p" ? tier("480p", u("seconds") * 0.384) : tier("720p", u("seconds") * 0.54)',
     basePrices: ['¥0.384/s', '¥0.54/s', '¥2.1/s'],
+    extraProvider: true,
   },
   {
     modelName: 'free-video-tiers',
@@ -528,6 +529,21 @@ it.each([
                 },
               },
             },
+            ...(testCase.extraProvider
+              ? [
+                  {
+                    plugin_key: 'yuanxiang',
+                    plugin_name: 'Yuanxiang AI',
+                    billing_expr: '',
+                    billing_usage_schema: {
+                      seconds: {
+                        type: 'number' as const,
+                        unit: 'second' as const,
+                      },
+                    },
+                  },
+                ]
+              : []),
           ],
         }}
         groupRatio={{ default: 2 }}
@@ -540,9 +556,10 @@ it.each([
       />
     </QueryClientProvider>
   )
-  const basePrices = within(
-    screen.getByRole('region', { name: 'Base Price' })
-  ).getByRole('table')
+  const base = within(screen.getByRole('region', { name: 'Base Price' }))
+  expect(base.queryByText('LecAPI')).not.toBeInTheDocument()
+  expect(base.queryByText('Yuanxiang AI')).not.toBeInTheDocument()
+  const basePrices = base.getByRole('table')
   for (const [index, resolution] of ['480p', '720p', '1080p'].entries()) {
     const name = new RegExp(`Output resolution: ${resolution}`)
     const baseRow = within(basePrices).getByRole('row', { name })

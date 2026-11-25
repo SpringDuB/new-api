@@ -16,25 +16,17 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Link } from '@tanstack/react-router'
-import { Library } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import {
   Sidebar,
   SidebarContent,
-  SidebarFooter,
   SidebarHeader,
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
   SidebarTrigger,
   useSidebar,
 } from '@/components/ui/sidebar'
-import { useTopNavLinks } from '@/hooks/use-top-nav-links'
 
 import type { ResolvedSidebarView } from '../types'
-import { ModelLibraryNavigation } from './model-library-navigation'
 import { NavGroup } from './nav-group'
 import { SidebarViewHeader } from './sidebar-view-header'
 import { SystemBrand } from './system-brand'
@@ -45,11 +37,8 @@ export function AppSidebar({
   navigation: ResolvedSidebarView
 }) {
   const { t } = useTranslation()
-  const { isMobile, state, setOpenMobile } = useSidebar()
+  const { isMobile, state } = useSidebar()
   const compact = !isMobile && state === 'collapsed'
-  const library = useTopNavLinks().find(
-    (link) => link.href === '/pricing' && !link.disabled
-  )
 
   return (
     <Sidebar collapsible='icon' className='top-0 h-dvh'>
@@ -65,31 +54,6 @@ export function AppSidebar({
           ))}
         </nav>
       </SidebarContent>
-      {library && (
-        <SidebarFooter className='stolas-rail-footer'>
-          {isMobile ? (
-            <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  render={
-                    <Link to='/pricing' onClick={() => setOpenMobile(false)} />
-                  }
-                >
-                  <Library aria-hidden='true' />
-                  <span>{library.title}</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            </SidebarMenu>
-          ) : (
-            <ModelLibraryNavigation
-              title={library.title}
-              side='right'
-              compact={compact}
-              className='stolas-rail-library'
-            />
-          )}
-        </SidebarFooter>
-      )}
     </Sidebar>
   )
 }

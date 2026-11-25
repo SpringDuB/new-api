@@ -120,7 +120,7 @@ async function renderWorkspace(
 
 describe('Stolas workspace navigation', () => {
   it.each([390, 1440])(
-    'shows the wallet balance before the Explore menu at %ipx',
+    'places the model library before the wallet balance at %ipx',
     async (width) => {
       vi.stubGlobal('innerWidth', width)
       await renderWorkspace('/keys', { walletQuota: 1250000 })
@@ -128,6 +128,13 @@ describe('Stolas workspace navigation', () => {
       const balance = await within(header).findByRole('group', {
         name: 'Current Balance',
       })
+      const library = within(header).getByRole('button', {
+        name: 'Model library',
+      })
+      expect(
+        library.compareDocumentPosition(balance) &
+          Node.DOCUMENT_POSITION_FOLLOWING
+      ).toBeTruthy()
       expect(await within(balance).findByText('$2.5')).toBeVisible()
       const explore = within(header).getByRole('button', {
         name: 'Explore Stolas',
@@ -266,8 +273,8 @@ describe('Stolas workspace navigation', () => {
       within(drawer).getByRole('link', { name: 'API Keys' })
     ).toHaveAttribute('aria-current', 'page')
     expect(
-      within(drawer).getByRole('link', { name: 'Model library' })
-    ).toHaveAttribute('href', '/pricing')
+      within(drawer).queryByRole('link', { name: 'Model library' })
+    ).not.toBeInTheDocument()
     await user.keyboard('{Escape}')
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     await user.click(toggle)

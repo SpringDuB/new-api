@@ -253,19 +253,6 @@ For commercial licensing, please contact support@quantumnous.com
   background: var(--sidebar-primary);
   color: var(--sidebar-primary-foreground);
 }
-.stolas-rail-footer {
-  border-top: 1px solid var(--sidebar-border);
-  padding: 0.625rem 0.75rem max(0.625rem, env(safe-area-inset-bottom));
-}
-.stolas-rail-library {
-  justify-content: flex-start;
-  width: 100%;
-  padding-inline: 0.625rem;
-}
-.stolas-rail-library .stolas-library-chevron {
-  margin-inline-start: auto;
-  rotate: -90deg;
-}
 [data-collapsible='icon'] .stolas-rail-brand {
   justify-content: center;
   padding: 0;
@@ -275,10 +262,6 @@ For commercial licensing, please contact support@quantumnous.com
 }
 [data-collapsible='icon'] .stolas-rail-nav [data-sidebar='group-label'] {
   display: none;
-}
-[data-collapsible='icon'] .stolas-rail-library {
-  justify-content: center;
-  padding: 0;
 }
 .stolas-page {
   width: 100%;
