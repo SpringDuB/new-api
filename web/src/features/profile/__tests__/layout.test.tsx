@@ -118,7 +118,7 @@ describe('profile preference layout', () => {
     })
     expect(
       within(identity).getByRole('img', { name: 'Stolas' })
-    ).toHaveAttribute('src', '/stolas/mark-orange.png')
+    ).toHaveAttribute('src', '/stolas/mark-black.png')
     expect(
       within(identity).getByRole('heading', { name: 'Mira Chen' })
     ).toBeVisible()

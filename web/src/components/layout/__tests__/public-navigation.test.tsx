@@ -33,7 +33,7 @@ import { PublicHeader } from '../components/public-header'
 vi.mock('@/hooks/use-system-config', () => ({
   useSystemConfig: () => ({
     systemName: 'Stolas',
-    logo: '/stolas/mark-orange.png',
+    logo: '/stolas/mark-black.png',
     loading: false,
     logoLoaded: true,
   }),
@@ -114,7 +114,7 @@ describe('Stolas public navigation', () => {
     }
     expect(screen.getByRole('img', { name: 'Stolas' })).toHaveAttribute(
       'src',
-      '/stolas/lockup-primary.png'
+      '/stolas/lockup-dark.png'
     )
   })
 })

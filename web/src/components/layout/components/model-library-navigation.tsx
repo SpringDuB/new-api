@@ -85,10 +85,14 @@ export function ModelLibraryNavigation({
   title,
   active,
   className,
+  side = 'bottom',
+  compact = false,
 }: {
   title: string
   active?: boolean
   className: string
+  side?: 'bottom' | 'right'
+  compact?: boolean
 }) {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
@@ -127,18 +131,22 @@ export function ModelLibraryNavigation({
         closeDelay={150}
         aria-current={active ? 'page' : undefined}
         data-active={active || undefined}
+        title={compact ? title : undefined}
         className={className}
         render={<Button variant='ghost' />}
       >
         <StolasNavigationIcon destination='/pricing' />
-        {title}
-        <ChevronDown
-          aria-hidden='true'
-          className='stolas-library-chevron size-3'
-        />
+        <span className={compact ? 'sr-only' : 'truncate'}>{title}</span>
+        {!compact && (
+          <ChevronDown
+            aria-hidden='true'
+            className='stolas-library-chevron size-3'
+          />
+        )}
       </PopoverTrigger>
       <PopoverContent
-        align='start'
+        side={side}
+        align={side === 'right' ? 'end' : 'start'}
         sideOffset={5}
         collisionPadding={16}
         className='stolas-library-menu'

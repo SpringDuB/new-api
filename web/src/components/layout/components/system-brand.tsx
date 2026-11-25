@@ -33,6 +33,7 @@ import { cn } from '@/lib/utils'
 type SystemBrandProps = {
   defaultName?: string
   defaultVersion?: string
+  compact?: boolean
   /**
    * Visual layout:
    * - 'sidebar': stacked card style (used inside the sidebar header).
@@ -68,7 +69,7 @@ export function SystemBrand(props: SystemBrandProps) {
         )}
       >
         {logo === DEFAULT_LOGO ? (
-          <StolasLogo />
+          <StolasLogo variant={props.compact ? 'mark' : 'lockup'} />
         ) : (
           <img
             src={logo}
@@ -76,7 +77,7 @@ export function SystemBrand(props: SystemBrandProps) {
             className='size-8 shrink-0 object-contain'
           />
         )}
-        {name.toLowerCase() !== 'stolas' && (
+        {!props.compact && name.toLowerCase() !== 'stolas' && (
           <span className='max-w-36 truncate text-sm'>{name}</span>
         )}
       </Link>

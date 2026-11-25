@@ -38,16 +38,17 @@ export function AuthenticatedLayout(props: AuthenticatedLayoutProps) {
   return (
     <LayoutProvider>
       <SearchProvider>
-        <SidebarProvider className='stolas-surface stolas-shell h-dvh min-h-0 flex-col overflow-hidden'>
+        <SidebarProvider className='stolas-surface stolas-shell h-dvh min-h-0 overflow-hidden'>
           <SkipToMain />
-          <WorkspaceNavigation />
-          <div
-            id='content'
-            tabIndex={-1}
-            className='@container/content flex min-h-0 w-full flex-1 flex-col overflow-hidden outline-none'
-          >
-            {props.children ?? <AnimatedOutlet />}
-          </div>
+          <WorkspaceNavigation>
+            <div
+              id='content'
+              tabIndex={-1}
+              className='@container/content flex min-h-0 w-full flex-1 flex-col overflow-hidden outline-none'
+            >
+              {props.children ?? <AnimatedOutlet />}
+            </div>
+          </WorkspaceNavigation>
         </SidebarProvider>
         <CommandMenu />
       </SearchProvider>

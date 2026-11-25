@@ -26,11 +26,9 @@ export function StolasLogo(props: {
 }) {
   const { resolvedTheme } = useTheme()
   const inverse = props.inverse || resolvedTheme === 'dark'
-  let source = inverse
-    ? '/stolas/lockup-white.png'
-    : '/stolas/lockup-primary.png'
+  let source = inverse ? '/stolas/lockup-white.png' : '/stolas/lockup-dark.png'
   if (props.variant === 'mark') {
-    source = inverse ? '/stolas/mark-white.png' : '/stolas/mark-orange.png'
+    source = inverse ? '/stolas/mark-white.png' : '/stolas/mark-black.png'
   }
   return (
     <img

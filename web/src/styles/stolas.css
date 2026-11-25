@@ -18,24 +18,24 @@ For commercial licensing, please contact support@quantumnous.com
 */
 /* Stolas product surfaces share semantic tokens with existing New API tools. */
 :root {
-  --background: #f8f6f0;
-  --foreground: #292821;
-  --card: #fffdf8;
+  --background: #ffffff;
+  --foreground: #171717;
+  --card: #ffffff;
   --card-foreground: var(--foreground);
   --popover: var(--card);
   --popover-foreground: var(--foreground);
-  --primary: #a84d29;
-  --primary-foreground: #fffaf2;
-  --secondary: #eeeadf;
-  --secondary-foreground: #49483f;
-  --muted: #eeece4;
-  --muted-foreground: #6c6a5f;
-  --accent: #eee3d1;
-  --accent-foreground: #7b3e25;
-  --border: #dedbd0;
-  --input: #d6d1c4;
-  --ring: #b66d44;
-  --sidebar: #f0eee6;
+  --primary: #171717;
+  --primary-foreground: #ffffff;
+  --secondary: #f0f0f0;
+  --secondary-foreground: #3d3d3d;
+  --muted: #f5f5f5;
+  --muted-foreground: #626262;
+  --accent: #eaeaea;
+  --accent-foreground: #171717;
+  --border: #dedede;
+  --input: #bdbdbd;
+  --ring: #686868;
+  --sidebar: #f7f7f7;
   --sidebar-foreground: var(--foreground);
   --sidebar-primary: var(--primary);
   --sidebar-primary-foreground: var(--primary-foreground);
@@ -44,17 +44,15 @@ For commercial licensing, please contact support@quantumnous.com
   --sidebar-border: var(--border);
   --sidebar-ring: var(--ring);
   --radius: 0.5rem;
-  --stolas-gold: #b5904b;
-  --stolas-dark-paper: #2c302b;
-  --stolas-light-ink: #f3efdf;
-  --overview-accent-1: #b56840;
-  --overview-accent-2: #72866a;
-  --overview-accent-3: #be9b52;
-  --chart-1: #b56840;
-  --chart-2: #72866a;
-  --chart-3: #be9b52;
-  --chart-4: #768d91;
-  --chart-5: #a27972;
+  --stolas-light-ink: #ffffff;
+  --overview-accent-1: var(--chart-1);
+  --overview-accent-2: var(--chart-2);
+  --overview-accent-3: var(--chart-3);
+  --chart-1: #242424;
+  --chart-2: #707070;
+  --chart-3: #a2a2a2;
+  --chart-4: #515151;
+  --chart-5: #898989;
   --font-ui-sans: 'Public Sans Variable', 'Public Sans', sans-serif;
 }
 
@@ -66,28 +64,32 @@ For commercial licensing, please contact support@quantumnous.com
 }
 
 .dark {
-  --background: #22241f;
-  --foreground: #eae7dc;
-  --card: #292c25;
-  --primary: #e7a274;
-  --primary-foreground: #2a2118;
-  --secondary: #34372e;
-  --secondary-foreground: #d4d0c0;
-  --muted: #30332b;
-  --muted-foreground: #b0b0a2;
-  --accent: #40382a;
-  --accent-foreground: #efbd91;
-  --border: #46493e;
-  --input: #525447;
-  --ring: #daa276;
-  --sidebar: #282b24;
-  --stolas-gold: #d0b879;
+  --background: #0c0c0c;
+  --foreground: #f5f5f5;
+  --card: #171717;
+  --primary: #f5f5f5;
+  --primary-foreground: #111111;
+  --secondary: #262626;
+  --secondary-foreground: #dedede;
+  --muted: #202020;
+  --muted-foreground: #ababab;
+  --accent: #2b2b2b;
+  --accent-foreground: #f5f5f5;
+  --border: #333333;
+  --input: #505050;
+  --ring: #a8a8a8;
+  --sidebar: #141414;
+  --chart-1: #eeeeee;
+  --chart-2: #a0a0a0;
+  --chart-3: #737373;
+  --chart-4: #c8c8c8;
+  --chart-5: #898989;
 }
 
 .stolas-editorial {
   font-family: var(--font-serif);
   font-weight: 450;
-  letter-spacing: -0.045em;
+  letter-spacing: 0;
   text-wrap: balance;
 }
 
@@ -153,7 +155,7 @@ For commercial licensing, please contact support@quantumnous.com
   }
 }
 .stolas-auth-art {
-  background-color: #172e39;
+  background-color: #151515;
   color: var(--stolas-light-ink);
 }
 @media (min-width: 1024px) {
@@ -161,10 +163,10 @@ For commercial licensing, please contact support@quantumnous.com
     background-image:
       linear-gradient(
         180deg,
-        #172e39dc 0%,
-        #172e3900 25%,
-        #172e3900 48%,
-        #172e39 90%
+        #151515dc 0%,
+        #15151500 25%,
+        #15151500 48%,
+        #151515 90%
       ),
       url('../assets/stolas-art/blue-canal.webp');
     background-position:
@@ -184,7 +186,7 @@ For commercial licensing, please contact support@quantumnous.com
 }
 .stolas-masthead-inner {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 1.5rem;
   min-height: var(--app-header-height);
@@ -192,43 +194,91 @@ For commercial licensing, please contact support@quantumnous.com
   margin-inline: auto;
   padding-inline: var(--stolas-page-gutter);
 }
-.stolas-workspace-nav {
-  display: flex;
-  align-items: center;
-  gap: 0.2rem;
-  padding-block: 0.25rem;
-  min-width: 0;
-  flex-wrap: wrap;
+.stolas-shell > [data-slot='sidebar'] {
+  --sidebar-width: 14.75rem;
+  --sidebar-width-icon: 3.5rem;
 }
-.stolas-workspace-nav > * {
+.stolas-rail-brand {
+  height: var(--app-header-height, 3.5rem);
   flex-shrink: 0;
+  border-bottom: 1px solid var(--sidebar-border);
+  padding-inline: 1rem;
 }
-.stolas-workspace-nav > [data-slot='sidebar-group'] {
-  width: auto;
-  min-width: 0;
-  flex: none;
+.stolas-rail-brand a {
+  height: 2.5rem;
+  max-width: 100%;
+  padding-inline: 0.25rem;
 }
-.stolas-workspace-link {
-  height: 2.125rem;
-  padding-inline: 0.85rem;
-  border-radius: 0.5rem;
+.stolas-rail-brand img {
+  height: 1.75rem;
+}
+.stolas-rail-scroll {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+.stolas-rail-nav {
+  padding: 0.5rem 0.75rem 1rem;
+  counter-reset: rail-section;
+}
+.stolas-rail-nav [data-sidebar='group'] {
+  padding: 0.625rem 0;
+  counter-increment: rail-section;
+}
+.stolas-rail-nav [data-sidebar='group'] + [data-sidebar='group'] {
+  border-top: 1px solid var(--sidebar-border);
+}
+.stolas-rail-nav [data-sidebar='group']:not(:has([data-sidebar='menu-item'])) {
+  display: none;
+}
+.stolas-rail-nav [data-sidebar='group-label'] {
+  gap: 0.625rem;
+  height: 1.875rem;
+  padding-inline: 0.5rem;
   color: var(--muted-foreground);
-  font-size: 0.8rem;
-  white-space: nowrap;
+  letter-spacing: 0;
 }
-.stolas-workspace-link[aria-current='page'],
-.stolas-workspace-link[data-active] {
-  background: var(--accent);
-  color: var(--accent-foreground);
+.stolas-rail-nav [data-sidebar='group-label']::before {
+  content: counter(rail-section, decimal-leading-zero) / '';
+  font: 0.625rem var(--font-mono);
 }
-.stolas-workspace-divider {
-  width: 1px;
-  height: 1rem;
-  margin-inline: 0.6rem;
-  background: var(--border);
+.stolas-rail-nav [data-sidebar='menu-button'] {
+  min-height: 2.125rem;
+  gap: 0.625rem;
+  border-radius: 0.25rem;
+  padding-inline: 0.625rem;
 }
-.stolas-canvas-link {
-  color: var(--primary);
+.stolas-rail-nav [data-sidebar='menu-button'][aria-current='page'],
+.stolas-rail-nav [data-sidebar='menu-sub-button'][aria-current='page'] {
+  background: var(--sidebar-primary);
+  color: var(--sidebar-primary-foreground);
+}
+.stolas-rail-footer {
+  border-top: 1px solid var(--sidebar-border);
+  padding: 0.625rem 0.75rem max(0.625rem, env(safe-area-inset-bottom));
+}
+.stolas-rail-library {
+  justify-content: flex-start;
+  width: 100%;
+  padding-inline: 0.625rem;
+}
+.stolas-rail-library .stolas-library-chevron {
+  margin-inline-start: auto;
+  rotate: -90deg;
+}
+[data-collapsible='icon'] .stolas-rail-brand {
+  justify-content: center;
+  padding: 0;
+}
+[data-collapsible='icon'] .stolas-rail-scroll {
+  overflow-y: auto;
+}
+[data-collapsible='icon'] .stolas-rail-nav [data-sidebar='group-label'] {
+  display: none;
+}
+[data-collapsible='icon'] .stolas-rail-library {
+  justify-content: center;
+  padding: 0;
 }
 .stolas-page {
   width: 100%;
@@ -374,7 +424,6 @@ For commercial licensing, please contact support@quantumnous.com
 }
 @media (max-width: 767px) {
   .stolas-masthead-inner {
-    grid-template-columns: auto minmax(0, 1fr) auto;
     gap: 0.5rem;
   }
   .stolas-masthead-tools {
@@ -477,13 +526,9 @@ For commercial licensing, please contact support@quantumnous.com
   flex-shrink: 0;
   color: currentColor;
 }
-.stolas-workspace-link .stolas-nav-symbol,
 .stolas-public-nav-link .stolas-nav-symbol {
   opacity: 0.7;
 }
-.stolas-workspace-link:hover .stolas-nav-symbol,
-.stolas-workspace-link[data-active] .stolas-nav-symbol,
-.stolas-workspace-link[aria-current='page'] .stolas-nav-symbol,
 .stolas-public-nav-link[aria-current='page'] .stolas-nav-symbol {
   color: var(--primary);
   opacity: 1;
@@ -733,8 +778,4 @@ For commercial licensing, please contact support@quantumnous.com
     animation: none !important;
     transition: none;
   }
-}
-
-.stolas-workspace-menu [data-slot='dropdown-menu-item'][aria-current='page'] {
-  background: var(--accent);
 }

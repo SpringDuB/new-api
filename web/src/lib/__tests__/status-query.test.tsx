@@ -94,7 +94,7 @@ describe('shared status query deduplication', () => {
   test('uses Stolas presentation defaults while preserving configured site branding', () => {
     expect(
       mapStatusDataToConfig({ system_name: 'New API', logo: '/logo.png' })
-    ).toMatchObject({ systemName: 'Stolas', logo: '/stolas/mark-orange.png' })
+    ).toMatchObject({ systemName: 'Stolas', logo: '/stolas/mark-black.png' })
     expect(
       mapStatusDataToConfig({
         system_name: 'Custom studio',

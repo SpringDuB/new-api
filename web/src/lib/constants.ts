@@ -22,7 +22,7 @@ For commercial licensing, please contact support@quantumnous.com
 
 // System Configuration Defaults
 export const DEFAULT_SYSTEM_NAME = 'Stolas'
-export const DEFAULT_LOGO = '/stolas/mark-orange.png'
+export const DEFAULT_LOGO = '/stolas/mark-black.png'
 export const INFINITE_CANVAS_URL = 'https://canvas.stolas.cc'
 
 // LocalStorage Keys

@@ -16,238 +16,55 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Link, useLocation } from '@tanstack/react-router'
-import { ArrowUpRight, ChevronDown } from 'lucide-react'
+import { useLocation } from '@tanstack/react-router'
+import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { Button } from '@/components/ui/button'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
-import { useSidebar } from '@/components/ui/sidebar'
-import { useMediaQuery } from '@/hooks/use-media-query'
+import { SidebarTrigger } from '@/components/ui/sidebar'
 import { useSidebarView } from '@/hooks/use-sidebar-view'
-import { useTopNavLinks } from '@/hooks/use-top-nav-links'
 
 import { checkIsActive } from '../lib/url-utils'
-import type { NavGroup as NavigationGroup, NavItem, NavLink } from '../types'
 import { AppHeader } from './app-header'
-import { ModelLibraryNavigation } from './model-library-navigation'
-import { NavGroup } from './nav-group'
-import { StolasNavigationIcon } from './stolas-navigation-icon'
+import { AppSidebar } from './app-sidebar'
 
-export function WorkspaceNavigation() {
+export function WorkspaceNavigation({ children }: { children: ReactNode }) {
   const { t } = useTranslation()
-  const { isMobile } = useSidebar()
-  const compactNavigation = useMediaQuery('(max-width: 1279px)')
   const href = useLocation({ select: (location) => location.href })
-  const { rootNavGroups, navGroups, view } = useSidebarView()
-  const modelLibrary = useTopNavLinks().find(
-    (link) => link.href === '/pricing' && !link.disabled
+  const navigation = useSidebarView()
+  const group = navigation.navGroups.find((group) =>
+    group.items.some((item) => checkIsActive(href, item))
   )
-  const general = rootNavGroups.find((group) => group.id === 'general')
-  const overview = general?.items.find(
-    (item) => item.url === '/dashboard/overview'
-  ) as NavLink | undefined
-  const canvas = rootNavGroups
-    .find((group) => group.id === 'chat')
-    ?.items.find((item) => 'external' in item && item.external) as
-    | NavLink
-    | undefined
-  const chatPresets =
-    rootNavGroups
-      .find((group) => group.id === 'chat')
-      ?.items.filter((item) => item.type === 'chat-presets') ?? []
-  const menus = rootNavGroups
-    .filter((group) => group.id !== 'chat')
-    .map((group) => {
-      const items = group.items.filter((item) => item !== overview)
-      const activeItem =
-        view && group.id === 'admin'
-          ? undefined
-          : items.find((item) => checkIsActive(href, item))
-      return { ...group, title: activeItem?.title ?? group.title, items }
-    })
-    .filter((group) => group.items.length > 0)
-
-  if (isMobile || compactNavigation) {
-    const current = navGroups
-      .flatMap((group) => group.items)
-      .flatMap((item) => item.items ?? [item])
-      .find((item) => checkIsActive(href, item))
-    const mobileItems: NavItem[] = [
-      ...(overview ? [overview] : []),
-      ...(modelLibrary ? [{ title: modelLibrary.title, url: '/pricing' }] : []),
-      ...(canvas ? [canvas] : []),
-      ...menus.map((group) => ({
-        title: group.title,
-        items: group.items.filter((item): item is NavLink => Boolean(item.url)),
-      })),
-      ...(view ? navGroups.flatMap((group) => group.items) : []),
-    ]
-    return (
-      <AppHeader
-        showSearch={false}
-        leftContent={
-          <nav
-            aria-label={t('Workspace pages')}
-            className='stolas-workspace-nav'
-          >
-            <WorkspaceMenu
-              group={{
-                id: current?.url ?? '/dashboard',
-                title: current?.title ?? t('Console'),
-                items: mobileItems,
-              }}
-            />
-            <NavGroup
-              title={t('Chat')}
-              orientation='horizontal'
-              items={chatPresets}
-            />
-          </nav>
-        }
-      />
-    )
-  }
+  const current = group?.items
+    .flatMap((item) => item.items ?? [item])
+    .find((item) => checkIsActive(href, item))
 
   return (
-    <AppHeader
-      showSearch={false}
-      leftContent={
-        <nav aria-label={t('Workspace pages')} className='stolas-workspace-nav'>
-          {overview && (
-            <Button
-              role='link'
-              variant='ghost'
-              className='stolas-workspace-link'
-              aria-current={checkIsActive(href, overview) ? 'page' : undefined}
-              render={<Link to={overview.url} />}
-            >
-              <StolasNavigationIcon destination='/dashboard/overview' />
-              {t('Console')}
-            </Button>
-          )}
-          {modelLibrary && (
-            <ModelLibraryNavigation
-              title={modelLibrary.title}
-              active={
-                href === '/pricing' ||
-                href.startsWith('/pricing/') ||
-                href.startsWith('/pricing?')
-              }
-              className='stolas-workspace-link stolas-library-trigger'
-            />
-          )}
-          {canvas && (
-            <Button
-              role='link'
-              variant='ghost'
-              className='stolas-workspace-link stolas-canvas-link'
-              render={
-                <a
-                  href={canvas.url}
-                  target='_blank'
-                  rel='noopener noreferrer'
-                />
-              }
-            >
-              <StolasNavigationIcon destination='canvas' />
-              {canvas.title}
-              <ArrowUpRight aria-hidden='true' className='size-3.5' />
-            </Button>
-          )}
-          <span className='stolas-workspace-divider' aria-hidden='true' />
-          {menus.map((group) => (
-            <WorkspaceMenu key={group.id} group={group} hover />
-          ))}
-          {view && (
-            <WorkspaceMenu
-              group={{
-                id: 'settings',
-                title: t('System Settings'),
-                items: navGroups.flatMap((group) => group.items),
-              }}
-            />
-          )}
-          <NavGroup
-            title={t('Chat')}
-            orientation='horizontal'
-            items={chatPresets}
-          />
-        </nav>
-      }
-    />
-  )
-}
-
-function WorkspaceMenu({
-  group,
-  hover = false,
-}: {
-  group: NavigationGroup
-  hover?: boolean
-}) {
-  const href = useLocation({ select: (location) => location.href })
-  const active = group.items.some((item) => checkIsActive(href, item))
-  return (
-    <DropdownMenu modal={!hover}>
-      <DropdownMenuTrigger
-        openOnHover={hover}
-        delay={90}
-        closeDelay={150}
-        render={
-          <Button
-            variant='ghost'
-            className='stolas-workspace-link max-w-full'
-            data-active={active || undefined}
-          />
-        }
-      >
-        <StolasNavigationIcon destination={group.id ?? 'settings'} />
-        <span className='min-w-0 truncate'>{group.title}</span>
-        <ChevronDown aria-hidden='true' className='size-3' />
-      </DropdownMenuTrigger>
-      <DropdownMenuContent
-        align='start'
-        className='stolas-workspace-menu max-h-[min(36rem,75dvh)] min-w-56 overflow-y-auto'
-      >
-        {group.items.map((item: NavItem) => (
-          <DropdownMenuGroup key={item.title}>
-            {item.items && <DropdownMenuLabel>{item.title}</DropdownMenuLabel>}
-            {(item.items ?? (item.url ? [item] : [])).map((link) => (
-              <DropdownMenuItem
-                key={link.url}
-                aria-current={checkIsActive(href, link) ? 'page' : undefined}
-                render={
-                  'external' in link && link.external ? (
-                    <a
-                      href={link.url}
-                      target='_blank'
-                      rel='noopener noreferrer'
-                    />
-                  ) : (
-                    <Link to={link.url} />
-                  )
-                }
-              >
-                <StolasNavigationIcon destination={link.url ?? '/'} tile />
-                {link.title}
-                {link.badge && (
-                  <span className='text-muted-foreground ms-auto text-xs'>
-                    {link.badge}
-                  </span>
-                )}
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuGroup>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <>
+      <AppSidebar navigation={navigation} />
+      <div className='flex min-h-0 min-w-0 flex-1 flex-col'>
+        <AppHeader
+          showSearch={false}
+          leftContent={
+            <div className='flex min-w-0 items-center gap-2.5 text-sm'>
+              <SidebarTrigger />
+              <span
+                aria-hidden='true'
+                className='bg-border h-4 w-px shrink-0'
+              />
+              {group && current && (
+                <span className='text-muted-foreground hidden shrink-0 items-center gap-2.5 lg:flex'>
+                  {group.title}
+                  <span aria-hidden='true'>/</span>
+                </span>
+              )}
+              <span className='truncate font-medium'>
+                {current?.title ?? t('Workspace')}
+              </span>
+            </div>
+          }
+        />
+        {children}
+      </div>
+    </>
   )
 }

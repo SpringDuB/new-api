@@ -59,28 +59,6 @@ export function useSidebarData(badges: SidebarBadges = {}): SidebarData {
   return {
     navGroups: [
       {
-        id: 'chat',
-        title: t('Infinite Canvas'),
-        items: [
-          {
-            title: t('Chat'),
-            icon: MessageSquare,
-            type: 'chat-presets',
-          },
-          ...(status?.canvas_enabled === false
-            ? []
-            : [
-                {
-                  title: t('Infinite Canvas'),
-                  url: getCanvasStartURL(status),
-                  configUrls: [INFINITE_CANVAS_URL],
-                  icon: PanelsTopLeft,
-                  external: true,
-                },
-              ]),
-        ],
-      },
-      {
         id: 'general',
         title: t('API access'),
         items: [
@@ -117,6 +95,28 @@ export function useSidebarData(badges: SidebarBadges = {}): SidebarData {
             configUrls: ['/usage-logs/drawing', '/usage-logs/task'],
             icon: ListTodo,
           },
+        ],
+      },
+      {
+        id: 'chat',
+        title: t('Infinite Canvas'),
+        items: [
+          {
+            title: t('Chat'),
+            icon: MessageSquare,
+            type: 'chat-presets',
+          },
+          ...(status?.canvas_enabled === false
+            ? []
+            : [
+                {
+                  title: t('Infinite Canvas'),
+                  url: getCanvasStartURL(status),
+                  configUrls: [INFINITE_CANVAS_URL],
+                  icon: PanelsTopLeft,
+                  external: true,
+                },
+              ]),
         ],
       },
       {

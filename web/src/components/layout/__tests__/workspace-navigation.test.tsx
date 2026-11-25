@@ -139,44 +139,32 @@ describe('Stolas workspace navigation', () => {
     }
   )
 
-  it('keeps destinations in one top navigation and marks the current API page in its menu', async () => {
+  it('marks the current page and keeps links reachable with the rail collapsed', async () => {
     await renderWorkspace('/keys')
-    expect(
-      screen.getByRole('button', { name: 'Model library' })
-    ).toHaveAttribute('aria-expanded', 'false')
-    expect(
-      screen.queryByRole('button', { name: 'Toggle Sidebar' })
-    ).not.toBeInTheDocument()
-    const menu = screen.getByRole('button', { name: /API Keys/ })
-    menu.focus()
-    await userEvent.setup().keyboard('{Enter}')
-    expect(
-      await screen.findByRole('menuitem', { name: 'API Keys' })
-    ).toHaveAttribute('href', '/keys')
-    expect(screen.getByRole('menuitem', { name: 'API Keys' })).toHaveAttribute(
+    const nav = within(
+      screen.getByRole('navigation', { name: 'Workspace pages' })
+    )
+    expect(nav.getByRole('link', { name: 'API Keys' })).toHaveAttribute(
       'aria-current',
       'page'
     )
-  })
-  it('keeps administrator destinations out of a regular user workspace', async () => {
-    await renderWorkspace('/wallet')
+    expect(nav.getByRole('link', { name: 'Wallet' })).toHaveAttribute(
+      'href',
+      '/wallet'
+    )
     expect(
-      screen.queryByRole('button', { name: /Admin/ })
+      nav.queryByRole('link', { name: 'Channels' })
     ).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Wallet/ })).toBeVisible()
-  })
-  it.each([
-    ['API access', 'API Keys'],
-    ['Personal', 'Wallet'],
-    ['Admin', 'Channels'],
-  ])('opens %s without clicking on desktop', async (menu, destination) => {
-    await renderWorkspace('/dashboard/overview', { role: ROLE.SUPER_ADMIN })
-    const trigger = screen.getByRole('button', { name: menu })
-    await userEvent.setup().hover(trigger)
-    expect(
-      await screen.findByRole('menuitem', { name: destination })
-    ).toBeVisible()
-    expect(trigger).toHaveAttribute('aria-expanded', 'true')
+    const toggle = screen.getByRole('button', { name: 'Close menu' })
+    toggle.focus()
+    await userEvent.setup().keyboard('{Enter}')
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    expect(nav.getByRole('link', { name: 'API Keys' })).toHaveAttribute(
+      'href',
+      '/keys'
+    )
+    await userEvent.setup().keyboard('{Enter}')
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
   })
   it('groups variants by series and links to the matching catalog filter', async () => {
     await renderWorkspace('/dashboard/overview')
@@ -227,69 +215,64 @@ describe('Stolas workspace navigation', () => {
     await userEvent.setup().keyboard('{Escape}')
     expect(menu).toHaveAttribute('aria-expanded', 'false')
   })
-  it('honors module visibility within the API menu', async () => {
+  it('shows permitted administrator links and respects user module visibility', async () => {
     await renderWorkspace('/keys', {
+      role: ROLE.SUPER_ADMIN,
       userModules: { console: { log: false, audit: false } },
     })
-    await userEvent
-      .setup()
-      .click(screen.getByRole('button', { name: /API Keys/ }))
+    const nav = within(
+      screen.getByRole('navigation', { name: 'Workspace pages' })
+    )
+    expect(nav.getByRole('link', { name: 'Channels' })).toHaveAttribute(
+      'href',
+      '/channels'
+    )
+    expect(nav.getByRole('link', { name: 'System Settings' })).toBeVisible()
     expect(
-      await screen.findByRole('menuitem', { name: 'API Keys' })
-    ).toBeVisible()
-    expect(
-      screen.queryByRole('menuitem', { name: 'Usage Logs' })
+      nav.queryByRole('link', { name: 'Usage Logs' })
     ).not.toBeInTheDocument()
   })
-  it('keeps system settings reachable from the top navigation', async () => {
+  it('shows contextual settings and provides a way back to the console', async () => {
     await renderWorkspace('/system-settings/billing/model-pricing', {
       role: ROLE.SUPER_ADMIN,
     })
-    await userEvent
-      .setup()
-      .click(screen.getByRole('button', { name: /System Settings/ }))
+    expect(screen.getByRole('link', { name: 'Model Pricing' })).toHaveAttribute(
+      'aria-current',
+      'page'
+    )
     expect(
-      await screen.findByRole('menuitem', { name: 'Model Pricing' })
-    ).toHaveAttribute('href', '/system-settings/billing/model-pricing')
+      screen.getByRole('link', { name: 'Back to Dashboard' })
+    ).toHaveAttribute('href')
   })
-  it('preserves the drawing alias as the current task page and the canvas entry', async () => {
+  it('preserves the drawing alias and external canvas link', async () => {
     await renderWorkspace('/usage-logs/drawing')
-    expect(screen.getByRole('button', { name: /Task Logs/ })).toBeVisible()
+    expect(screen.getByRole('link', { name: 'Task Logs' })).toHaveAttribute(
+      'aria-current',
+      'page'
+    )
     expect(
-      screen.getByRole('link', { name: /Infinite Canvas/ })
+      screen.getByRole('link', { name: 'Infinite Canvas' })
     ).toHaveAttribute('target', '_blank')
-    expect(
-      screen.getByRole('navigation', { name: 'Workspace pages' })
-    ).not.toHaveClass('overflow-x-auto')
   })
-  it('uses a compact current-page menu on mobile and retains every destination', async () => {
+  it('opens a mobile drawer and dismisses it on Escape or navigation', async () => {
     vi.stubGlobal('innerWidth', 390)
     await renderWorkspace('/keys')
-    const menu = screen.getByRole('button', { name: 'API Keys' })
-    expect(menu).toHaveAttribute('aria-expanded', 'false')
-    await userEvent.setup().click(menu)
+    const user = userEvent.setup()
+    const toggle = screen.getByRole('button', { name: 'Open menu' })
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    await user.click(toggle)
+    const drawer = await screen.findByRole('dialog')
     expect(
-      await screen.findByRole('menuitem', { name: 'API Keys' })
+      within(drawer).getByRole('link', { name: 'API Keys' })
     ).toHaveAttribute('aria-current', 'page')
-    expect(screen.getByRole('menuitem', { name: 'Wallet' })).toBeVisible()
     expect(
-      screen.getByRole('menuitem', { name: 'Infinite Canvas' })
-    ).toHaveAttribute('target', '_blank')
-  })
-  it('uses the compact menu on narrower desktops with all destinations reachable', async () => {
-    const originalMatchMedia = window.matchMedia
-    vi.spyOn(window, 'matchMedia').mockImplementation((query) => ({
-      ...originalMatchMedia(query),
-      matches: query === '(max-width: 1279px)',
-    }))
-    await renderWorkspace('/keys')
-    await userEvent
-      .setup()
-      .click(screen.getByRole('button', { name: 'API Keys' }))
-    expect(
-      await screen.findByRole('menuitem', { name: 'Model library' })
-    ).toBeVisible()
-    expect(screen.getByRole('menuitem', { name: 'Wallet' })).toBeVisible()
+      within(drawer).getByRole('link', { name: 'Model library' })
+    ).toHaveAttribute('href', '/pricing')
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    await user.click(toggle)
+    await user.click(screen.getByRole('link', { name: 'Wallet' }))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 
   it('hides the canvas entry when integration is disabled', async () => {

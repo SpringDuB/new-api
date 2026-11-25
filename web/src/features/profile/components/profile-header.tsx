@@ -21,6 +21,7 @@ import { ArrowUpRight } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { CopyButton } from '@/components/copy-button'
+import { StolasLogo } from '@/components/stolas-logo'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useIsSidebarModuleVisible } from '@/hooks/use-sidebar-config'
@@ -73,12 +74,7 @@ export function ProfileHeader(props: ProfileHeaderProps) {
       aria-label={t('Account details')}
     >
       <div className='stolas-profile-account-mark'>
-        <img
-          src='/stolas/mark-orange.png'
-          alt='Stolas'
-          width={32}
-          height={32}
-        />
+        <StolasLogo variant='mark' className='size-8' />
         <span>{t('Your Stolas account')}</span>
       </div>
       <div className='stolas-profile-person'>

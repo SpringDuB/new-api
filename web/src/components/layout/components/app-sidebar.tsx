@@ -16,62 +16,80 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
+import { Link } from '@tanstack/react-router'
+import { Library } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 
-import { Sidebar, SidebarContent, SidebarRail } from '@/components/ui/sidebar'
-import { useLayout } from '@/context/layout-provider'
-import { useSidebarView } from '@/hooks/use-sidebar-view'
-import { MOTION_TRANSITION, MOTION_VARIANTS } from '@/lib/motion'
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarHeader,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarTrigger,
+  useSidebar,
+} from '@/components/ui/sidebar'
+import { useTopNavLinks } from '@/hooks/use-top-nav-links'
 
+import type { ResolvedSidebarView } from '../types'
+import { ModelLibraryNavigation } from './model-library-navigation'
 import { NavGroup } from './nav-group'
 import { SidebarViewHeader } from './sidebar-view-header'
+import { SystemBrand } from './system-brand'
 
-/**
- * Application sidebar.
- *
- * Adopts the Vercel / Cloudflare "drill-in" pattern: the URL drives
- * which sidebar *view* is rendered. Clicking a top-level entry like
- * `System Settings` swaps the sidebar to a contextual workspace —
- * with a `← Back to Dashboard` affordance — instead of stacking the
- * sub-navigation inside the root tree.
- *
- * Architecture:
- *   - View resolution + filtering: {@link useSidebarView}
- *   - View registry: `layout/lib/sidebar-view-registry.ts`
- *   - Per-view header: {@link SidebarViewHeader}
- *
- * Adding a new nested view only requires registering a {@link SidebarView}
- * in the registry; this component requires no changes.
- */
-export function AppSidebar() {
-  const { collapsible, variant } = useLayout()
-  const { key, view, navGroups } = useSidebarView()
-  const shouldReduce = useReducedMotion()
+export function AppSidebar({
+  navigation,
+}: {
+  navigation: ResolvedSidebarView
+}) {
+  const { t } = useTranslation()
+  const { isMobile, state, setOpenMobile } = useSidebar()
+  const compact = !isMobile && state === 'collapsed'
+  const library = useTopNavLinks().find(
+    (link) => link.href === '/pricing' && !link.disabled
+  )
 
   return (
-    <Sidebar collapsible={collapsible} variant={variant}>
-      {view && <SidebarViewHeader view={view} />}
-
-      <SidebarContent className='py-2'>
-        <AnimatePresence mode='wait' initial={false}>
-          <motion.div
-            key={key}
-            initial={
-              shouldReduce ? false : MOTION_VARIANTS.sidebarSlide.initial
-            }
-            animate={MOTION_VARIANTS.sidebarSlide.animate}
-            exit={shouldReduce ? undefined : MOTION_VARIANTS.sidebarSlide.exit}
-            transition={MOTION_TRANSITION.fast}
-            className='flex flex-col'
-          >
-            {navGroups.map((props) => (
-              <NavGroup key={props.id || props.title} {...props} />
-            ))}
-          </motion.div>
-        </AnimatePresence>
+    <Sidebar collapsible='icon' className='top-0 h-dvh'>
+      <SidebarHeader className='stolas-rail-brand flex-row items-center justify-between'>
+        <SystemBrand variant='inline' compact={compact} />
+        {isMobile && <SidebarTrigger />}
+      </SidebarHeader>
+      {navigation.view && <SidebarViewHeader view={navigation.view} />}
+      <SidebarContent className='stolas-rail-scroll'>
+        <nav aria-label={t('Workspace pages')} className='stolas-rail-nav'>
+          {navigation.navGroups.map((group) => (
+            <NavGroup key={group.id ?? group.title} {...group} />
+          ))}
+        </nav>
       </SidebarContent>
-
-      <SidebarRail />
+      {library && (
+        <SidebarFooter className='stolas-rail-footer'>
+          {isMobile ? (
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  render={
+                    <Link to='/pricing' onClick={() => setOpenMobile(false)} />
+                  }
+                >
+                  <Library aria-hidden='true' />
+                  <span>{library.title}</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          ) : (
+            <ModelLibraryNavigation
+              title={library.title}
+              side='right'
+              compact={compact}
+              className='stolas-rail-library'
+            />
+          )}
+        </SidebarFooter>
+      )}
     </Sidebar>
   )
 }

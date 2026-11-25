@@ -130,14 +130,8 @@ export function AppHeader({
     <header className='stolas-masthead shrink-0'>
       <div className='stolas-masthead-inner'>
         <div className='min-w-0'>
-          <SystemBrand variant='inline' />
+          {leftContent ?? <SystemBrand variant='inline' />}
         </div>
-
-        {leftContent ? (
-          <div className='stolas-masthead-navigation min-w-0'>
-            {leftContent}
-          </div>
-        ) : null}
 
         {rightContent ?? (
           <div className='stolas-masthead-tools flex shrink-0 items-center gap-1'>
