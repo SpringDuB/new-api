@@ -4,13 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
-	"fmt"
 	"maps"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"slices"
-	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -66,12 +64,12 @@ func yuanxiangHook(t *testing.T, plugin *jsplugin.LoadedPlugin, hook string, arg
 
 func TestYuanxiangCanvasMappingAndBilling(t *testing.T) {
 	plugin := loadYuanxiangPlugin(t)
-	ctx := yuanxiangContext("Wan 3.0 ·  官方直连 · 特价按秒-YX", map[string]any{"model": "Wan 3.0 ·  官方直连 · 特价按秒-YX", "prompt": "A paper boat", "resolution_name": "720p", "seconds": "5", "size": "16:9"})
+	ctx := yuanxiangContext("seedance-2-5-per-request", map[string]any{"model": "seedance-2-5-per-request", "prompt": "A paper boat", "resolution_name": "720p", "seconds": "5", "size": "16:9"})
 	submit := yuanxiangHook(t, plugin, "buildSubmitRequest", ctx)
 	assert.Equal(t, "https://yuanxiang.example/v1/videos", submit["url"])
-	assert.NotContains(t, submit, "model", "the pinned billing identity stays suffixed")
+	assert.NotContains(t, submit, "model", "the submit hook keeps the pinned billing identity")
 	body := submit["body"].(map[string]any)
-	assert.Equal(t, "Wan 3.0 ·  官方直连 · 特价按秒", body["model"])
+	assert.Equal(t, "SD 2.5 · 特价按次", body["model"])
 	assert.Equal(t, float64(5), body["duration"])
 	assert.Equal(t, "720p", body["resolution"])
 	assert.Equal(t, "16:9", body["ratio"])
@@ -90,216 +88,175 @@ func TestYuanxiangCanvasMappingAndBilling(t *testing.T) {
 	ctx["usagePurpose"] = "billing_ratios"
 	assert.Equal(t, map[string]any{"requests": float64(1)}, yuanxiangHook(t, plugin, "extractUsage", ctx))
 	delete(ctx, "usagePurpose")
-	ctx["upstreamModel"] = "MiniMax H3 · 特价按秒"
+	ctx["upstreamModel"] = "seedance-2-5-per-request"
 	ctx["model"] = "canvas-custom-YX"
-	assert.Equal(t, "MiniMax H3 · 特价按秒", yuanxiangHook(t, plugin, "buildSubmitRequest", ctx)["body"].(map[string]any)["model"])
+	assert.Equal(t, "SD 2.5 · 特价按次", yuanxiangHook(t, plugin, "buildSubmitRequest", ctx)["body"].(map[string]any)["model"])
 	ctx["upstream"] = map[string]any{"kind": "new_api"}
 	gateway := yuanxiangHook(t, plugin, "buildSubmitRequest", ctx)
 	assert.Equal(t, "https://yuanxiang.example/yuanxiang/v1/videos", gateway["url"])
-	assert.Equal(t, "MiniMax H3 · 特价按秒-YX", gateway["body"].(map[string]any)["model"])
+	assert.Equal(t, "seedance-2-5-per-request", gateway["body"].(map[string]any)["model"])
 }
 
-func TestYuanxiangModelFamiliesAndImageProtocol(t *testing.T) {
+func TestYuanxiangHistoricalModelsCanOnlyBeQueried(t *testing.T) {
 	plugin := loadYuanxiangPlugin(t)
-	videoModels := []string{
-		"SD 2.5 · 官方满血按秒", "SD 2.0 · 官转满血68折（返官链）",
-		"SD 2.5 · 特价按次", "Sd 2.0 · 特价按次 · 漫剧短剧专线", "SD 2.0 · 特价按次 · 电商专线",
-		"SD 2.0 FAST · 特价按秒 · 稳定冲量", "Sd 2.0 · 即梦满血按秒专线", "Sd 2.5 · 即梦满血按秒专线",
-		"GK-video-3.5", "Muse · 特价按次 ·【原生】", "MiniMax H3 · 特价按秒",
-		"MiniMax H3 · 特价按次（慢线）", "Wan 3.0 ·  官方直连 · 特价按秒",
-	}
-	for _, model := range videoModels {
-		t.Run(model, func(t *testing.T) {
-			requestBody := map[string]any{"prompt": "A boat"}
-			if model == "GK-video-3.5" {
-				requestBody["image_ids"] = []string{"uploaded-image"}
-			}
-			ctx := yuanxiangContext(model+"-YX", requestBody)
-			for _, upstream := range []string{"vendor", "new_api"} {
-				ctx["upstream"] = map[string]any{"kind": upstream}
-				body := yuanxiangHook(t, plugin, "buildSubmitRequest", ctx)["body"].(map[string]any)
-				wantModel := model
-				if upstream == "new_api" {
-					wantModel += "-YX"
-				}
-				assert.Equal(t, wantModel, body["model"])
-				options, _ := body["options"].(map[string]any)
-				if model == "SD 2.0 · 官转满血68折（返官链）" {
-					assert.Equal(t, "标准", options["version"])
-				} else {
-					assert.NotContains(t, options, "version", "use the platform's default model version on %s", upstream)
-				}
-				assert.NotContains(t, body, "version")
-			}
-			schema, _ := plugin.Meta.UsageForModels(model + "-YX")
-			assert.Equal(t, []string{"duration_tier", "reference_seconds", "requests", "resolution", "seconds", "tokens", "video_input"}, slices.Sorted(maps.Keys(schema)))
-		})
-	}
-	assert.NotContains(t, plugin.Meta.Models, "SD 2.0 满血版 按秒-YX")
-	assert.NotContains(t, plugin.Meta.Models, "SD 2.5 · 官方直连（满血版）按秒-YX")
-	assert.NotContains(t, plugin.Meta.Models, "MiniMax H3 · 特价按次-YX")
 	for _, tc := range []struct {
-		model, quality string
+		model, path string
 	}{
-		{"GT Image 2.5 · 特价按张", "low"},
-		{"GT Image 2.6 Flare", "auto"},
-		{"GT Image 2 · OpenAI", "low"},
-		{"Banana 2", ""},
+		{"SD 2.5 · 官方满血按秒", "videos"},
+		{"SD 2.0 · 官转满血68折（返官链）", "videos"},
+		{"SD 2.5 · 特价按次", "videos"},
+		{"Sd 2.0 · 特价按次 · 漫剧短剧专线", "videos"},
+		{"SD 2.0 · 特价按次 · 电商专线", "videos"},
+		{"SD2.0 · 即梦满血版", "videos"},
+		{"SD 2.0 FAST · 特价按秒 · 稳定冲量", "videos"},
+		{"Sd 2.0 · 即梦满血按秒专线", "videos"},
+		{"Sd 2.5 · 即梦满血按秒专线", "videos"},
+		{"GK-video-3.5", "videos"},
+		{"Muse · 特价按次 ·【原生】", "videos"},
+		{"MiniMax H3 · 特价按秒", "videos"},
+		{"MiniMax H3 · 特价按次（慢线）", "videos"},
+		{"Wan 3.0 ·  官方直连 · 特价按秒", "videos"},
+		{"GT Image 2.5", "images"},
+		{"GT Image 2.5 · 特价按张", "images"},
+		{"GT Image 2.6 Flare", "images"},
+		{"GT Image 2 · OpenAI", "images"},
+		{"Banana 2", "images"},
 	} {
 		t.Run(tc.model, func(t *testing.T) {
-			ctx := yuanxiangContext(tc.model+"-YX", map[string]any{"prompt": "A boat"})
-			body := yuanxiangHook(t, plugin, "buildSubmitRequest", ctx)["body"].(map[string]any)
-			assert.Equal(t, tc.model, body["model"])
-			assert.Equal(t, "1k", body["resolution"])
-			if tc.quality == "" {
-				assert.NotContains(t, body, "quality")
-			} else {
-				assert.Equal(t, tc.quality, body["quality"])
+			for _, id := range []string{tc.model, tc.model + "-YX"} {
+				ctx := yuanxiangContext(id, map[string]any{"model": id, "prompt": "boat"})
+				for _, hook := range []string{"buildSubmitRequest", "extractUsage"} {
+					_, err := plugin.Engine.Call(t.Context(), hook, ctx)
+					require.ErrorContains(t, err, "unsupported Yuanxiang model for new tasks")
+				}
+				ctx["taskId"] = "historical/id"
+				query := yuanxiangHook(t, plugin, "buildQueryRequest", ctx)
+				assert.Equal(t, "https://yuanxiang.example/v1/"+tc.path+"/historical%2Fid", query["url"])
+				ctx["upstream"] = map[string]any{"kind": "new_api"}
+				query = yuanxiangHook(t, plugin, "buildQueryRequest", ctx)
+				assert.Equal(t, "https://yuanxiang.example/yuanxiang/v1/"+tc.path+"/historical%2Fid", query["url"])
 			}
-			facts := yuanxiangHook(t, plugin, "extractUsage", ctx)
-			assert.Equal(t, float64(1), facts["image_count"])
-			schema, _ := plugin.Meta.UsageForModels(tc.model + "-YX")
-			assert.Equal(t, []string{"image_count", "resolution"}, slices.Sorted(maps.Keys(schema)))
 		})
 	}
-	for _, imageIDs := range [][]string{nil, {"first", "second"}} {
-		_, err := plugin.Engine.Call(t.Context(), "buildSubmitRequest", yuanxiangContext("GK-video-3.5-YX", map[string]any{
-			"prompt": "A boat", "image_ids": imageIDs,
-		}))
-		require.Error(t, err)
-	}
-	for _, model := range []string{"GT Image 2.5"} {
-		t.Run(model, func(t *testing.T) {
-			ctx := yuanxiangContext(model+"-YX", map[string]any{"prompt": "A boat", "n": 1, "size": "16:9", "resolution_name": "4K", "quality": "high"})
-			submit := yuanxiangHook(t, plugin, "buildSubmitRequest", ctx)
-			assert.Equal(t, "https://yuanxiang.example/v1/images/generations", submit["url"])
-			body := submit["body"].(map[string]any)
-			assert.Equal(t, model, body["model"])
-			assert.Equal(t, "16:9", body["ratio"])
-			assert.NotContains(t, body, "options", "GT Image 2.5 requests must not inject model options")
-			facts := yuanxiangHook(t, plugin, "extractUsage", ctx)
-			assert.Equal(t, float64(1), facts["image_count"])
-			assert.Equal(t, "4k", facts["resolution"])
-			assert.Equal(t, "high", body["quality"])
-			assert.Equal(t, "low", facts["quality"], "retired conditions retain their first declared value for stored expressions")
-			schema, _ := plugin.Meta.UsageForModels(model + "-YX")
-			assert.Equal(t, []string{"image_count", "resolution"}, slices.Sorted(maps.Keys(schema)))
-			result, err := plugin.Engine.CallPath(t.Context(), "protocols", []string{"openai_image", "render"}, map[string]any{}, map[string]any{"status": "SUCCESS", "data": map[string]any{"data": []any{map[string]any{"url": "https://cdn.example/image.png"}}}})
-			require.NoError(t, err)
-			encoded, err := common.Marshal(result)
-			require.NoError(t, err)
-			assert.JSONEq(t, `{"data":[{"url":"https://cdn.example/image.png"}]}`, string(encoded))
-		})
-	}
-	for _, model := range plugin.Meta.Models {
-		assert.True(t, strings.HasSuffix(model, "-YX"), model)
-	}
-	assert.NotContains(t, plugin.Meta.Models, "wan3.0-video-nsfw-YX", "the user's example is not an upstream model")
-	assert.Len(t, plugin.Meta.Models, len(videoModels)+5)
+	value, err := plugin.Engine.CallPath(t.Context(), "native", []string{"task"}, map[string]any{}, map[string]any{
+		"task_id": "old-image", "status": "SUCCESS", "data": map[string]any{"data": []any{map[string]any{"url": "https://cdn.example/image.png"}}},
+	})
+	require.NoError(t, err)
+	encoded, err := common.Marshal(value)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"id":"old-image","status":"succeeded","data":[{"url":"https://cdn.example/image.png"}]}`, string(encoded))
 }
 
 func TestYuanxiangSD25PerItemStableRoute(t *testing.T) {
 	plugin := loadYuanxiangPlugin(t)
-	const model = "SD 2.5 · 特价按次-YX"
-	t.Run("defaults to the stable route and meters its resolution", func(t *testing.T) {
-		ctx := yuanxiangContext(model, map[string]any{"prompt": "boat"})
-		body := yuanxiangHook(t, plugin, "buildSubmitRequest", ctx)["body"].(map[string]any)
-		assert.Equal(t, "SD 2.5 · 特价按次", body["model"])
-		assert.Equal(t, "route:stable", body["channel"])
-		assert.Equal(t, "720p", body["resolution"])
-		assert.Equal(t, float64(5), body["duration"])
-		facts := yuanxiangHook(t, plugin, "extractUsage", ctx)
-		assert.Equal(t, "720p", facts["resolution"])
-		assert.Equal(t, float64(1), facts["requests"])
-	})
-	t.Run("accepts 30 seconds and 10 reference images", func(t *testing.T) {
-		images := make([]string, 10)
-		for i := range images {
-			images[i] = fmt.Sprintf("image-%d", i)
-		}
-		ctx := yuanxiangContext(model, map[string]any{"prompt": "boat", "seconds": "30", "image_ids": images})
-		body := yuanxiangHook(t, plugin, "buildSubmitRequest", ctx)["body"].(map[string]any)
-		assert.Equal(t, "route:stable", body["channel"])
-		assert.Equal(t, float64(30), body["duration"])
-		assert.Len(t, body["image_ids"], 10)
-		assert.Equal(t, "30", yuanxiangHook(t, plugin, "extractUsage", ctx)["duration_tier"])
-	})
-	t.Run("preserves an explicitly selected 1080p route", func(t *testing.T) {
-		ctx := yuanxiangContext(model, map[string]any{"prompt": "boat", "metadata": map[string]any{"channel": "route:tejia-y", "duration": 12}})
-		body := yuanxiangHook(t, plugin, "buildSubmitRequest", ctx)["body"].(map[string]any)
-		assert.Equal(t, "route:tejia-y", body["channel"])
-		assert.Equal(t, "1080p", body["resolution"])
-		assert.Equal(t, float64(12), body["duration"])
-	})
-	for _, tc := range []struct {
-		name string
-		body map[string]any
-	}{
-		{"unsupported duration", map[string]any{"metadata": map[string]any{"duration": 12}}},
-		{"unsupported resolution", map[string]any{"channel": "Sd 2.5-720p-30s（10图稳定）", "resolution": "1080p"}},
-		{"too many images", map[string]any{"image_ids": slices.Repeat([]string{"image"}, 11)}},
-		{"reference audio", map[string]any{"audio_b64s": []string{"YXVkaW8="}}},
-		{"reference video", map[string]any{"video_b64s": []string{"dmlkZW8="}}},
+	const model = "seedance-2-5-per-request"
+	ctx := yuanxiangContext(model, map[string]any{"prompt": "boat", "seconds": "30", "image_ids": slices.Repeat([]string{"uploaded-image"}, 30)})
+	body := yuanxiangHook(t, plugin, "buildSubmitRequest", ctx)["body"].(map[string]any)
+	assert.Equal(t, "line:stable-longsupply-item", body["channel"])
+	assert.Equal(t, float64(30), body["duration"])
+	assert.Len(t, body["image_ids"], 30)
+	facts := yuanxiangHook(t, plugin, "extractUsage", ctx)
+	assert.Equal(t, "30", facts["duration_tier"])
+	assert.Equal(t, "720p", facts["resolution"])
+	assert.Equal(t, float64(1), facts["requests"])
+
+	for _, tc := range []map[string]any{
+		{"duration": 31}, {"resolution": "1080p"}, {"image_ids": slices.Repeat([]string{"uploaded-image"}, 31)},
+		{"metadata": map[string]any{"channel": "route:tejia-y"}},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			tc.body["prompt"] = "boat"
-			ctx := yuanxiangContext(model, tc.body)
-			for _, hook := range []string{"extractUsage", "buildSubmitRequest"} {
-				_, err := plugin.Engine.Call(t.Context(), hook, ctx)
-				require.ErrorContains(t, err, "route:stable", hook)
-			}
-		})
+		tc["prompt"] = "boat"
+		ctx := yuanxiangContext(model, tc)
+		for _, hook := range []string{"extractUsage", "buildSubmitRequest"} {
+			_, err := plugin.Engine.Call(t.Context(), hook, ctx)
+			require.Error(t, err, "%s: %v", hook, tc)
+		}
 	}
 }
 
-func TestYuanxiangResolutionBranchesRemainIndependent(t *testing.T) {
-	plugin := loadYuanxiangPlugin(t)
+func TestYuanxiangSharesSeedancePerRequestModelsWithLecAPI(t *testing.T) {
+	registry := jsplugin.NewRegistry()
+	for _, key := range []string{"lecapi", "yuanxiang"} {
+		source, err := builtinplugins.Source(key)
+		require.NoError(t, err)
+		_, err = registry.RegisterFactory(source, jsplugin.Options{Key: key})
+		require.NoError(t, err)
+	}
+	const sd20, sd25 = "seedance-2-0-per-request", "seedance-2-5-per-request"
+	const modelPath = "/v1/videos"
+	generation := registry.Generation()
+	yuanxiang, ok := generation.Get("yuanxiang")
+	require.True(t, ok)
+	assert.ElementsMatch(t, []string{sd20, sd25}, yuanxiang.Meta.Models)
+	assert.Empty(t, generation.LookupEndpointCandidates("POST", "/v1/images/generations", "GT Image 2.5-YX"))
+	for _, model := range []string{sd20, sd25} {
+		bindings := generation.LookupEndpointCandidates("POST", modelPath, model)
+		require.Len(t, bindings, 2)
+		assert.Equal(t, "lecapi", bindings[0].Plugin.Meta.Key)
+		assert.Equal(t, "yuanxiang", bindings[1].Plugin.Meta.Key)
+	}
 	for _, tc := range []struct {
-		model, quantity, resolution, fallback, quality string
+		public, wire, line, ratio, quality string
+		seconds                            int
+		price                              float64
 	}{
-		{"Wan 3.0 ·  官方直连 · 特价按秒-YX", "requests", "720p", "1080p", "default"},
-		{"GT Image 2.5-YX", "image_count", "4k", "2k", "low"},
+		{sd20, "Sd 2.0 · 特价按次 · 漫剧短剧专线", "", "4:3", "", 10, 2.9},
+		{sd20, "SD 2.0 · 特价按次 · 电商专线", "", "9:16", "真人模特", 15, 2.9},
+		{sd20, "SD2.0 · 即梦满血版", "", "16:9", "", 12, 2.9},
+		{sd25, "SD 2.5 · 特价按次", "line:stable-longsupply-item", "1:1", "", 30, 6},
+		{sd25, "SD 2.5 · 特价按次", "line:economy-sd25", "21:9", "", 4, 6},
 	} {
-		t.Run(tc.model, func(t *testing.T) {
-			schema, _ := plugin.Meta.UsageForModels(tc.model)
-			assert.True(t, schema["resolution"].AllowCustom)
-			expression := `u("resolution") == "` + tc.resolution + `" ? tier("resolution", u("` + tc.quantity + `") * 0.2) : tier("fallback", u("` + tc.quantity + `") * 0.1)`
-			require.NoError(t, billing_setting.SmokeTestTaskExpr(expression, schema))
-			for _, field := range []string{"quality", "version", "channel", "has_reference_video"} {
-				assert.NotContains(t, schema, field)
-				require.Error(t, billing_setting.SmokeTestTaskExpr(`u("`+field+`") == "custom" ? tier("custom", 1) : tier("base", 0.1)`, schema))
+		t.Run(tc.wire+"/"+tc.line, func(t *testing.T) {
+			input := map[string]any{"model": tc.public, "prompt": "boat", "duration": tc.seconds, "aspect_ratio": tc.ratio}
+			if tc.quality != "" {
+				input["quality"] = tc.quality
 			}
-			for _, tier := range []struct {
-				resolution, name string
-				cost             float64
-			}{
-				{tc.resolution, "resolution", 0.2},
-				{tc.fallback, "fallback", 0.1},
-			} {
-				for _, customOptions := range []bool{false, true} {
-					body := map[string]any{"prompt": "boat", "resolution_name": strings.ToUpper(tier.resolution)}
-					if customOptions {
-						body["quality"], body["version"], body["channel"] = "high", "custom", "alternate"
-						if tc.quantity == "requests" {
-							body["seconds"], body["video_b64s"] = 15, []string{"unmeasured-reference"}
-						}
-					}
-					ctx := yuanxiangContext(tc.model, body)
-					facts := yuanxiangHook(t, plugin, "extractUsage", ctx)
-					cost, trace, err := billingexpr.RunExprWithRequest(expression, billingexpr.TokenParams{}, billingexpr.RequestInput{Usage: facts})
-					require.NoError(t, err)
-					assert.InDelta(t, tier.cost, cost, 1e-12)
-					assert.Equal(t, tier.name, trace.MatchedTier)
-					assert.Equal(t, tc.quality, facts["quality"])
-					assert.Equal(t, "default", facts["version"])
-					assert.Equal(t, "auto", facts["channel"])
-					if tc.quantity == "requests" {
-						assert.Equal(t, fmt.Sprint(facts["seconds"]), facts["duration_tier"])
-						assert.Equal(t, false, facts["has_reference_video"])
-					}
-				}
+			ctx := yuanxiangContext(tc.public, input)
+			request := yuanxiangHook(t, yuanxiang, "buildSubmitRequest", ctx)["body"].(map[string]any)
+			assert.Equal(t, tc.wire, request["model"])
+			assert.Equal(t, float64(tc.seconds), request["duration"])
+			if tc.line != "" {
+				assert.Equal(t, tc.line, request["channel"])
 			}
+			facts := yuanxiangHook(t, yuanxiang, "extractUsage", ctx)
+			defaults, found := yuanxiang.Meta.DefaultsForModel(tc.public)
+			require.True(t, found)
+			cost, _, err := billingexpr.RunExprWithRequest(defaults.BillingExpr, billingexpr.TokenParams{}, billingexpr.RequestInput{Usage: facts})
+			require.NoError(t, err)
+			assert.InDelta(t, tc.price, cost*7.3, 1e-12)
+			ctx["upstream"] = map[string]any{"kind": "new_api"}
+			chained := yuanxiangHook(t, yuanxiang, "buildSubmitRequest", ctx)["body"].(map[string]any)
+			assert.Equal(t, tc.public, chained["model"])
+			assert.NotContains(t, chained, "channel")
+			_, err = yuanxiang.Engine.CallPath(t.Context(), "protocols", []string{"openai_video", "decodeRequest"}, map[string]any{
+				"model": tc.public, "body": map[string]any{"kind": "json", "value": chained},
+			})
+			require.NoError(t, err)
 		})
+	}
+	lecapi, ok := generation.Get("lecapi")
+	require.True(t, ok)
+	for _, tc := range []struct {
+		model  string
+		fields map[string]any
+		accept *jsplugin.LoadedPlugin
+		reject *jsplugin.LoadedPlugin
+	}{
+		{sd25, map[string]any{"resolution": "480p"}, nil, lecapi},
+		{sd25, map[string]any{"resolution": "480p"}, nil, yuanxiang},
+		{sd20, map[string]any{"quality": "真人模特", "duration": 10}, yuanxiang, lecapi},
+		{sd20, map[string]any{"videos": []string{"https://media.example/ref.mp4"}, "images": []string{"https://media.example/ref.png"}, "duration": 5}, lecapi, yuanxiang},
+		{sd25, map[string]any{"channel": "arbitrary"}, nil, yuanxiang},
+		{sd20, map[string]any{"options": map[string]any{"quality": "满血9图"}}, nil, yuanxiang},
+	} {
+		input := map[string]any{"model": tc.model, "prompt": "boat"}
+		maps.Copy(input, tc.fields)
+		ctx := map[string]any{"model": tc.model, "body": map[string]any{"kind": "json", "value": input}}
+		_, err := tc.reject.Engine.CallPath(t.Context(), "protocols", []string{"openai_video", "decodeRequest"}, ctx)
+		require.Error(t, err)
+		if tc.accept != nil {
+			_, err = tc.accept.Engine.CallPath(t.Context(), "protocols", []string{"openai_video", "decodeRequest"}, ctx)
+			require.NoError(t, err)
+		}
 	}
 }
 
@@ -316,76 +273,21 @@ func TestYuanxiangRejectsConflictingAndUnboundedParameters(t *testing.T) {
 	} {
 		body["prompt"] = "boat"
 		for _, hook := range []string{"buildSubmitRequest", "extractUsage"} {
-			_, err := plugin.Engine.Call(t.Context(), hook, yuanxiangContext("Wan 3.0 ·  官方直连 · 特价按秒-YX", body))
+			_, err := plugin.Engine.Call(t.Context(), hook, yuanxiangContext("seedance-2-5-per-request", body))
 			require.Error(t, err, "%s: %v", hook, body)
 		}
 	}
-	ctx := yuanxiangContext("Wan 3.0 ·  官方直连 · 特价按秒-YX", map[string]any{"prompt": "boat", "metadata": map[string]any{"seconds": "8", "size": "9:16", "resolution_name": "1080P", "options": map[string]any{"version": "Mini", "generate_audio": false}}})
+	ctx := yuanxiangContext("seedance-2-5-per-request", map[string]any{"prompt": "boat", "metadata": map[string]any{"seconds": "8", "size": "9:16", "resolution_name": "720P"}})
 	body := yuanxiangHook(t, plugin, "buildSubmitRequest", ctx)["body"].(map[string]any)
 	assert.Equal(t, float64(8), body["duration"])
 	assert.Equal(t, "9:16", body["ratio"])
-	assert.Equal(t, "1080p", body["resolution"])
-	assert.Equal(t, "Mini", body["options"].(map[string]any)["version"])
-}
-
-func TestYuanxiangImageSizeMapping(t *testing.T) {
-	plugin := loadYuanxiangPlugin(t)
-	for _, tc := range []struct {
-		name       string
-		fields     map[string]any
-		ratio      string
-		resolution string
-	}{
-		{"reported request", map[string]any{"size": "1824x1024", "resolution": "1k", "n": 1, "output_format": "png"}, "16:9", "1k"},
-		{"portrait", map[string]any{"size": "1024x1824", "resolution": "2k"}, "9:16", "2k"},
-		{"square default resolution", map[string]any{"size": "1024x1024"}, "1:1", "1k"},
-		{"landscape", map[string]any{"size": "1536x1024", "resolution_name": "4K"}, "3:2", "4k"},
-		{"uppercase separator", map[string]any{"size": " 1824X1024 "}, "16:9", "1k"},
-		{"matching explicit ratio", map[string]any{"size": "1824x1024", "ratio": "16:9"}, "16:9", "1k"},
-		{"explicit ratio takes precedence", map[string]any{"size": "1824x1024", "ratio": "9:16"}, "9:16", "1k"},
-		{"nested explicit ratio takes precedence", map[string]any{"size": "1824x1024", "metadata": map[string]any{"aspect_ratio": "9:16"}}, "9:16", "1k"},
-		{"nested dimensions", map[string]any{"resolution": "2k", "metadata": map[string]any{"parameters": map[string]any{"size": "1024x1824"}}}, "9:16", "2k"},
-		{"resolution label", map[string]any{"size": "2K"}, "", "2k"},
-		{"documented request", map[string]any{"ratio": "1:1"}, "1:1", "1k"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			tc.fields["prompt"] = "A corgi wearing an astronaut helmet"
-			tc.fields["quality"] = "high"
-			ctx := yuanxiangContext("GT Image 2.5-YX", tc.fields)
-			body := yuanxiangHook(t, plugin, "buildSubmitRequest", ctx)["body"].(map[string]any)
-			assert.Equal(t, tc.resolution, body["resolution"])
-			assert.Equal(t, "high", body["quality"])
-			if tc.ratio == "" {
-				assert.NotContains(t, body, "ratio")
-			} else {
-				assert.Equal(t, tc.ratio, body["ratio"])
-			}
-			assert.NotContains(t, body, "size")
-			assert.NotContains(t, body, "options", "image size conversion must not inject model options")
-			facts := yuanxiangHook(t, plugin, "extractUsage", ctx)
-			assert.Equal(t, tc.resolution, facts["resolution"])
-			assert.Equal(t, "low", facts["quality"], "retired quality conditions retain their value for stored expressions")
-			assert.Equal(t, float64(1), facts["image_count"])
-		})
-	}
-	for _, fields := range []map[string]any{
-		{"size": "0x1024"}, {"size": "1024x0"}, {"size": "-1024x1024"},
-		{"size": "1024.5x1024"}, {"size": "99999999999999999999x1024"},
-		{"size": "1824x1024", "metadata": map[string]any{"size": "1024x1824"}},
-		{"size": "1824x1024", "resolution": "1k", "metadata": map[string]any{"resolution_name": "4k"}},
-	} {
-		fields["prompt"] = "A corgi wearing an astronaut helmet"
-		for _, hook := range []string{"buildSubmitRequest", "extractUsage"} {
-			_, err := plugin.Engine.Call(t.Context(), hook, yuanxiangContext("GT Image 2.5-YX", fields))
-			require.Error(t, err, "%s: %v", hook, fields)
-		}
-	}
+	assert.Equal(t, "720p", body["resolution"])
 }
 
 func TestYuanxiangReferenceBillingUsesMediaAndSkipsDisabledMeasurements(t *testing.T) {
 	plugin := loadYuanxiangPlugin(t)
 	video := base64.StdEncoding.EncodeToString(yueqiReferenceVideoFixture(t, 3.5))
-	ctx := yuanxiangContext("MiniMax H3 · 特价按秒-YX", map[string]any{"prompt": "boat", "video_b64s": []string{video}})
+	ctx := yuanxiangContext("seedance-2-5-per-request", map[string]any{"prompt": "boat", "video_b64s": []string{video}})
 	ctx["usageKeys"] = []string{"reference_seconds"}
 	assert.Equal(t, 3.5, yuanxiangHook(t, plugin, "extractUsage", ctx)["reference_seconds"], "bill the video track, not the longer audio track")
 	ctx["requestBody"] = map[string]any{"prompt": "boat", "video_b64s": []string{"not-a-video"}}
@@ -448,38 +350,37 @@ func TestYuanxiangDecodersReferencesAndArtifactRoutes(t *testing.T) {
 	signedURL := "https://media.example/reference.png?Expires=1794225387&OSSAccessKeyId=test-id&Signature=abc%2Bdef%3D"
 	for _, reference := range []any{map[string]any{"image_url": signedURL}, map[string]any{"image_url": map[string]any{"url": signedURL}}} {
 		value, err := plugin.Engine.CallPath(t.Context(), "protocols", []string{"openai_video", "decodeRequest"}, map[string]any{
-			"model": "MiniMax H3 · 特价按秒-YX",
-			"body":  map[string]any{"kind": "json", "value": map[string]any{"model": "MiniMax H3 · 特价按秒-YX", "prompt": "boat", "seconds": "5", "resolution_name": "720p", "size": "16:9", "input_reference": reference}},
+			"model": "seedance-2-5-per-request",
+			"body":  map[string]any{"kind": "json", "value": map[string]any{"model": "seedance-2-5-per-request", "prompt": "boat", "seconds": "5", "resolution_name": "720p", "size": "16:9", "input_reference": reference}},
 		})
 		require.NoError(t, err)
 		encoded, err := common.Marshal(value)
 		require.NoError(t, err)
 		var intent map[string]any
 		require.NoError(t, common.Unmarshal(encoded, &intent))
-		ctx := yuanxiangContext("MiniMax H3 · 特价按秒-YX", intent["requestBody"].(map[string]any))
+		ctx := yuanxiangContext("seedance-2-5-per-request", intent["requestBody"].(map[string]any))
 		submit := yuanxiangHook(t, plugin, "buildSubmitRequest", ctx)
 		assert.Equal(t, []any{signedURL}, submit["body"].(map[string]any)["image_urls"], "preserve encoded signatures and query parameters byte for byte")
 	}
 	for _, kind := range []string{"json", "multipart"} {
-		body := map[string]any{"kind": kind, "value": map[string]any{"model": "MiniMax H3 · 特价按秒-YX", "prompt": "boat", "seconds": "5", "size": "16:9"}}
+		body := map[string]any{"kind": kind, "value": map[string]any{"model": "seedance-2-5-per-request", "prompt": "boat", "seconds": "5", "size": "16:9"}}
 		if kind == "multipart" {
 			body = map[string]any{"kind": kind, "fields": map[string][]string{"prompt": {"boat"}, "seconds": {"5"}, "size": {"16:9"}, "metadata": {`{"resolution_name":"720p"}`}}}
 		}
-		value, err := plugin.Engine.CallPath(t.Context(), "protocols", []string{"openai_video", "decodeRequest"}, map[string]any{"model": "MiniMax H3 · 特价按秒-YX", "body": body})
+		value, err := plugin.Engine.CallPath(t.Context(), "protocols", []string{"openai_video", "decodeRequest"}, map[string]any{"model": "seedance-2-5-per-request", "body": body})
 		require.NoError(t, err)
 		encoded, err := common.Marshal(value)
 		require.NoError(t, err)
 		var intent map[string]any
 		require.NoError(t, common.Unmarshal(encoded, &intent))
-		assert.Equal(t, "MiniMax H3 · 特价按秒-YX", intent["model"])
+		assert.Equal(t, "seedance-2-5-per-request", intent["model"])
 		ctx := yuanxiangContext(intent["model"].(string), intent["requestBody"].(map[string]any))
 		assert.Equal(t, float64(5), yuanxiangHook(t, plugin, "buildSubmitRequest", ctx)["body"].(map[string]any)["duration"])
 	}
-	ctx := yuanxiangContext("GT Image 2.5-YX", map[string]any{"prompt": "boat", "image_ids": []string{"uploaded"}, "image_refs": []any{map[string]any{"url": "https://media.example/reference.png"}}})
+	ctx := yuanxiangContext("seedance-2-5-per-request", map[string]any{"prompt": "boat", "image_ids": []string{"uploaded"}, "image_refs": []any{map[string]any{"url": "https://media.example/reference.png"}}})
 	body := yuanxiangHook(t, plugin, "buildSubmitRequest", ctx)["body"].(map[string]any)
 	assert.Equal(t, []any{"uploaded"}, body["image_ids"])
 	assert.Equal(t, []any{"https://media.example/reference.png"}, body["image_urls"])
-	assert.Equal(t, "low", body["quality"], "match the actually available upstream API quality")
 	ctx = yuanxiangContext("MiniMax H3 · 特价按秒-YX", map[string]any{"prompt": "boat"})
 	ctx["artifactKey"], ctx["upstreamTaskId"] = "video", "private/id"
 	callCtx := jsplugin.WithFetcher(t.Context(), func(_ context.Context, request jsplugin.FetchRequest) (jsplugin.FetchResponse, error) {
@@ -549,7 +450,7 @@ func TestYuanxiangContentRefreshValidatesTaskAndResult(t *testing.T) {
 	}
 }
 
-func TestYuanxiangSoraMultipartUploadsBeforeVideoSubmission(t *testing.T) {
+func TestYuanxiangMultipartUploadsBeforeVideoSubmission(t *testing.T) {
 	plugin := loadYuanxiangPlugin(t)
 	var uploaded int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -576,8 +477,8 @@ func TestYuanxiangSoraMultipartUploadsBeforeVideoSubmission(t *testing.T) {
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", &input)
 	c.Request.Header.Set("Content-Type", writer.FormDataContentType())
-	c.Set("task_request", map[string]any{"model": "MiniMax H3 · 特价按秒-YX", "prompt": "boat", "seconds": "5", "resolution_name": "720p", "size": "16:9"})
-	info := &relaycommon.RelayInfo{OriginModelName: "MiniMax H3 · 特价按秒-YX", TaskRelayInfo: &relaycommon.TaskRelayInfo{}, ChannelMeta: &relaycommon.ChannelMeta{ChannelType: constant.ChannelTypeTaskPlugin, UpstreamModelName: "MiniMax H3 · 特价按秒-YX", ChannelBaseUrl: server.URL, ApiKey: "test-key"}}
+	c.Set("task_request", map[string]any{"model": "seedance-2-5-per-request", "prompt": "boat", "seconds": "5", "resolution_name": "720p", "size": "16:9"})
+	info := &relaycommon.RelayInfo{OriginModelName: "seedance-2-5-per-request", TaskRelayInfo: &relaycommon.TaskRelayInfo{}, ChannelMeta: &relaycommon.ChannelMeta{ChannelType: constant.ChannelTypeTaskPlugin, UpstreamModelName: "seedance-2-5-per-request", ChannelBaseUrl: server.URL, ApiKey: "test-key"}}
 	adaptor := taskplugin.New(plugin)
 	adaptor.Init(info)
 	require.Nil(t, adaptor.ValidateRequestAndSetAction(c, info))
@@ -585,7 +486,7 @@ func TestYuanxiangSoraMultipartUploadsBeforeVideoSubmission(t *testing.T) {
 	require.NoError(t, err)
 	var body map[string]any
 	require.NoError(t, common.DecodeJson(reader, &body))
-	assert.Equal(t, "MiniMax H3 · 特价按秒", body["model"])
+	assert.Equal(t, "SD 2.5 · 特价按次", body["model"])
 	assert.Equal(t, []any{"uploaded-image"}, body["image_ids"])
 	assert.Equal(t, []any{"dmlkZW8tYnl0ZXM="}, body["video_b64s"])
 	assert.Equal(t, []any{"YXVkaW8tYnl0ZXM="}, body["audio_b64s"])
@@ -595,173 +496,56 @@ func TestYuanxiangSoraMultipartUploadsBeforeVideoSubmission(t *testing.T) {
 	assert.Equal(t, 1, uploaded)
 }
 
-func TestYuanxiangDurationBranchesIndependentlyForEveryVideoModel(t *testing.T) {
+func TestYuanxiangDurationBranchesUseSubmittedSeconds(t *testing.T) {
 	plugin := loadYuanxiangPlugin(t)
-	const durationExpr = "u(\"duration_tier\") == \"10\" ? tier(\"10s\", u(\"requests\") * 2) : u(\"duration_tier\") == \"20\" ? tier(\"20s\", u(\"requests\") * 3) : tier(\"other\", u(\"requests\") * 1)"
-	const resolutionExpr = "u(\"resolution\") == \"720p\" ? tier(\"720p\", u(\"requests\") * 0.2) : tier(\"other\", u(\"requests\") * 0.4)"
-	var videos int
-	for _, modelName := range plugin.Meta.Models {
-		schema, _ := plugin.Meta.UsageForModels(modelName)
-		duration, video := schema["duration_tier"]
-		if !video {
-			assert.Contains(t, schema, "image_count")
-			continue
+	const expression = `u("duration_tier") == "10" ? tier("10s", u("requests") * 2) : u("duration_tier") == "20" ? tier("20s", u("requests") * 3) : tier("other", u("requests") * 1)`
+	for _, model := range plugin.Meta.Models {
+		schema, _ := plugin.Meta.UsageForModels(model)
+		assert.Equal(t, "10s", schema["duration_tier"].EnumLabels["10"]["en"])
+		assert.Equal(t, "20秒", schema["duration_tier"].EnumLabels["20"]["zh"])
+		require.NoError(t, billing_setting.SmokeTestTaskExpr(expression, schema))
+		for _, tc := range []struct {
+			seconds string
+			price   float64
+			tier    string
+		}{{"10", 2, "10s"}, {"12", 1, "other"}} {
+			ctx := yuanxiangContext(model, map[string]any{"prompt": "boat", "metadata": map[string]any{"duration": tc.seconds, "resolution_name": "720P"}})
+			facts := yuanxiangHook(t, plugin, "extractUsage", ctx)
+			assert.Equal(t, tc.seconds, facts["duration_tier"])
+			cost, trace, err := billingexpr.RunExprWithRequest(expression, billingexpr.TokenParams{}, billingexpr.RequestInput{Usage: facts})
+			require.NoError(t, err)
+			assert.Equal(t, tc.price, cost)
+			assert.Equal(t, tc.tier, trace.MatchedTier)
 		}
-		videos++
-		t.Run(modelName, func(t *testing.T) {
-			assert.True(t, duration.AllowCustom)
-			assert.Equal(t, "10s", duration.EnumLabels["10"]["en"])
-			assert.Equal(t, "20秒", duration.EnumLabels["20"]["zh"])
-			require.NoError(t, billing_setting.SmokeTestTaskExpr(durationExpr, schema))
-			require.NoError(t, billing_setting.SmokeTestTaskExpr(resolutionExpr, schema))
-			for _, tc := range []struct {
-				seconds int
-				cost    float64
-				tier    string
-			}{{10, 2, "10s"}, {20, 3, "20s"}, {12, 1, "other"}} {
-				for _, resolution := range []string{"720p", "1080p"} {
-					metadata := map[string]any{"duration": tc.seconds, "resolution_name": strings.ToUpper(resolution)}
-					if modelName == "SD 2.5 · 特价按次-YX" {
-						if resolution == "1080p" {
-							metadata["channel"] = "route:tejia-y"
-						} else if tc.seconds != 10 {
-							continue // These durations are unavailable on the model's 720p line.
-						}
-					}
-					requestBody := map[string]any{
-						"prompt":   "boat",
-						"metadata": metadata,
-					}
-					if modelName == "GK-video-3.5-YX" {
-						requestBody["image_ids"] = []string{"uploaded-image"}
-					}
-					ctx := yuanxiangContext(modelName, requestBody)
-					ctx["model"] = "local-alias"
-					facts := yuanxiangHook(t, plugin, "extractUsage", ctx)
-					body := yuanxiangHook(t, plugin, "buildSubmitRequest", ctx)["body"].(map[string]any)
-					assert.Equal(t, float64(tc.seconds), body["duration"])
-					assert.Equal(t, float64(tc.seconds), facts["seconds"])
-					assert.Equal(t, fmt.Sprint(tc.seconds), facts["duration_tier"])
-					assert.Equal(t, resolution, facts["resolution"])
-					cost, trace, err := billingexpr.RunExprWithRequest(durationExpr, billingexpr.TokenParams{}, billingexpr.RequestInput{Usage: facts})
-					require.NoError(t, err)
-					assert.Equal(t, tc.cost, cost, "duration tier is a per-request total, independent of resolution")
-					assert.Equal(t, tc.tier, trace.MatchedTier)
-					cost, _, err = billingexpr.RunExprWithRequest(resolutionExpr, billingexpr.TokenParams{}, billingexpr.RequestInput{Usage: facts})
-					require.NoError(t, err)
-					want := 0.2
-					if resolution == "1080p" {
-						want = 0.4
-					}
-					assert.Equal(t, want, cost, "resolution pricing is independent of the duration tier")
-					completion := yuanxiangHook(t, plugin, "extractUsageOnComplete", ctx, map[string]any{"status": "SUCCESS"}, map[string]any{"duration": 1, "resolution": "480p"})
-					assert.Empty(t, completion, "upstream echoes must preserve the frozen submission tier")
-				}
-			}
-		})
 	}
-	assert.Equal(t, 13, videos)
-	t.Run("Muse continuation normalizes to 20 seconds before billing", func(t *testing.T) {
-		ctx := yuanxiangContext("Muse · 特价按次 ·【原生】-YX", map[string]any{
-			"prompt": "boat", "seconds": 10, "video_b64s": []string{"unmeasured-reference"},
-		})
-		facts := yuanxiangHook(t, plugin, "extractUsage", ctx)
-		body := yuanxiangHook(t, plugin, "buildSubmitRequest", ctx)["body"].(map[string]any)
-		assert.Equal(t, float64(20), body["duration"])
-		assert.Equal(t, "20", facts["duration_tier"])
-		cost, _, err := billingexpr.RunExprWithRequest(durationExpr, billingexpr.TokenParams{}, billingexpr.RequestInput{Usage: facts})
-		require.NoError(t, err)
-		assert.Equal(t, float64(3), cost)
-	})
 }
 
 func TestYuanxiangTokenEstimatesMatchDoubao(t *testing.T) {
 	plugin := loadYuanxiangPlugin(t)
 	_, doubao := newDoubaoPlugin(t)
-	const expression = "tier(\"tokens\", u(\"tokens\") * 1 / 1000000)"
-	var videos int
-	for _, modelName := range plugin.Meta.Models {
-		schema, examples := plugin.Meta.UsageForModels(modelName)
-		if _, image := schema["image_count"]; image {
-			assert.NotContains(t, schema, "tokens")
-			continue
-		}
-		videos++
-		t.Run(modelName, func(t *testing.T) {
-			assert.Equal(t, "token", schema["tokens"].Unit)
-			assert.True(t, schema["tokens"].Optional)
-			require.NotEmpty(t, examples)
-			require.NoError(t, billing_setting.SmokeTestTaskExpr(expression, schema))
-			for _, tc := range []struct {
-				resolution string
-				seconds    int
-				tokens     float64
-			}{
-				{"480p", 5, 48037.5},
-				{"720p", 10, 216000},
-				{"1080p", 20, 972000},
-				{"4k", 5, 972000},
-			} {
-				metadata := map[string]any{"duration": tc.seconds, "resolution_name": strings.ToUpper(tc.resolution)}
-				if modelName == "SD 2.5 · 特价按次-YX" {
-					switch tc.resolution {
-					case "720p":
-					case "1080p":
-						metadata["channel"] = "route:tejia-y"
-					default:
-						continue
-					}
-				}
-				requestBody := map[string]any{
-					"prompt": "boat", "metadata": metadata,
-					"tokens": 0, "usage": map[string]any{"completion_tokens": 0},
-				}
-				if modelName == "GK-video-3.5-YX" {
-					requestBody["image_ids"] = []string{"uploaded-image"}
-				}
-				ctx := yuanxiangContext(modelName, requestBody)
-				ctx["model"] = "mapped-client-name"
-				facts := yuanxiangHook(t, plugin, "extractUsage", ctx)
-				assert.Equal(t, tc.tokens, facts["tokens"], "client-supplied usage cannot replace metered facts")
-				other := yuanxiangHook(t, doubao, "extractUsage", map[string]any{
-					"model":       "doubao-seedance-2-0-260128",
-					"requestBody": map[string]any{"seconds": tc.seconds, "metadata": map[string]any{"resolution": tc.resolution}},
-				})
-				assert.Equal(t, other["tokens"], facts["tokens"], "shared resolution tiers use the existing Doubao formula")
-			}
+	const expression = `tier("tokens", u("tokens") * 1 / 1000000)`
+	for _, model := range plugin.Meta.Models {
+		schema, examples := plugin.Meta.UsageForModels(model)
+		assert.Equal(t, "token", schema["tokens"].Unit)
+		assert.True(t, schema["tokens"].Optional)
+		require.NotEmpty(t, examples)
+		require.NoError(t, billing_setting.SmokeTestTaskExpr(expression, schema))
+		request := map[string]any{"prompt": "boat", "seconds": 10, "resolution": "720p"}
+		facts := yuanxiangHook(t, plugin, "extractUsage", yuanxiangContext(model, request))
+		assert.Equal(t, float64(216000), facts["tokens"])
+		other := yuanxiangHook(t, doubao, "extractUsage", map[string]any{
+			"model":       "doubao-seedance-2-0-260128",
+			"requestBody": map[string]any{"seconds": 10, "metadata": map[string]any{"resolution": "720p"}},
 		})
+		assert.Equal(t, other["tokens"], facts["tokens"])
 	}
-	assert.Equal(t, 13, videos)
-	for _, tc := range []struct {
-		resolution string
-		seconds    int
-		tokens     float64
-	}{
-		{"768p", 5, 122940},
-		{"8k", 60, 46656000},
-	} {
-		facts := yuanxiangHook(t, plugin, "extractUsage", yuanxiangContext("MiniMax H3 · 特价按秒-YX", map[string]any{
-			"prompt": "boat", "seconds": tc.seconds, "resolution": tc.resolution,
-		}))
-		assert.Equal(t, tc.tokens, facts["tokens"])
-	}
-	facts := yuanxiangHook(t, plugin, "extractUsage", yuanxiangContext("Muse · 特价按次 ·【原生】-YX", map[string]any{
-		"prompt": "boat", "seconds": 10, "resolution": "720p", "video_b64s": []string{"unmeasured-reference"},
-	}))
-	assert.Equal(t, float64(432000), facts["tokens"], "Muse's actual submitted duration is normalized before token reservation")
-	facts = yuanxiangHook(t, plugin, "extractUsage", yuanxiangContext("MiniMax H3 · 特价按秒-YX", map[string]any{
-		"prompt": "boat", "seconds": 60, "resolution": "9999p",
-	}))
-	tokens := facts["tokens"].(float64)
-	assert.Positive(t, tokens)
-	assert.Less(t, tokens, float64(2147483647), "every accepted resolution and duration stays below the host token ceiling")
 }
 
 func TestYuanxiangActualTokenSettlementAndEstimatedFallback(t *testing.T) {
 	plugin := loadYuanxiangPlugin(t)
 	const modelName = "SD 2.5 · 官方满血按秒-YX"
 	const expression = "tier(\"tokens\", u(\"tokens\") * 1 / 1000000)"
-	frozen := yuanxiangHook(t, plugin, "extractUsage", yuanxiangContext(modelName, map[string]any{
+	frozen := yuanxiangHook(t, plugin, "extractUsage", yuanxiangContext("seedance-2-5-per-request", map[string]any{
 		"prompt": "boat", "seconds": 10, "resolution": "720p",
 	}))
 	assert.Equal(t, float64(216000), frozen["tokens"])
@@ -828,14 +612,10 @@ func TestYuanxiangActualTokenSettlementAndEstimatedFallback(t *testing.T) {
 
 func TestYuanxiangReferenceVideoPricingConditions(t *testing.T) {
 	plugin := loadYuanxiangPlugin(t)
-	const modelName = "SD 2.5 · 官方满血按秒-YX"
+	const modelName = "seedance-2-5-per-request"
 	const expression = `
 	u("resolution") == "720p" && u("video_input") == "video" ? tier("reference", u("requests") * 2) :
 	u("resolution") == "720p" && u("video_input") == "none" ? tier("text", u("requests") * 1) :
-	u("resolution") == "1080p" && u("video_input") == "video" ? tier("fhd-reference", u("requests") * 4) :
-	u("resolution") == "1080p" && u("video_input") == "none" ? tier("fhd-text", u("requests") * 3) :
-	u("resolution") == "4k" && u("video_input") == "video" ? tier("uhd-reference", u("requests") * 6) :
-	u("resolution") == "4k" && u("video_input") == "none" ? tier("uhd-text", u("requests") * 5) :
 	tier("other", u("requests") * 7)`
 	schema, _ := plugin.Meta.UsageForModels(modelName)
 	require.NoError(t, billing_setting.SmokeTestTaskExpr(expression, schema))
@@ -853,11 +633,6 @@ func TestYuanxiangReferenceVideoPricingConditions(t *testing.T) {
 		{name: "nested video references", body: map[string]any{"metadata": map[string]any{"parameters": map[string]any{"videos": []string{"data:video/mp4;base64,dmlkZW8="}}}}, videoInput: "video", cost: 2},
 		{name: "uploaded video", files: []any{map[string]any{"ref": "request_file:video", "field": "videos[]", "mimeType": "video/mp4", "size": 100}}, videoInput: "video", cost: 2},
 		{name: "uploaded input reference", files: []any{map[string]any{"ref": "request_file:video", "field": "input_reference", "mimeType": "video/mp4", "size": 100}}, videoInput: "video", cost: 2},
-		{name: "1080p without reference", body: map[string]any{"resolution": "1080p"}, videoInput: "none", cost: 3},
-		{name: "1080p with reference", body: map[string]any{"resolution": "1080p", "video_b64s": []string{"unmeasured-video"}}, videoInput: "video", cost: 4},
-		{name: "4k without reference", body: map[string]any{"resolution": "4k"}, videoInput: "none", cost: 5},
-		{name: "4k with reference", body: map[string]any{"resolution": "4k", "video_b64s": []string{"unmeasured-video"}}, videoInput: "video", cost: 6},
-		{name: "other resolution", body: map[string]any{"resolution": "8k", "video_b64s": []string{"unmeasured-video"}}, videoInput: "video", cost: 7},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			body := map[string]any{"prompt": "boat", "resolution": "720p", "seconds": 10}

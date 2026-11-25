@@ -1,31 +1,20 @@
-// Yuanxiang's public API model catalog, checked 2026-11-21.
+// Yuanxiang model contracts verified against authenticated /v1/models and /v1/pricing on 2026-11-25.
 // Defaults are sent explicitly so upstream defaults cannot change the facts.
-const SD25_STABLE_CHANNEL = "route:stable";
-const VIDEO_MODELS = {
-  "SD 2.5 · 官方满血按秒": { seconds: 5, resolution: "720p" },
-  "SD 2.0 · 官转满血68折（返官链）": { seconds: 5, resolution: "720p", version: "标准" },
-  "SD 2.5 · 特价按次": { seconds: 5, resolution: "1080p", channel: SD25_STABLE_CHANNEL },
-  "Sd 2.0 · 特价按次 · 漫剧短剧专线": { seconds: 5, resolution: "720p" },
-  "SD 2.0 · 特价按次 · 电商专线": { seconds: 5, resolution: "720p", quality: "真人模特" },
-  "SD 2.0 FAST · 特价按秒 · 稳定冲量": { seconds: 5, resolution: "720p" },
-  "Sd 2.0 · 即梦满血按秒专线": { seconds: 5, resolution: "720p" },
-  "Sd 2.5 · 即梦满血按秒专线": { seconds: 5, resolution: "720p" },
-  "GK-video-3.5": { seconds: 5, resolution: "720p", requiredImages: 1 },
-  "Muse · 特价按次 ·【原生】": { seconds: 10, resolution: "720p" },
-  "MiniMax H3 · 特价按秒": { seconds: 5, resolution: "480p" },
-  "MiniMax H3 · 特价按次（慢线）": { seconds: 4, resolution: "768p" },
-  "Wan 3.0 ·  官方直连 · 特价按秒": { seconds: 5, resolution: "480p" },
+const SD20_PER_REQUEST = "seedance-2-0-per-request";
+const SD25_PER_REQUEST = "seedance-2-5-per-request";
+const SD20_MANJU = "Sd 2.0 · 特价按次 · 漫剧短剧专线";
+const SD20_ECOMMERCE = "SD 2.0 · 特价按次 · 电商专线";
+const SD20_FULL = "SD2.0 · 即梦满血版";
+const SD25_SPECIAL = "SD 2.5 · 特价按次";
+const SHARED_MODELS = {
+  [SD20_PER_REQUEST]: SD20_MANJU,
+  [SD25_PER_REQUEST]: SD25_SPECIAL,
 };
-const IMAGE_MODELS = {
-  "GT Image 2.5": { resolution: "1k", quality: "low" },
-  "GT Image 2.5 · 特价按张": { resolution: "1k", quality: "low" },
-  "GT Image 2.6 Flare": { resolution: "1k", quality: "auto" },
-  "GT Image 2 · OpenAI": { resolution: "1k", quality: "low" },
-  "Banana 2": { resolution: "1k" },
-};
-const MODEL_MAPPING = Object.fromEntries(Object.keys(VIDEO_MODELS).concat(Object.keys(IMAGE_MODELS)).map((model) => [model + "-YX", model]));
-const VIDEO_NAMES = Object.keys(MODEL_MAPPING).filter((name) => Object.prototype.hasOwnProperty.call(VIDEO_MODELS, MODEL_MAPPING[name]));
-const IMAGE_NAMES = Object.keys(MODEL_MAPPING).filter((name) => Object.prototype.hasOwnProperty.call(IMAGE_MODELS, MODEL_MAPPING[name]));
+// Historical image tasks use a different query endpoint and completion facts.
+const HISTORICAL_IMAGE_MODELS = new Set([
+  "GT Image 2.5", "GT Image 2.5 · 特价按张", "GT Image 2.6 Flare", "GT Image 2 · OpenAI", "Banana 2",
+]);
+const VIDEO_NAMES = Object.keys(SHARED_MODELS);
 const DURATION_TIERS = ["5", "10", "15", "20", "30", "40", "50", "60"];
 const VIDEO_USAGE_SCHEMA = {
   requests: { type: "number", unit: "count", description: { en: "Video generation request unit price", zh: "视频生成按次单价" } },
@@ -48,51 +37,71 @@ const VIDEO_USAGE_SCHEMA = {
     description: { en: "Reference video input", zh: "参考视频输入" },
   },
 };
-const IMAGE_USAGE_SCHEMA = {
-  image_count: { type: "number", unit: "count", unitLabel: { en: "image", zh: "张" }, description: { en: "Image generation unit price", zh: "图片生成单价" } },
-  resolution: { enum: ["1k", "2k", "4k"], allowCustom: true, description: { en: "Output image resolution", zh: "输出图片分辨率" } },
-};
 const CONTAINERS = ["values", "metadata", "extra", "parameters"];
 const IMAGE_FIELDS = ["image", "images", "image_url", "image_urls", "imageUrls", "image_refs", "image_references", "reference_images", "input_reference", "first_image", "last_image", "first_frame_url", "last_frame_url"];
 const VIDEO_FIELDS = ["video", "videos", "video_url", "video_urls", "videoUrls", "video_refs", "video_references", "reference_videos"];
 const AUDIO_FIELDS = ["audio", "audios", "audio_url", "audio_urls", "audioUrls", "audio_refs", "audio_references", "reference_audios"];
 const QUANTITY_FIELDS = ["n", "count", "batch_size", "batch_count", "num_videos", "num_images"];
+const SHARED_FIELDS = new Set([
+  "model", "prompt", "seconds", "duration", "resolution", "resolution_name", "size", "aspect_ratio", "ratio", "quality", "options",
+  "image_ids", "image_b64s", "video_b64s", "audio_b64s",
+  ...CONTAINERS, ...IMAGE_FIELDS, ...VIDEO_FIELDS, ...AUDIO_FIELDS, ...QUANTITY_FIELDS,
+]);
+const CNY_PER_USD = 7.3;
 
 export const meta = {
   apiVersion: 1,
   key: "yuanxiang",
   name: "Yuanxiang AI",
   icon: "text:YX",
-  description: { en: "Yuanxiang video and image generation with canvas parameter mapping and configurable reference video pricing", zh: "元象视频与图片生成，支持画布参数映射和可选参考视频计费" },
-  version: "1.1.0",
+  description: { en: "Yuanxiang Seedance 2.0 and 2.5 video generation with per-request pricing", zh: "元象 Seedance 2.0 和 2.5 视频生成，按次计费" },
+  version: "1.2.0",
   author: { name: "QuantumNous" },
   website: "https://yuanxiangai.cc/api-docs",
   baseUrl: "https://yuanxiangai.cc",
   fetchMode: "per_task",
   upstreams: ["vendor", "new_api"],
   requiredCapabilities: ["submit-no-retry@1", "media-duration@1", "json-file-upload@1"],
-  models: Object.keys(MODEL_MAPPING),
-  usageSchema: VIDEO_USAGE_SCHEMA,
+  models: VIDEO_NAMES,
+  modelDefaults: {
+    [SD20_PER_REQUEST]: {
+      displayName: "Seedance 2.0 · 按次",
+      billingExpr: 'tier("720p", u("requests") * ' + (2.9 / CNY_PER_USD).toPrecision(15) + ")",
+    },
+    [SD25_PER_REQUEST]: {
+      displayName: "Seedance 2.5 · 按次",
+      billingExpr: 'tier("720p", u("requests") * ' + (6 / CNY_PER_USD).toPrecision(15) + ")",
+    },
+  },
+  usageSchema: {
+    ...VIDEO_USAGE_SCHEMA,
+    image_count: { type: "number", unit: "count", optional: true, unitLabel: { en: "image", zh: "张" }, description: { en: "Image generation unit price", zh: "图片生成单价" } },
+  },
   usageExamples: [
-    { label: "720p · 10s", facts: { requests: 1, seconds: 10, tokens: estimateVideoTokens(10, "720p"), reference_seconds: 0, resolution: "720p", duration_tier: "10", video_input: "none" } },
-    { label: "1080p · 20s", facts: { requests: 1, seconds: 20, tokens: estimateVideoTokens(20, "1080p"), reference_seconds: 0, resolution: "1080p", duration_tier: "20", video_input: "none" } },
+    { label: "720p · 10s", facts: { requests: 1, seconds: 10, tokens: estimateVideoTokens(10, "720p"), reference_seconds: 0, resolution: "720p", duration_tier: "10", video_input: "none", image_count: 0 } },
+    { label: "1080p · 20s", facts: { requests: 1, seconds: 20, tokens: estimateVideoTokens(20, "1080p"), reference_seconds: 0, resolution: "1080p", duration_tier: "20", video_input: "none", image_count: 0 } },
   ],
-  usageProfiles: [{ models: IMAGE_NAMES, schema: IMAGE_USAGE_SCHEMA }],
-  protocols: [{ name: "openai_video", models: VIDEO_NAMES }, { name: "openai_image", models: IMAGE_NAMES }],
+  usageProfiles: [{
+    models: VIDEO_NAMES,
+    schema: {
+      ...VIDEO_USAGE_SCHEMA,
+      resolution: { ...VIDEO_USAGE_SCHEMA.resolution, allowCustom: false },
+    },
+    examples: [
+      { label: "720p · 10s", facts: { requests: 1, seconds: 10, tokens: estimateVideoTokens(10, "720p"), reference_seconds: 0, resolution: "720p", duration_tier: "10", video_input: "none" } },
+    ],
+  }],
+  protocols: [{ name: "openai_video", models: VIDEO_NAMES }],
   routes: [
-    { method: "POST", path: "/yuanxiang/v1/videos", type: "submit", decode: "createVideo", render: "task" },
+    { method: "POST", path: "/yuanxiang/v1/videos", type: "submit", decode: "createVideo", render: "task", models: VIDEO_NAMES },
     { method: "GET", path: "/yuanxiang/v1/videos/:task_id", type: "query", render: "task" },
-    { method: "POST", path: "/yuanxiang/v1/images/generations", type: "submit", decode: "createImage", render: "task" },
     { method: "GET", path: "/yuanxiang/v1/images/:task_id", type: "query", render: "task" },
   ],
 };
 
-function modelDetails(ctx) {
-  const requested = ctx.upstreamModel || ctx.model;
-  const model = Object.prototype.hasOwnProperty.call(MODEL_MAPPING, requested) ? MODEL_MAPPING[requested] : requested;
-  if (Object.prototype.hasOwnProperty.call(VIDEO_MODELS, model)) return { model: model, kind: "video", defaults: VIDEO_MODELS[model] };
-  if (Object.prototype.hasOwnProperty.call(IMAGE_MODELS, model)) return { model: model, kind: "image", defaults: IMAGE_MODELS[model] };
-  throw new Error("unsupported Yuanxiang model");
+function isHistoricalImage(ctx) {
+  const model = ctx.upstreamModel || ctx.model || "";
+  return HISTORICAL_IMAGE_MODELS.has(model.replace(/-YX$/, ""));
 }
 
 function secondsValue(value) {
@@ -110,67 +119,46 @@ function conditionValue(value, field) {
   return value.trim();
 }
 
-function imageAspectRatio(size) {
-  const dimensions = /^([1-9]\d{0,4})x([1-9]\d{0,4})$/.exec(size);
-  if (!dimensions) throw new Error("size must contain positive pixel dimensions up to five digits per side");
-  const aspect = Number(dimensions[1]) / Number(dimensions[2]);
-  let closest = "1:1", nearest = Infinity;
-  for (const ratio of ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "4:5", "5:4", "21:9", "9:21"]) {
-    const sides = ratio.split(":");
-    const distance = Math.abs(Math.log(aspect) - Math.log(Number(sides[0]) / Number(sides[1])));
-    if (distance < nearest) {
-      nearest = distance;
-      closest = ratio;
-    }
-  }
-  return closest;
-}
-
 // Used by both building and metering. Flatten parameter containers, validate
 // conflicting aliases, and forward only the documented vendor body members.
 function submission(ctx) {
-  const profile = modelDetails(ctx);
+  const model = ctx.upstreamModel || ctx.model;
+  if (!Object.hasOwn(SHARED_MODELS, model)) throw new Error("unsupported Yuanxiang model for new tasks");
   const input = ctx.requestBody;
   if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("request body must be an object");
   const scopes = [input];
-  const imageSizes = [];
   const values = {};
   const options = {};
-  const body = { model: profile.model, wait: false };
+  const body = { model: SHARED_MODELS[model], wait: false };
   const references = { images: [], videos: [], audios: [] };
   for (let i = 0; i < scopes.length; i++) {
     const scope = scopes[i];
+    for (const field of Object.keys(scope)) {
+      if (!SHARED_FIELDS.has(field)) throw new Error(field + " is not supported by this Yuanxiang model");
+    }
     for (const container of CONTAINERS) {
       if (scope[container] === undefined) continue;
       if (!scope[container] || typeof scope[container] !== "object" || Array.isArray(scope[container])) throw new Error(container + " must be an object");
       scopes.push(scope[container]);
       if (scopes.length > 64) throw new Error("too many parameter containers");
     }
-    if (i > 0 && scope.model !== undefined && scope.model !== ctx.model && scope.model !== ctx.upstreamModel && scope.model !== profile.model)
+    if (i > 0 && scope.model !== undefined && scope.model !== ctx.model && scope.model !== model && scope.model !== body.model)
       throw new Error("nested model must match the channel model");
     for (const field of QUANTITY_FIELDS) {
       if (scope[field] !== undefined && scope[field] !== 1 && scope[field] !== "1") throw new Error("Yuanxiang requests must generate exactly one result");
     }
-    for (const field of ["max_tokens", "max_output_tokens", "max_completion_tokens"]) {
-      if (scope[field] !== undefined) throw new Error(field + " is not supported by this plugin");
-    }
     if (scope.options !== undefined) {
       if (!scope.options || typeof scope.options !== "object" || Array.isArray(scope.options)) throw new Error("options must be an object");
       for (const field of Object.keys(scope.options)) {
-        if (CONTAINERS.concat(QUANTITY_FIELDS, ["model", "seconds", "duration", "resolution", "resolution_name", "size", "max_tokens", "max_output_tokens", "max_completion_tokens"]).includes(field))
-          throw new Error("unsupported options field: " + field);
-        if (Object.prototype.hasOwnProperty.call(options, field) && JSON.stringify(options[field]) !== JSON.stringify(scope.options[field])) throw new Error("conflicting options." + field);
-        Object.defineProperty(options, field, { value: scope.options[field], enumerable: true, configurable: true, writable: true });
+        if (model !== SD20_PER_REQUEST || field !== "quality") throw new Error("unsupported Yuanxiang per-request option: " + field);
+        if (Object.hasOwn(options, field) && options[field] !== scope.options[field]) throw new Error("conflicting options." + field);
+        options[field] = scope.options[field];
       }
     }
     const sizeIsRatio = typeof scope.size === "string" && (scope.size.includes(":") || ["adaptive", "auto"].includes(scope.size));
-    for (const field of ["prompt", "seconds", "duration", "resolution", "resolution_name", "size", "aspect_ratio", "ratio", "quality", "version", "channel"]) {
+    for (const field of ["prompt", "seconds", "duration", "resolution", "resolution_name", "size", "aspect_ratio", "ratio", "quality"]) {
       if (scope[field] === undefined) continue;
       let key = field, value = scope[field];
-      if (field === "size" && profile.kind === "image" && typeof value === "string" && /^\d+x\d+$/i.test(value.trim())) {
-        imageSizes.push(conditionValue(value, field).toLowerCase());
-        continue;
-      }
       if (["seconds", "duration"].includes(field)) {
         key = "duration";
         value = secondsValue(value);
@@ -197,43 +185,16 @@ function submission(ctx) {
     }
   }
   if (values.prompt === undefined) throw new Error("prompt is required");
-  // Pixel sizes select the layout only. An explicit ratio in any parameter
-  // container wins, and the resolution label stays independent for billing.
-  if (values.ratio === undefined) {
-    for (const size of imageSizes) {
-      const ratio = imageAspectRatio(size);
-      if (values.ratio !== undefined && values.ratio !== ratio) throw new Error("conflicting image size parameters");
-      values.ratio = ratio;
-    }
-  }
   body.prompt = values.prompt;
   if (values.ratio !== undefined) body.ratio = values.ratio;
-  const channel = values.channel ?? profile.defaults.channel;
-  // The 720p line is opt-in upstream, even though it is our default for this model.
-  const stableSD25 = profile.defaults.channel === SD25_STABLE_CHANNEL &&
-    (channel === SD25_STABLE_CHANNEL || channel === "Sd 2.5-720p-30s（10图稳定）");
-  if (channel !== undefined) body.channel = stableSD25 ? SD25_STABLE_CHANNEL : channel;
-  body.resolution = values.resolution ?? (stableSD25 ? "720p" : profile.defaults.resolution);
-  for (const field of ["quality", "version"]) {
-    if (options[field] !== undefined) {
-      const value = conditionValue(options[field], field);
-      if (values[field] !== undefined && values[field] !== value) throw new Error("conflicting " + field + " parameters");
-      values[field] = value;
-    }
-    if (values[field] === undefined && profile.defaults[field] !== undefined) values[field] = profile.defaults[field];
+  body.resolution = values.resolution ?? "720p";
+  body.duration = values.duration ?? 5;
+  if (Object.hasOwn(options, "quality")) {
+    options.quality = conditionValue(options.quality, "quality");
+    if (values.quality !== undefined && values.quality !== options.quality) throw new Error("conflicting quality parameters");
   }
-  if (profile.kind === "video") {
-    body.duration = values.duration === undefined ? profile.defaults.seconds : values.duration;
-    if (values.quality !== undefined) options.quality = values.quality;
-    // Muse continuation produces the fixed 20-second tier regardless of the
-    // requested text-generation tier. Normalize before reservation and submit.
-    if (profile.model === "Muse · 特价按次 ·【原生】" && references.videos.length) body.duration = 20;
-  } else {
-    if (values.duration !== undefined) throw new Error("image requests do not accept video duration");
-    if (values.quality !== undefined && values.quality !== "default") body.quality = values.quality;
-    delete options.quality;
-  }
-  if (values.version !== undefined) options.version = values.version;
+  const quality = options.quality ?? values.quality;
+  if (quality !== undefined && (model !== SD20_PER_REQUEST || quality !== "真人模特")) throw new Error("unsupported Yuanxiang per-request option: quality");
   for (const file of ctx.files || []) {
     const field = file.field.replace(/\[\]$/, "");
     const kind = VIDEO_FIELDS.includes(field) || field === "video_b64s" || field === "input_reference" && String(file.mimeType || "").startsWith("video/") ? "videos"
@@ -243,17 +204,35 @@ function submission(ctx) {
     if (!Number.isSafeInteger(file.size) || file.size <= 0) throw new Error("reference files must not be empty");
     references[kind].push({ fileRef: file.ref });
   }
-  if (profile.defaults.requiredImages !== undefined && references.images.length !== profile.defaults.requiredImages)
-    throw new Error(profile.model + " requires exactly " + profile.defaults.requiredImages + " reference image");
-  if (stableSD25) {
-    if (body.resolution !== "720p") throw new Error("route:stable requires 720p resolution");
-    if (![5, 10, 15, 30].includes(body.duration)) throw new Error("route:stable requires a duration of 5, 10, 15 or 30 seconds");
-    if (references.images.length > 10) throw new Error("route:stable accepts at most 10 reference images");
-    if (references.videos.length || references.audios.length) throw new Error("route:stable does not accept reference video or audio");
+  if (body.resolution !== "720p") throw new Error("Yuanxiang per-request Seedance requires 720p");
+  const ratio = body.ratio ?? "16:9";
+  const wide = ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"];
+  const standard = wide.slice(0, 3);
+  if (model === SD25_PER_REQUEST) {
+    if (!wide.includes(ratio) || body.duration < 4 || body.duration > 30 ||
+        references.images.length > 30 || references.videos.length > 10 || references.audios.length > 10 ||
+        Array.from(body.prompt).length > 4000)
+      throw new Error("unsupported Yuanxiang Seedance 2.5 duration, aspect ratio or references");
+    // Chained gateways run the same selection with their own vendor credentials.
+    if (ctx.upstream?.kind !== "new_api") body.channel = body.duration >= 5 && standard.includes(ratio) ? "line:stable-longsupply-item" : "line:economy-sd25";
+  } else {
+    const discreteDuration = [5, 10, 15].includes(body.duration);
+    const promptLength = Array.from(body.prompt).length;
+    if (references.videos.length || references.images.length > 9)
+      throw new Error("Yuanxiang Seedance 2.0 does not support reference videos or more than nine images");
+    if (quality === "真人模特") {
+      if (!discreteDuration || !standard.includes(ratio) || references.audios.length || promptLength > 24400)
+        throw new Error("unsupported Yuanxiang Seedance 2.0 e-commerce duration, aspect ratio or references");
+      body.model = SD20_ECOMMERCE;
+      body.options = { quality };
+    } else if (discreteDuration && wide.slice(0, 5).includes(ratio) && !references.audios.length && promptLength <= 8000) {
+      body.model = SD20_MANJU;
+    } else if (standard.includes(ratio) && body.duration >= 5 && body.duration <= 15 && references.audios.length <= 3 && promptLength <= 4000) {
+      body.model = SD20_FULL;
+    } else throw new Error("unsupported Yuanxiang Seedance 2.0 duration, aspect ratio or references");
   }
   for (const kind of ["images", "videos", "audios"]) {
     if (references[kind].length > (kind === "images" ? 30 : 10)) throw new Error("too many reference " + kind);
-    if (profile.kind === "image" && kind !== "images" && references[kind].length) throw new Error("image models accept only reference images");
     for (const ref of references[kind]) {
       if (ref.fileRef) {
         if (kind !== "images") {
@@ -281,9 +260,7 @@ function submission(ctx) {
       (body[field] || (body[field] = [])).push(value);
     }
   }
-  if (profile.model === "Muse · 特价按次 ·【原生】" && references.videos.length) body.duration = 20;
-  if (Object.keys(options).length) body.options = options;
-  return { body: body, profile: profile, references: references };
+  return { body, model, references };
 }
 
 function apiRoot(ctx) {
@@ -294,7 +271,7 @@ export function buildSubmitRequest(ctx) {
   const request = submission(ctx);
   const headers = { Authorization: "Bearer " + ctx.apiKey, "Content-Type": "application/json" };
   const gateway = ctx.upstream && ctx.upstream.kind === "new_api";
-  if (gateway) request.body.model = request.profile.model + "-YX";
+  if (gateway) request.body.model = request.model;
   for (const reference of request.references.images) {
     if (!reference.fileRef || gateway) continue;
     const uploaded = utils.uploadFile({ url: ctx.baseUrl.replace(/\/$/, "") + "/v1/files", headers: { Authorization: "Bearer " + ctx.apiKey }, fileRef: reference.fileRef, jsonField: "data_b64" });
@@ -304,8 +281,9 @@ export function buildSubmitRequest(ctx) {
   }
   // Scope idempotency to this gateway task, rather than a client-provided id
   // shared by other gateway users of the same upstream API key.
-  request.body.external_id = ctx.publicTaskId || utils.uuid();
-  const descriptor = { url: apiRoot(ctx) + (request.profile.kind === "image" ? "/v1/images/generations" : "/v1/videos"), method: "POST", headers: headers, body: request.body, action: request.profile.kind === "image" ? "image_generation" : "video_generation" };
+  if (gateway) delete request.body.wait;
+  else request.body.external_id = ctx.publicTaskId || utils.uuid();
+  const descriptor = { url: apiRoot(ctx) + "/v1/videos", method: "POST", headers, body: request.body, action: "video_generation" };
   if (gateway && (ctx.files || []).length) {
     // Another gateway uploads its own request files to the vendor. Preserve
     // those files as multipart rather than calling its unrelated /v1/files.
@@ -411,13 +389,12 @@ function estimateVideoTokens(seconds, resolution) {
 
 export function extractUsage(ctx) {
   const request = submission(ctx);
-  if (ctx.usagePurpose === "billing_ratios") return request.profile.kind === "image" ? { image_count: 1 } : { requests: 1 };
+  if (ctx.usagePurpose === "billing_ratios") return { requests: 1 };
   // Retired conditions keep their first declared values for stored expressions.
   // Vendor options still pass through in the submission body. Resolution and
   // duration remain independent facts so each model's expression can select
   // one or more conditions without changing the client request.
   const facts = { resolution: request.body.resolution.toLowerCase(), quality: "default", version: "default", channel: "auto" };
-  if (request.profile.kind === "image") return { ...facts, quality: "low", image_count: 1 };
   let referenceSeconds = 0;
   if ((ctx.usageKeys || []).includes("reference_seconds")) {
     for (const reference of request.references.videos) {
@@ -449,7 +426,7 @@ export function parseTaskResult(ctx, response) {
   if (!status) return { status: "UNKNOWN", reason: "Unrecognized Yuanxiang task status" };
   if (status === "FAILURE") return { status: status, reason: typeof body.error === "string" ? body.error : body.error && body.error.message || "Yuanxiang generation failed" };
   if (status === "SUCCESS") {
-    const delivered = modelDetails(ctx).kind === "image" ? imageEntries(body).length > 0 : typeof body.video_url === "string" && /^https?:\/\/[^\s]+$/.test(body.video_url);
+    const delivered = isHistoricalImage(ctx) ? imageEntries(body).length > 0 : typeof body.video_url === "string" && /^https?:\/\/[^\s]+$/.test(body.video_url);
     return delivered ? { status: "SUCCESS", progress: "100%" } : { status: "IN_PROGRESS", progress: "99%" };
   }
   const progress = Number(String(body.progress === undefined ? "" : body.progress).replace(/%$/, ""));
@@ -467,12 +444,12 @@ export function parseSubmitResponse(ctx, response) {
 }
 
 export function buildQueryRequest(ctx) {
-  return { url: apiRoot(ctx) + (modelDetails(ctx).kind === "image" ? "/v1/images/" : "/v1/videos/") + encodeURIComponent(ctx.taskId), method: "GET", headers: { Authorization: "Bearer " + ctx.apiKey } };
+  return { url: apiRoot(ctx) + (isHistoricalImage(ctx) ? "/v1/images/" : "/v1/videos/") + encodeURIComponent(ctx.taskId), method: "GET", headers: { Authorization: "Bearer " + ctx.apiKey } };
 }
 
 export function extractUsageOnComplete(ctx, result, body) {
   if (result.status !== "SUCCESS") return {};
-  if (modelDetails(ctx).kind === "video") {
+  if (!isHistoricalImage(ctx)) {
     const usage = body && body.usage;
     if (!usage || typeof usage !== "object" || Array.isArray(usage)) return {};
     // Follow Doubao's video billing: prefer completion tokens, then total
@@ -525,7 +502,7 @@ export function buildContentRequest(ctx) {
   return { url: url, method: "GET", credentialless: true };
 }
 
-function decodeRequest(ctx, kind) {
+function decodeRequest(ctx) {
   if (!ctx.body || !["json", "multipart"].includes(ctx.body.kind)) throw new Error("JSON or multipart body required");
   let body;
   if (ctx.body.kind === "json") {
@@ -548,9 +525,8 @@ function decodeRequest(ctx, kind) {
   const knownModel = ctx.upstreamModel || model;
   // Channel aliases can be decoded before the executing channel's mapping is
   // known. The driver validates the final model before any billable work.
-  if (Object.prototype.hasOwnProperty.call(MODEL_MAPPING, knownModel) || Object.prototype.hasOwnProperty.call(VIDEO_MODELS, knownModel) || Object.prototype.hasOwnProperty.call(IMAGE_MODELS, knownModel)) {
-    if (modelDetails({ model: model, upstreamModel: ctx.upstreamModel }).kind !== kind) throw new Error("model does not support this media endpoint");
-  }
+  if (ctx.upstreamModel || Object.hasOwn(SHARED_MODELS, knownModel))
+    submission({ model, upstreamModel: knownModel, requestBody: body, files: ctx.body.files });
   return { kind: "submit", model: model, requestBody: body };
 }
 
@@ -565,18 +541,13 @@ function renderTask(ctx, task) {
 }
 
 export const native = {
-  createVideo: function (ctx) { return decodeRequest(ctx, "video"); },
-  createImage: function (ctx) { return decodeRequest(ctx, "image"); },
+  createVideo: decodeRequest,
   task: renderTask,
 };
 
 export const protocols = {
   openai_video: {
-    decodeRequest: function (ctx) { return decodeRequest(ctx, "video"); },
+    decodeRequest,
     render: function (ctx, task) { return task.data || {}; },
-  },
-  openai_image: {
-    decodeRequest: function (ctx) { return decodeRequest(ctx, "image"); },
-    render: function (ctx, task) { return { data: imageEntries(task.data) }; },
   },
 };

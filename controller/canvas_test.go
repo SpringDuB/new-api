@@ -93,12 +93,12 @@ func TestCanvasModelCatalogDatabaseMatrix(t *testing.T) {
 			other := model.Token{UserId: user.Id, Key: "nondefaultkey", Status: common.TokenStatusEnabled, ExpiredTime: -1, UnlimitedQuota: true}
 			require.NoError(t, db.Create(&other).Error)
 			require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(`{"gpt-image-hidden":1,"gpt-image-1":1,"gpt-image-private":1,"catalog-video":1}`))
-			common.OptionMap[model.ModelSquareDisplayOption] = `{"order":["seedance-2-0-02","gpt-image-1"],"models":{"gpt-image-1":{"highlight":true,"tags":["image-extra"]},"seedance-2-0-02":{"badge":"推荐","color":"violet","tags":["video-extra"]}}}`
+			common.OptionMap[model.ModelSquareDisplayOption] = `{"order":["seedance-2-0-per-request","gpt-image-1"],"models":{"gpt-image-1":{"highlight":true,"tags":["image-extra"]},"seedance-2-0-per-request":{"badge":"推荐","color":"violet","tags":["video-extra"]}}}`
 			channels := []model.Channel{
-				{Name: "not-public-channel", Key: "not-public-upstream-key", Type: constant.ChannelTypeTaskPlugin, Group: "default", Models: "seedance-2-0-02", Status: common.ChannelStatusEnabled},
-				{Name: "backup", Key: "backup-key", Type: constant.ChannelTypeTaskPlugin, Group: "default", Models: "seedance-2-0-02", Status: common.ChannelStatusEnabled},
+				{Name: "not-public-channel", Key: "not-public-upstream-key", Type: constant.ChannelTypeTaskPlugin, Group: "default", Models: "seedance-2-0-per-request", Status: common.ChannelStatusEnabled},
+				{Name: "backup", Key: "backup-key", Type: constant.ChannelTypeTaskPlugin, Group: "default", Models: "seedance-2-0-per-request", Status: common.ChannelStatusEnabled},
 				{Name: "other group", Key: "other-key", Type: constant.ChannelTypeOpenAI, Group: "private", Models: "gpt-image-private", Status: common.ChannelStatusEnabled},
-				{Name: "image", Key: "image-key", Type: constant.ChannelTypeOpenAI, Group: "default", Models: "gpt-image-1,gpt-image-unpriced,gpt-image-hidden,catalog-video,seedance-2-0-02", Status: common.ChannelStatusEnabled},
+				{Name: "image", Key: "image-key", Type: constant.ChannelTypeOpenAI, Group: "default", Models: "gpt-image-1,gpt-image-unpriced,gpt-image-hidden,catalog-video,seedance-2-0-per-request", Status: common.ChannelStatusEnabled},
 			}
 			for i := range 2 {
 				channels[i].SetSetting(dto.ChannelSettings{TaskPluginKey: "lecapi"})
@@ -109,7 +109,7 @@ func TestCanvasModelCatalogDatabaseMatrix(t *testing.T) {
 			metadata := []model.Model{
 				{ModelName: "gpt-image-hidden", Status: 1},
 				{ModelName: "gpt-image-1", Status: 1, Description: "Image generation model", Tags: "image,official"},
-				{ModelName: "seedance-2-0-02", Status: 1, Description: "Video generation model; images: 最多 3", Tags: "video;cinematic"},
+				{ModelName: "seedance-2-0-per-request", Status: 1, Description: "Video generation model; images: 最多 3", Tags: "video;cinematic"},
 			}
 			require.NoError(t, db.Create(&metadata).Error)
 			require.NoError(t, db.Model(&metadata[0]).Update("status", 0).Error)
@@ -126,7 +126,7 @@ func TestCanvasModelCatalogDatabaseMatrix(t *testing.T) {
 			for _, denied := range []*httptest.ResponseRecorder{read(token.Key, ""), read("invalid", secret), read(other.Key, secret)} {
 				assert.Equal(t, http.StatusUnauthorized, denied.Code)
 				assert.Contains(t, denied.Header().Get("Cache-Control"), "no-store")
-				assert.NotContains(t, denied.Body.String(), "seedance-2-0-02")
+				assert.NotContains(t, denied.Body.String(), "seedance-2-0-per-request")
 			}
 			catalog := func() []canvasCatalogModel {
 				res := read(token.Key, secret)
@@ -148,8 +148,8 @@ func TestCanvasModelCatalogDatabaseMatrix(t *testing.T) {
 			assert.Empty(t, image.Tags)
 			require.NotNil(t, image.Price)
 			assert.Equal(t, []canvasPriceRate{{Unit: "request", Min: 1, Max: 1}}, image.Price.Rates)
-			assert.Equal(t, "seedance-2-0-02", video.ID)
-			assert.Equal(t, "Seedance 2.0 · 720p 多参考", video.DisplayName)
+			assert.Equal(t, "seedance-2-0-per-request", video.ID)
+			assert.Equal(t, "Seedance 2.0 · 按次", video.DisplayName)
 			assert.Equal(t, "Video generation model", video.Description)
 			assert.Equal(t, []canvasCatalogTag{{Text: "推荐", Color: "purple"}}, video.Tags)
 			assert.Equal(t, "seedance-2.0", video.Family)
@@ -162,7 +162,7 @@ func TestCanvasModelCatalogDatabaseMatrix(t *testing.T) {
 			assert.Equal(t, []canvasCatalogModel{image, video}, catalog(), "a backup route keeps the same published ID")
 			require.NoError(t, db.Model(&model.Channel{}).Where("id = ?", channels[1].Id).Update("status", common.ChannelStatusManuallyDisabled).Error)
 			assert.Equal(t, []canvasCatalogModel{image}, catalog(), "the last disabled route withdraws the model, even with warm pricing metadata")
-			require.NoError(t, db.Model(token).Updates(map[string]any{"model_limits_enabled": true, "model_limits": "seedance-2-0-02"}).Error)
+			require.NoError(t, db.Model(token).Updates(map[string]any{"model_limits_enabled": true, "model_limits": "seedance-2-0-per-request"}).Error)
 			assert.Equal(t, []canvasCatalogModel{}, catalog(), "model limits can produce a successful empty result")
 			require.NoError(t, db.Model(token).Update("expired_time", time.Now().Add(-time.Minute).Unix()).Error)
 			assert.Equal(t, http.StatusUnauthorized, read(token.Key, secret).Code)
@@ -175,13 +175,13 @@ func TestCanvasLecAPIVideoFramesFollowUpstreamModel(t *testing.T) {
 	require.NoError(t, err)
 	plugin, err := jsplugin.NewRegistry().RegisterFactory(source, jsplugin.Options{Key: "lecapi"})
 	require.NoError(t, err)
-	for _, name := range []string{"ap-seedance-2-0-ot", "ap-seedance-2-0-ot-fast", "ap-seedance-2-0-ot-mini", "ap-seedance-2-5-ot", "ap-muse-video-720-10s", "am-minimax-h3-official", "ml-wan-3", "gt-seedance-2-0-full", "ms-minimax-h3"} {
+	for _, name := range []string{"seedance-2-0-per-token", "seedance-2-0-fast-per-token", "seedance-2-0-mini-per-token", "seedance-2-5-per-token", "ap-muse-video-720-10s", "am-minimax-h3-official", "wan-3-0-per-second", "ms-minimax-h3"} {
 		assert.Equal(t, 2, canvasLecAPIFrameCapacity(plugin.Meta, name, &model.Channel{}), name)
 	}
-	mapping := `{"custom":"route","route":"lec-ml-wan-3","ml-wan-3":"ap-wan-3-0-720p"}`
+	mapping := `{"custom":"route","route":"lec-wan-3-0-per-second","wan-3-0-per-second":"wan-3-0-per-request"}`
 	channel := &model.Channel{ModelMapping: &mapping}
 	assert.Equal(t, 2, canvasLecAPIFrameCapacity(plugin.Meta, "custom", channel))
-	assert.Zero(t, canvasLecAPIFrameCapacity(plugin.Meta, "ml-wan-3", channel))
+	assert.Zero(t, canvasLecAPIFrameCapacity(plugin.Meta, "wan-3-0-per-second", channel))
 	assert.Zero(t, canvasLecAPIFrameCapacity(plugin.Meta, "seedance-2-5-01", channel))
 }
 
