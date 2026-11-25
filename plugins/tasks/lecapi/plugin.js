@@ -1,6 +1,6 @@
-// LecAPI public media catalog and pricing snapshot: 2026-11-23.
-// Sources: https://api.lecapi.net/api/media-models/catalog and /api/pricing.
-// Catalog version: sha256:84ac4543ff852f98cd016387d6b33cfc125304882e690652642b94611676d892.
+// LecAPI public media catalog and pricing snapshot: 2026-11-25.
+// Sources: https://api.lecapi.net/api/media-models/catalog, /api/pricing, and authenticated /v1/models.
+// Catalog version: sha256:a3a5c74b4c487f3090b3b4bca80384c489eff1aa6c2c4d65a6f41c13063000b1.
 // Pricing version: a42d372ccf0b5dd13ecf71203521f9d2.
 // New routes were cross-checked against public pricing and the authenticated /v1/models list.
 // The catalog determines media kinds; this plugin serves only image and video generation.
@@ -151,6 +151,7 @@ const MODELS = {
     billing: { billing_unit: "request", price_per_request: 2 },
   },
   "lec-vg-seedance-2-0-fast-cc": {
+    retired: true,
     kind: "video",
     name: "Seedance 2.0 Fast（VG）",
     icon: "Doubao.Color",
@@ -198,6 +199,7 @@ const MODELS = {
     billing: { billing_unit: "request", price_per_request: 5 },
   },
   "lec-rs-seedance-2-0-fast": {
+    retired: true,
     kind: "video",
     name: "Seedance 2.0 Fast（RS）",
     icon: "Doubao.Color",
@@ -556,6 +558,7 @@ const MODELS = {
     billing: { billing_unit: "request", price: 0.13 },
   },
   "lec-vw-seedance-2-0-fast": {
+    retired: true,
     kind: "video",
     name: "Seedance 2.0 Fast（VW）",
     icon: "Doubao.Color",
@@ -2076,7 +2079,6 @@ const MODELS = {
     billing: { billing_unit: "request", price_per_request: 0.1 },
   },
   image2: {
-    retired: true,
     kind: "image",
     name: "Image generation",
     icon: "OpenAI.Color",
@@ -2092,7 +2094,6 @@ const MODELS = {
     billing: {},
   },
   "nano-banana-2": {
-    retired: true,
     kind: "image",
     name: "Image generation Pro",
     icon: "Gemini.Color",
@@ -2107,7 +2108,6 @@ const MODELS = {
     billing: {},
   },
   "lec-vp-seedance-2-9-301010": {
-    retired: true,
     kind: "video",
     name: "Seedance 2.9 301010 (VP)",
     icon: "Doubao.Color",
@@ -2144,6 +2144,7 @@ const MODELS = {
     billing: { billing_unit: "request", price_per_request: 0.8 },
   },
   "lec-ap-seedance-2-0-image-audio": {
+    retired: true,
     kind: "video",
     name: "Seedance 2.0 903（AP）",
     icon: "Doubao.Color",
@@ -2477,7 +2478,31 @@ const MODELS = {
     },
     billing: { billing_unit: "request", resolution_prices: { "480p": 3.7, "720p": 5 } },
   },
+  "lec-mw-seedance-2-5-slow": {
+    kind: "video",
+    name: "Seedance 2.5 Slow（MW）",
+    icon: "Doubao.Color",
+    tags: ["image", "video", "audio", "per_second"],
+    parameters: {
+      prompt: { type: "string", required: true, maxLength: 5000 },
+      duration: { type: "integer", default: 4, min: 4, max: 30, step: 1 },
+      resolution: { type: "enum", default: "720p", values: ["480p", "720p", "1080p", "4k"] },
+      aspect_ratio: { type: "enum", default: "16:9", values: ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"] },
+      images: { type: "array", constraints: { max_items: 30, url_schemes: ["http", "https"] } },
+      videos: { type: "array", constraints: { max_items: 10, url_schemes: ["http", "https"] } },
+      audios: { type: "array", constraints: { max_items: 10, url_schemes: ["http", "https"] } },
+    },
+    billing: {
+      billing_unit: "second",
+      equivalent_second_price: 0.32,
+      resolution_prices: { "480p": 0.26, "720p": 0.32, "1080p": 2.1, "4k": 2.5 },
+      video_reference_input_prices: { "480p": 0.18, "720p": 0.252, "1080p": 1.8, "4k": 2.25 },
+    },
+    max_reference_total: 50,
+    reference_video_duration_must_not_exceed_output: true,
+  },
   "lec-vp-seedance-2-5-flash-t": {
+    retired: true,
     kind: "video",
     name: "Seedance 2.5 Flash T (VP)",
     icon: "Doubao.Color",
@@ -2752,7 +2777,7 @@ const RESOLUTIONS = ["unspecified", ...new Set(Object.values(MODELS).flatMap((mo
 const VIDEO_USAGE_SCHEMA = {
   requests: { type: "number", unit: "count", description: { en: "Video generation request unit price", zh: "视频生成按次单价" } },
   seconds: { type: "number", unit: "second", description: { en: "Video generation unit price", zh: "视频生成单价" } },
-  reference_seconds: { type: "number", unit: "second", optional: true, description: { en: "Reference video unit price", zh: "参考视频单价" } },
+  reference_seconds: { type: "number", unit: "second", optional: true, description: { en: "Reference video input unit price", zh: "参考视频输入单价" } },
   extra_images: {
     type: "number",
     unit: "count",
@@ -2806,16 +2831,25 @@ function defaultExpression(profile) {
       ? Math.min(salePrice, Number((price + TEMP_REQUEST_MARKUP_CAP).toFixed(12)))
       : salePrice;
   };
-  const leaf = (name, price) =>
-    "tier(" +
-    JSON.stringify(name) +
-    ", u(" +
-    JSON.stringify(quantity) +
-    ") * " +
-    priceWithFee(price) +
-    (billing.billing_unit === "million_tokens" ? " / 1000000" : "") +
-    (profile.bill_reference_videos ? ' + u("reference_seconds") * ' + priceWithFee(price) : "") +
-    ")";
+  const leaf = (name, price, referencePrice) => {
+    const referenceCharge =
+      referencePrice !== undefined
+        ? ' + u("reference_seconds") * ' + priceWithFee(referencePrice)
+        : profile.bill_reference_videos
+          ? ' + u("reference_seconds") * ' + priceWithFee(price)
+          : "";
+    return (
+      "tier(" +
+      JSON.stringify(name) +
+      ", u(" +
+      JSON.stringify(quantity) +
+      ") * " +
+      priceWithFee(price) +
+      (billing.billing_unit === "million_tokens" ? " / 1000000" : "") +
+      referenceCharge +
+      ")"
+    );
+  };
   if (billing.upscale_prices) {
     const branches = [];
     for (const [algorithm, resolutions] of Object.entries(billing.upscale_prices)) {
@@ -2886,6 +2920,14 @@ function defaultExpression(profile) {
     const resolutions = Object.keys(billing.resolution_prices).filter(
       (value) => !profile.parameters.resolution?.values || profile.parameters.resolution.values.includes(value)
     );
+    if (billing.video_reference_input_prices) {
+      return resolutions
+        .map((resolution, index) => {
+          const expression = leaf(resolution, billing.resolution_prices[resolution], billing.video_reference_input_prices[resolution]);
+          return (index === resolutions.length - 1 ? "" : 'u("resolution") == ' + JSON.stringify(resolution) + " ? ") + "(" + expression + ")";
+        })
+        .join(" : ");
+    }
     if (billing.video_reference_prices) {
       const branches = [];
       for (let index = 0; index < resolutions.length; index++) {
@@ -3272,6 +3314,10 @@ const PUBLIC_DISPLAY_NAMES = {
   "wan-3-0-h2": "Wan 3.0 · 480p",
   "aj-wan-3-0-prime": "Wan 3.0 Prime",
   "mw-wan-3-0-s": "Wan 3.0 · 1080p 按次",
+  "mw-seedance-2-5-slow": "Seedance 2.5 Slow · MW",
+  image2: "Image 2 · OpenAI",
+  "nano-banana-2": "Nano Banana 2 · Google",
+  "vp-seedance-2-9-301010": "Seedance 2.9 301010 · VP",
   "ap-muse-video-720-10s": "Muse Video · 720p",
   "muse-zr-700": "Muse Video · Character",
   "mf-gemini-omni-1-2-flash": "Gemini Omni 1.2 Flash",
@@ -3314,7 +3360,7 @@ export const meta = {
   key: "lecapi",
   name: "LecAPI",
   icon: "text:LE",
-  version: "1.15.0",
+  version: "1.16.0",
   author: { name: "QuantumNous" },
   website: "https://api.lecapi.net/docs",
   baseUrl: "https://api.lecapi.net",
@@ -3685,10 +3731,12 @@ function submission(ctx, profile = modelProfile(ctx)) {
     throw new Error("unsupported upscaling algorithm, resolution and frame rate combination");
   // Smart duration reserves the longest supported output while preserving -1 upstream.
   let seconds = body.duration === -1 ? profile.parameters.duration.max : body.duration || 0,
-    referenceSeconds = 0;
+    referenceSeconds = 0,
+    measuredReferenceDuration = 0;
   if (
     profile.source_duration ||
     profile.bill_reference_videos ||
+    profile.billing.video_reference_input_prices ||
     (profile.vendorModel === "lec-ms-minimax-h3" && videoCount) ||
     profile.max_reference_video_seconds ||
     profile.max_reference_video_total_seconds
@@ -3703,9 +3751,12 @@ function submission(ctx, profile = modelProfile(ctx)) {
       )
         throw new Error("reference video duration is outside the supported range");
       // AJ rounds each reference clip separately before adding it to output time.
+      measuredReferenceDuration += duration;
       referenceSeconds += profile.bill_reference_videos ? Math.ceil(duration) : duration;
     }
-    referenceSeconds = Math.ceil(referenceSeconds);
+    if (!profile.billing.video_reference_input_prices) referenceSeconds = Math.ceil(referenceSeconds);
+    if (profile.reference_video_duration_must_not_exceed_output && measuredReferenceDuration > seconds)
+      throw new Error("combined reference video duration cannot exceed output duration");
     if (referenceSeconds > 3600) throw new Error("combined reference video duration exceeds 3600 seconds");
     if (profile.max_reference_video_total_seconds && referenceSeconds > profile.max_reference_video_total_seconds)
       throw new Error("combined reference video duration exceeds the supported range");
@@ -3852,7 +3903,12 @@ export function extractUsage(ctx) {
   const facts = {
     requests: 1,
     seconds: request.seconds,
-    reference_seconds: request.profile.vendorModel === "lec-ms-minimax-h3" || request.profile.bill_reference_videos ? request.referenceSeconds : 0,
+    reference_seconds:
+      request.profile.vendorModel === "lec-ms-minimax-h3" ||
+      request.profile.bill_reference_videos ||
+      request.profile.billing.video_reference_input_prices
+        ? request.referenceSeconds
+        : 0,
     extra_images: request.profile.vendorModel === "lec-ms-minimax-h3" ? Math.max(request.imageCount - 5, 0) : 0,
     resolution: request.resolution || request.body.resolution || "unspecified",
     duration_tier: request.seconds > 15 ? "long" : "short",
