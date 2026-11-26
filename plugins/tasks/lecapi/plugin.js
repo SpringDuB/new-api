@@ -5,7 +5,7 @@
 // New routes were cross-checked against public pricing and the authenticated /v1/models list.
 // The catalog determines media kinds; this plugin serves only image and video generation.
 // Standalone model pricing: published CNY price +20%, with a temporary ¥0.50 per-request markup cap.
-// Seedance pools have their own CNY platform prices, converted to USD for task expressions.
+// Seedance pools publish their own platform prices for the 1:1 CNY setup.
 // Retired profiles remain readable for historical tasks but cannot accept new submissions.
 // TinySnow Image 2 follows its Base64-only docs rather than the url capability.
 // Missing or unverifiable prices remain unconfigured.
@@ -2658,7 +2658,6 @@ MODELS["lec-vg-minimax-h3-2k"] = {
   },
   max_reference_total: 15,
   billing: { billing_unit: "request", resolution_prices: { "1440p": 0.8 } },
-  convertCatalogCNY: true,
 };
 
 // These fixed output settings are omitted from the upstream JSON contract.
@@ -2787,8 +2786,8 @@ const SEEDANCE_POOLS = {
   "seedance-2-5-flash-per-second": ["lec-ap-seedance-2-5-flash-pf", "lec-mf-seedance-2-5-flash-gz"],
 };
 
-// Customer prices in the existing LecAPI catalog units. Route costs do not
-// participate in the pooled customer's bill.
+// Customer prices are in CNY for the site's 1:1 billing setup. Route costs do
+// not participate in the pooled customer's bill.
 const SEEDANCE_PRICES = {
   "seedance-2-0-per-request": {
     billing_unit: "request", resolution_prices: { "720p": 2.9 }, video_reference_prices: { "720p": 3.3 },
@@ -2827,8 +2826,9 @@ const SEEDANCE_PRICES = {
   },
   "seedance-2-5-per-second": {
     billing_unit: "second",
-    resolution_prices: { "480p": 0.39, "720p": 0.84, "1080p": 2.52, "4k": 3 },
-    video_reference_prices: { "480p": 0.68, "720p": 1.06, "1080p": 2.52, "4k": 3 },
+    // Base costs by resolution: 0.32, 0.47, 1.75, and 2.50 CNY. Add 20% and round up to cents.
+    resolution_prices: { "480p": 0.39, "720p": 0.57, "1080p": 2.10, "4k": 3 },
+    video_reference_prices: { "480p": 0.68, "720p": 1.06, "1080p": 2.10, "4k": 3 },
     video_reference_input_prices: { "480p": 0.22, "720p": 0.31, "1080p": 2.16, "4k": 2.7 },
   },
   "seedance-2-5-per-token": {
@@ -2866,8 +2866,6 @@ const WAN_PRICES = {
 
 const PRICE_MARKUP = 1.2;
 const TEMP_REQUEST_MARKUP_CAP = 0.5;
-// Stolas' accounting rate when publishing CNY prices through USD task expressions.
-const CNY_PER_USD = 7.3;
 
 function roundedSalePrice(markedUpPrice, unit) {
   const scale = unit === "second" ? 100 : 10;
@@ -3002,7 +3000,8 @@ for (const [model, candidates] of Object.entries({ ...SEEDANCE_POOLS, ...WAN_POO
   });
   pooled.uniformVideoPool = true;
   const seedance25PerRequest = model === "seedance-2-5-per-request";
-  pooled.limitRouteCost = wan || seedance25PerRequest || model.startsWith("seedance-2-0-");
+  pooled.enforceSecondRouteCost = !wan && unit === "second";
+  pooled.limitRouteCost = wan || seedance25PerRequest || (model.startsWith("seedance-2-0-") && !pooled.enforceSecondRouteCost);
   if (wan || seedance25PerRequest) {
     for (const route of candidates) INTERNAL_VIDEO_MODELS.add(route);
   }
@@ -3104,13 +3103,13 @@ function defaultExpression(profile) {
           ? "seconds"
           : "requests";
   const priceWithFee = (price) => {
-    if (profile.uniformVideoPool) return Number((price / CNY_PER_USD).toPrecision(15));
+    // Keep integer rates as decimal literals so tier() receives a float.
+    if (profile.uniformVideoPool) return Number.isInteger(price) ? price.toFixed(1) : String(price);
     const markedUp = price * PRICE_MARKUP;
     const salePrice =
       profile.kind === "video" && ["request", "second"].includes(billing.billing_unit)
         ? roundedSalePrice(markedUp, billing.billing_unit)
         : Number(markedUp.toFixed(12));
-    if (profile.convertCatalogCNY) return Number((salePrice / CNY_PER_USD).toPrecision(15));
     return billing.billing_unit === "request" && billing.price_per_image === undefined
       ? Math.min(salePrice, Number((price + TEMP_REQUEST_MARKUP_CAP).toFixed(12)))
       : salePrice;
@@ -3671,7 +3670,7 @@ export const meta = {
     en: "LecAPI image and video generation with model parameters, reference materials and published default pricing",
     zh: "LecAPI 图片与视频生成，包含模型参数、参考素材要求及公开默认定价",
   },
-  requiredCapabilities: ["submit-no-retry@1", "media-duration@1", "lecapi-video-pool@1"],
+  requiredCapabilities: ["submit-no-retry@1", "media-duration@1", "lecapi-video-pool@1", "lecapi-route-cost@1"],
   upstreams: ["vendor", "new_api"],
   fetchMode: "per_task",
   models: Object.keys(MODEL_MAPPING),
@@ -4115,6 +4114,7 @@ function videoPoolSubmission(ctx, profile, includeAlternatives) {
   const resolutionParameter = profile.parameters.resolution;
   let selected;
   const routeAlternatives = [];
+  const routeCosts = includeAlternatives && ctx.upstream?.kind !== "new_api" && profile.enforceSecondRouteCost ? {} : undefined;
   for (const vendorModel of profile.routes) {
     const candidate = MODELS[vendorModel];
     const fixed = FIXED_VIDEO_OUTPUTS[vendorModel] || {};
@@ -4156,20 +4156,29 @@ function videoPoolSubmission(ctx, profile, includeAlternatives) {
         if (fixed.resolution) delete request.body.resolution;
         if (fixed.duration) delete request.body.duration;
       }
-      if (!selected) {
+      if (selected) {
+        // Alternatives must share the reservation facts and effective output settings.
+        if (request.seconds !== selected.seconds || request.videoCount !== selected.videoCount || resolution !== selected.resolution ||
+            request.referenceSeconds !== selected.referenceSeconds || request.tokens !== selected.tokens) continue;
+        routeAlternatives.push(request.body);
+      } else {
         selected = { ...request, profile, resolution };
         if (!includeAlternatives || ctx.upstream?.kind === "new_api") return selected;
-      } else if (request.seconds === selected.seconds && request.videoCount === selected.videoCount && resolution === selected.resolution &&
-                 request.referenceSeconds === selected.referenceSeconds && request.tokens === selected.tokens) {
-        // Alternatives must share every reservation fact and effective output
-        // setting; otherwise a retry could change the request or its price.
-        routeAlternatives.push(request.body);
+      }
+      if (routeCosts) {
+        const upstream = candidate.billing;
+        routeCosts[vendorModel] = {
+          outputSecond: (request.videoCount && upstream.video_reference_prices?.[resolution]) || upstream.resolution_prices[resolution],
+          referenceSecond: request.videoCount ? upstream.video_reference_input_prices?.[resolution] ?? 0 : 0,
+          // Match the durations this route can return for usage settlement.
+          durations: duration.values || Array.from({ length: duration.max - duration.min + 1 }, (_, index) => duration.min + index),
+        };
       }
     } catch {
       // A candidate can be excluded before submit, never by downgrading its input.
     }
   }
-  if (selected) return { ...selected, routeAlternatives };
+  if (selected) return { ...selected, routeAlternatives, routeCosts };
   throw new Error("No LecAPI route supports this combination of resolution, duration and reference materials");
 }
 
@@ -4213,6 +4222,7 @@ export function buildSubmitRequest(ctx) {
     body: request.body,
     action: request.profile.kind === "image" ? request.body.action || "imagine" : "generate",
     ...(request.routeAlternatives ? { lecapiRouteAlternatives: request.routeAlternatives } : {}),
+    ...(request.routeCosts ? { lecapiRouteCosts: request.routeCosts } : {}),
   };
 }
 

@@ -47,7 +47,6 @@ const SHARED_FIELDS = new Set([
   "image_ids", "image_b64s", "video_b64s", "audio_b64s",
   ...CONTAINERS, ...IMAGE_FIELDS, ...VIDEO_FIELDS, ...AUDIO_FIELDS, ...QUANTITY_FIELDS,
 ]);
-const CNY_PER_USD = 7.3;
 
 export const meta = {
   apiVersion: 1,
@@ -63,14 +62,15 @@ export const meta = {
   upstreams: ["vendor", "new_api"],
   requiredCapabilities: ["submit-no-retry@1", "media-duration@1", "json-file-upload@1"],
   models: VIDEO_NAMES,
+  // Customer prices are in CNY for the site's 1:1 billing setup.
   modelDefaults: {
     [SD20_PER_REQUEST]: {
       displayName: "Seedance 2.0 · 按次",
-      billingExpr: 'tier("720p", u("requests") * ' + (2.9 / CNY_PER_USD).toPrecision(15) + ")",
+      billingExpr: 'tier("720p", u("requests") * 2.9)',
     },
     [SD25_PER_REQUEST]: {
       displayName: "Seedance 2.5 · 按次",
-      billingExpr: 'tier("720p", u("requests") * ' + (6 / CNY_PER_USD).toPrecision(15) + ")",
+      billingExpr: 'tier("720p", u("requests") * 6.0)',
     },
   },
   usageSchema: {

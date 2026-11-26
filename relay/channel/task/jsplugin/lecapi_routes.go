@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"math"
 	"net/http"
 	"reflect"
 	"slices"
@@ -22,7 +23,9 @@ import (
 	"github.com/QuantumNous/new-api/relay/channel"
 	"github.com/QuantumNous/new-api/relay/channel/task/taskcommon"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
+	"github.com/shopspring/decimal"
 )
 
 // Keep persistence bounded independently of the plugin's small state limit.
@@ -37,6 +40,83 @@ type lecapiRetryPayload struct {
 type lecapiRouteCandidate struct {
 	Route string         `json:"route"`
 	Body  map[string]any `json:"body"`
+}
+
+type lecapiRouteCost struct {
+	OutputSecond    float64 `json:"outputSecond"`
+	ReferenceSecond float64 `json:"referenceSecond"`
+	Durations       []int   `json:"durations"`
+}
+
+// FilterPricedTaskRoutes freezes the affordable set before either submission or
+// delayed retry can see it. Compare known costs to the actual group-adjusted
+// charge at each duration the route can report, including the reservation.
+func (a *TaskAdaptor) FilterPricedTaskRoutes(info *relaycommon.RelayInfo) error {
+	if a.plugin.Meta.Key != "lecapi" || a.submit == nil || a.submit.LecAPIRouteCosts == nil {
+		return nil
+	}
+	snap := info.TieredBillingSnapshot
+	if snap == nil || snap.QuotaPerUnit <= 0 || math.IsNaN(snap.QuotaPerUnit) || math.IsInf(snap.QuotaPerUnit, 0) {
+		return errors.New("the video route pool requires a valid usage price")
+	}
+	primary, ok := a.submit.Body.(map[string]any)
+	seconds, validSeconds := snap.UsageFacts["seconds"].(float64)
+	referenceSeconds, _ := snap.UsageFacts["reference_seconds"].(float64)
+	const maxSeedanceDuration = 30
+	if !ok || !validSeconds || math.Trunc(seconds) != seconds || seconds < 1 || seconds > maxSeedanceDuration ||
+		math.IsNaN(referenceSeconds) || math.IsInf(referenceSeconds, 0) || referenceSeconds < 0 {
+		return errors.New("invalid video usage for the route cost check")
+	}
+	quotaPerUnit := decimal.NewFromFloat(snap.QuotaPerUnit)
+	inputSeconds := decimal.NewFromFloat(referenceSeconds)
+	charges := map[int]int{int(seconds): snap.EstimatedQuotaAfterGroup}
+	candidates := append([]map[string]any{primary}, a.submit.LecAPIRouteAlternatives...)
+	eligible := candidates[:0]
+	for _, body := range candidates {
+		name, _ := body["model"].(string)
+		rate, ok := a.submit.LecAPIRouteCosts[name]
+		if !ok || rate.OutputSecond <= 0 || rate.ReferenceSecond < 0 ||
+			(rate.ReferenceSecond > 0 && referenceSeconds == 0) || !slices.Contains(rate.Durations, int(seconds)) {
+			continue
+		}
+		outputQuotaPerSecond := decimal.NewFromFloat(rate.OutputSecond).Mul(quotaPerUnit)
+		inputQuota := decimal.NewFromFloat(rate.ReferenceSecond).Mul(inputSeconds).Mul(quotaPerUnit)
+		covered := true
+		for _, duration := range rate.Durations {
+			if duration < 1 || duration > maxSeedanceDuration {
+				covered = false
+				break
+			}
+			charge, resolved := charges[duration]
+			if !resolved {
+				durationTier := "short"
+				if duration > 15 {
+					durationTier = "long"
+				}
+				result, _, err := service.EvaluateTaskCompletionUsage(snap, map[string]any{"seconds": float64(duration), "duration_tier": durationTier})
+				if err != nil {
+					covered = false
+					break
+				}
+				charge = result.ActualQuotaAfterGroup
+				charges[duration] = charge
+			}
+			cost := outputQuotaPerSecond.Mul(decimal.NewFromInt(int64(duration))).Add(inputQuota)
+			if cost.GreaterThan(decimal.NewFromInt(int64(charge))) {
+				covered = false
+				break
+			}
+		}
+		if covered {
+			eligible = append(eligible, body)
+		}
+	}
+	if len(eligible) == 0 {
+		return errors.New("no video route is available at the current price for this request")
+	}
+	a.submit.Body = eligible[0]
+	a.submit.LecAPIRouteAlternatives = eligible[1:]
+	return nil
 }
 
 // The plugin validates each body before quota reservation. All alternatives use

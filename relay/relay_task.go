@@ -342,6 +342,13 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (_ *TaskSubmit
 		noteTaskQuotaClamp(info, clamp)
 	}
 
+	if filter, ok := adaptor.(channel.TaskPricedRouteFilter); ok {
+		if err := filter.FilterPricedTaskRoutes(info); err != nil {
+			logger.LogDebug(c, "task route price check failed: %v", err)
+			return nil, service.TaskErrorWrapperLocal(errors.New(i18n.T(c, i18n.MsgRelayTaskRouteOverBudget)), "task_route_over_budget", http.StatusServiceUnavailable)
+		}
+	}
+
 	// 7. 预扣费：首次尝试创建计费会话；重试时会话已存在，换到更贵的渠道要在
 	//    发起上游请求前补足预扣，余额不足就不发请求。
 	if info.Billing != nil || !info.PriceData.FreeModel {

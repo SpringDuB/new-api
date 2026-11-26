@@ -25,6 +25,7 @@ import (
 	taskplugin "github.com/QuantumNous/new-api/relay/channel/task/jsplugin"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/config"
 	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/gin-gonic/gin"
@@ -124,6 +125,8 @@ func TestLecAPICurrentVideoModelsExposePricingAndRequestContracts(t *testing.T) 
 		{"seedance-2-5-flash-per-second", "lec-ap-seedance-2-5-flash-pf", map[string]any{"prompt": "boat", "duration": 5, "resolution": "720p", "videos": []any{"https://media.example/ref.mp4"}}, 3.6},
 		{"seedance-2-5-per-second", "lec-ap-seedance-2-5-pf", map[string]any{"prompt": "boat", "duration": 4, "resolution": "480p", "first_frame": "https://media.example/frame.png"}, 1.56},
 		{"vg-minimax-h3-2k", "lec-vg-minimax-h3-2k", map[string]any{"prompt": "boat"}, 1},
+		{"seedance-2-5-per-second", "lec-ap-seedance-2-5-pf", map[string]any{"prompt": "boat", "duration": 5, "resolution": "720p"}, 2.85},
+		{"seedance-2-5-per-second", "lec-ap-seedance-2-5-yz", map[string]any{"prompt": "boat", "duration": 5, "resolution": "1080p"}, 10.5},
 		{"seedance-2-5-per-second", "lec-mw-seedance-2-5-slow", map[string]any{"prompt": "boat", "duration": 5, "resolution": "4k"}, 15},
 	} {
 		t.Run(tc.model+"/"+tc.upstream, func(t *testing.T) {
@@ -171,9 +174,6 @@ func TestLecAPICurrentVideoModelsExposePricingAndRequestContracts(t *testing.T) 
 			}
 			cost, _, err := billingexpr.RunExprWithRequest(defaults.BillingExpr, billingexpr.TokenParams{}, billingexpr.RequestInput{Usage: facts})
 			require.NoError(t, err)
-			if strings.HasPrefix(tc.model, "seedance-2-") || tc.model == "vg-minimax-h3-2k" {
-				cost *= 7.3
-			}
 			assert.InDelta(t, tc.price, cost, 1e-12)
 		})
 	}
@@ -365,7 +365,7 @@ func TestLecAPIVideoPoolsBillAndRouteByRequestedResolution(t *testing.T) {
 			assert.Equal(t, tc.resolution, facts["resolution"])
 			cost, _, err := billingexpr.RunExprWithRequest(defaults.BillingExpr, billingexpr.TokenParams{}, billingexpr.RequestInput{Usage: facts})
 			require.NoError(t, err)
-			assert.InDelta(t, tc.price, cost*7.3, 1e-12)
+			assert.InDelta(t, tc.price, cost, 1e-12)
 		})
 	}
 	for _, tc := range []struct {
@@ -467,7 +467,7 @@ func TestLecAPISeedance25RoutesByResolutionAndMaterials(t *testing.T) {
 	assert.Equal(t, "720p", facts.(map[string]any)["resolution"])
 	cost, _, err := billingexpr.RunExprWithRequest(defaults.BillingExpr, billingexpr.TokenParams{}, billingexpr.RequestInput{Usage: facts.(map[string]any)})
 	require.NoError(t, err)
-	assert.InDelta(t, 6, cost*7.3, 1e-12)
+	assert.InDelta(t, 6, cost, 1e-12)
 	videoCtx["requestBody"].(map[string]any)["images"] = slices.Repeat([]any{"https://media.example/ref.png"}, 31)
 	_, err = plugin.Engine.Call(probe, "buildSubmitRequest", videoCtx)
 	require.ErrorContains(t, err, "supports this combination")
@@ -1324,7 +1324,7 @@ func TestLecAPITokenVideoReservationAndSettlement(t *testing.T) {
 			require.True(t, found)
 			cost, _, err := billingexpr.RunExprWithRequest(defaults.BillingExpr, billingexpr.TokenParams{}, billingexpr.RequestInput{Usage: facts})
 			require.NoError(t, err)
-			assert.InDelta(t, tc.tokens*tc.unitPrice/1000000, cost*7.3, 1e-10)
+			assert.InDelta(t, tc.tokens*tc.unitPrice/1000000, cost, 1e-10)
 			complete := lecAPIHook(t, plugin, "extractUsageOnComplete", ctx, map[string]any{"status": "SUCCESS"}, map[string]any{
 				"seconds": 4, "resolution": "480p", "usage": map[string]any{"total_tokens": 1000000},
 			})
@@ -1332,7 +1332,7 @@ func TestLecAPITokenVideoReservationAndSettlement(t *testing.T) {
 			maps.Copy(facts, complete)
 			cost, _, err = billingexpr.RunExprWithRequest(defaults.BillingExpr, billingexpr.TokenParams{}, billingexpr.RequestInput{Usage: facts})
 			require.NoError(t, err)
-			assert.InDelta(t, tc.unitPrice, cost*7.3, 1e-10)
+			assert.InDelta(t, tc.unitPrice, cost, 1e-10)
 		})
 	}
 	ctx := lecAPIContext("seedance-2-5-per-token", nil)
@@ -1615,12 +1615,12 @@ func TestLecAPIReferenceVideoBillingUsesMeasuredDuration(t *testing.T) {
 			require.True(t, ok)
 			cost, _, err := billingexpr.RunExprWithRequest(defaults.BillingExpr, billingexpr.TokenParams{}, billingexpr.RequestInput{Usage: facts})
 			require.NoError(t, err)
-			assert.InDelta(t, tc.price*15, cost*7.3, 1e-12)
+			assert.InDelta(t, tc.price*15, cost, 1e-12)
 			completion := lecAPIHook(t, plugin, "extractUsageOnComplete", lecAPIContext(tc.model, nil), map[string]any{"status": "SUCCESS"}, map[string]any{"seconds": 5})
 			maps.Copy(facts, completion)
 			cost, _, err = billingexpr.RunExprWithRequest(defaults.BillingExpr, billingexpr.TokenParams{}, billingexpr.RequestInput{Usage: facts})
 			require.NoError(t, err)
-			assert.InDelta(t, tc.price*13, cost*7.3, 1e-12, "completion preserves the frozen reference duration")
+			assert.InDelta(t, tc.price*13, cost, 1e-12, "completion preserves the frozen reference duration")
 			for _, videos := range [][]any{
 				{server.URL + "/broken.mp4"},
 				{server.URL + "/long.mp4", server.URL + "/long.mp4", server.URL + "/long.mp4", server.URL + "/long.mp4"},
@@ -1655,13 +1655,38 @@ func TestLecAPIReferenceVideoBillingUsesMeasuredDuration(t *testing.T) {
 			resolution string
 			cost       float64
 		}{
-			{"480p", 6.3}, {"720p", 9.59}, {"1080p", 32.76}, {"4k", 39.9},
+			{"480p", 6.3}, {"720p", 9.59}, {"1080p", 29.82}, {"4k", 39.9},
 		} {
 			usage := maps.Clone(facts)
 			usage["resolution"] = tc.resolution
 			cost, _, err := billingexpr.RunExprWithRequest(defaults.BillingExpr, billingexpr.TokenParams{}, billingexpr.RequestInput{Usage: usage})
 			require.NoError(t, err)
-			assert.InDelta(t, tc.cost, cost*7.3, 1e-12, tc.resolution)
+			assert.InDelta(t, tc.cost, cost, 1e-12, tc.resolution)
+		}
+
+		c.Set("task_request", map[string]any{"prompt": "boat", "duration": 7, "resolution": "4k", "videos": []any{server.URL + "/first.mp4", server.URL + "/second.mp4"}})
+		require.Nil(t, adaptor.ValidateRequestAndSetAction(c, info))
+		facts, err = adaptor.ExtractUsageFactsValidated(c, info)
+		require.NoError(t, err)
+		for _, tc := range []struct {
+			expression string
+			eligible   bool
+		}{
+			{`u("seconds") * 3.0`, false},
+			{`u("seconds") * 3.0 + u("reference_seconds") * 2.7`, true},
+		} {
+			charge, _, err := billingexpr.RunExprWithRequest(tc.expression, billingexpr.TokenParams{}, billingexpr.RequestInput{Usage: facts})
+			require.NoError(t, err)
+			info.TieredBillingSnapshot = &billingexpr.BillingSnapshot{
+				ExprString: tc.expression, ExprHash: billingexpr.ExprHashString(tc.expression), GroupRatio: 1,
+				QuotaPerUnit: common.QuotaPerUnit, TaskUsageBilling: true, UsageFacts: facts,
+				EstimatedQuotaAfterGroup: common.QuotaRound(charge * common.QuotaPerUnit),
+			}
+			if tc.eligible {
+				require.NoError(t, adaptor.FilterPricedTaskRoutes(info))
+			} else {
+				require.Error(t, adaptor.FilterPricedTaskRoutes(info), "the 4K upstream also charges for reference input")
+			}
 		}
 
 		c.Set("task_request", map[string]any{"prompt": "boat", "metadata": map[string]any{
@@ -2109,7 +2134,7 @@ func TestLecAPIHostReservesAndSettlesDefaultPricesWithoutSavedConfiguration(t *t
 	t.Run("merged route keeps the advertised price", func(t *testing.T) {
 		const entry = "seedance-2-5-per-request"
 		reservation := &xogpuReservation{}
-		want := common.QuotaRound(6 / 7.3 * common.QuotaPerUnit)
+		want := common.QuotaRound(6 * common.QuotaPerUnit)
 		calls := 0
 		client.Transport = lecAPIFixtureTransport(func(request *http.Request) (*http.Response, error) {
 			calls++
@@ -2140,13 +2165,79 @@ func TestLecAPIHostReservesAndSettlesDefaultPricesWithoutSavedConfiguration(t *t
 		assert.Equal(t, want, result.Quota)
 		assert.Equal(t, "720p", info.TieredBillingSnapshot.UsageFacts["resolution"])
 	})
+	t.Run("per-second pool filters routes against the effective customer charge", func(t *testing.T) {
+		const sd25 = "seedance-2-5-per-second"
+		for _, tc := range []struct {
+			name, model, resolution, expression string
+			seconds                             int
+			routes                              []string
+			accept                              bool
+		}{
+			{"480p at cost", sd25, "480p", `u("seconds") * 0.24`, 4, []string{"lec-vg-seedance-2-5-pa"}, false},
+			{"720p using only eligible fallbacks", sd25, "720p", `u("seconds") * 0.34`, 4, []string{"lec-mw-seedance-2-5-slow", "lec-vg-seedance-2-5-pa"}, false},
+			{"720p stores only the affordable retry", sd25, "720p", `u("seconds") * 0.34`, 4, []string{"lec-mw-seedance-2-5-slow", "lec-vg-seedance-2-5-pa"}, true},
+			{"1080p uses lower-cost routes", sd25, "1080p", `u("seconds") * 0.60`, 5, []string{"lec-mf-seedance-2-5-gz", "lec-shuikule-seedance-2-5-m"}, false},
+			{"4K has no affordable route", sd25, "4k", `u("seconds") * 2.49`, 5, nil, false},
+			{"later settlement may not run at a loss", sd25, "480p", `u("seconds") == 5 ? u("seconds") * 0.31 : u("seconds") * 0.10`, 5, nil, false},
+			{"2.0 filters by the configured price", "seedance-2-0-per-second", "720p", `u("seconds") * 0.32`, 5, []string{"lec-ap-seedance-2-0-pf"}, false},
+			{"2.0 Fast keeps both routes at cost or below", "seedance-2-0-fast-per-second", "480p", `u("seconds") * 0.19`, 5, []string{"lec-ap-seedance-2-0-fast-pf", "lec-mf-seedance-2-0-fast-gz"}, false},
+			{"2.0 Mini has no affordable alternative", "seedance-2-0-mini-per-second", "720p", `u("seconds") * 0.13`, 5, nil, false},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				prices, err := common.Marshal(map[string]string{billing_setting.PluginBillingExprKey("lecapi", tc.model): tc.expression})
+				require.NoError(t, err)
+				require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{billing_setting.PluginBillingExprOption: string(prices)}))
+				var attempted []string
+				client.Transport = lecAPIFixtureTransport(func(request *http.Request) (*http.Response, error) {
+					var body map[string]any
+					require.NoError(t, common.DecodeJson(request.Body, &body))
+					attempted = append(attempted, body["model"].(string))
+					if tc.accept {
+						return &http.Response{StatusCode: http.StatusAccepted, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"id":"accepted-video","status":"queued"}`)), Request: request}, nil
+					}
+					return &http.Response{StatusCode: http.StatusTooManyRequests, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"error":{"code":"rate_limit_exceeded"}}`)), Request: request}, nil
+				})
+				c, _ := gin.CreateTestContext(httptest.NewRecorder())
+				c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", nil)
+				c.Set("task_request", map[string]any{"model": tc.model, "prompt": "boat", "duration": tc.seconds, "resolution": tc.resolution})
+				c.Set(jsplugin.ContextKeyPinnedPlugin, jsplugin.PinnedPlugin{Plugin: plugin, Generation: jsplugin.DefaultRegistry.Generation()})
+				common.SetContextKey(c, constant.ContextKeyChannelType, constant.ChannelTypeTaskPlugin)
+				common.SetContextKey(c, constant.ContextKeyChannelBaseUrl, "https://lecapi-fixture.invalid")
+				common.SetContextKey(c, constant.ContextKeyChannelKey, "test-key")
+				reservation := &xogpuReservation{}
+				info := &relaycommon.RelayInfo{OriginModelName: tc.model, UserGroup: "default", UsingGroup: "default", Billing: reservation, TaskRelayInfo: &relaycommon.TaskRelayInfo{}}
+				result, taskErr := relay.RelayTaskSubmit(c, info)
+				if tc.accept {
+					require.Nil(t, taskErr, "%+v", taskErr)
+					require.NotNil(t, result)
+					assert.Equal(t, tc.routes[:1], attempted)
+					var saved struct {
+						Routes map[string]any `json:"routes"`
+					}
+					require.NoError(t, common.Unmarshal(result.LecAPIRetryPayload, &saved))
+					assert.ElementsMatch(t, tc.routes[1:], slices.Collect(maps.Keys(saved.Routes)))
+					return
+				}
+				require.NotNil(t, taskErr)
+				assert.Equal(t, tc.routes, attempted)
+				if tc.routes == nil {
+					assert.Equal(t, http.StatusServiceUnavailable, taskErr.StatusCode)
+					assert.Equal(t, 0, reservation.held)
+				} else {
+					assert.Equal(t, http.StatusTooManyRequests, taskErr.StatusCode)
+					assert.Positive(t, reservation.held)
+				}
+			})
+		}
+		require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{billing_setting.PluginBillingExprOption: `{}`}))
+	})
 	t.Run("AP token reservation and completion quota", func(t *testing.T) {
 		reservation := &xogpuReservation{}
 		calls := 0
 		client.Transport = lecAPIFixtureTransport(func(request *http.Request) (*http.Response, error) {
 			calls++
 			assert.Equal(t, "https://lecapi-fixture.invalid/v1/videos", request.URL.String())
-			assert.Equal(t, common.QuotaRound(2.51817984/7.3*common.QuotaPerUnit), reservation.held, "estimated tokens must be reserved before the upstream call")
+			assert.Equal(t, common.QuotaRound(2.51817984*common.QuotaPerUnit), reservation.held, "estimated tokens must be reserved before the upstream call")
 			var body map[string]any
 			require.NoError(t, common.DecodeJson(request.Body, &body))
 			assert.Equal(t, "lec-ap-seedance-2-0-ot", body["model"])
@@ -2170,7 +2261,7 @@ func TestLecAPIHostReservesAndSettlesDefaultPricesWithoutSavedConfiguration(t *t
 		require.Nil(t, taskErr, "%+v", taskErr)
 		require.NotNil(t, result)
 		assert.Equal(t, 1, calls)
-		assert.Equal(t, common.QuotaRound(2.91456/7.3*common.QuotaPerUnit), result.Quota)
+		assert.Equal(t, common.QuotaRound(2.91456*common.QuotaPerUnit), result.Quota)
 		assert.Greater(t, result.Quota, reservation.held, "the completion quota carries the increase to the host submission barrier")
 		assert.Equal(t, float64(100000), info.TieredBillingSnapshot.UsageFacts["tokens"])
 	})

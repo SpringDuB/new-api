@@ -1279,6 +1279,9 @@ func normalizeV1Meta(meta *Meta) error {
 		if name == CapabilityLecAPIVideoPool && (meta.Key != "lecapi" || !slices.Contains(meta.RequiredCapabilities, CapabilitySubmitNoRetry) || meta.PreservesJSONOrder()) {
 			return fmt.Errorf("%s requires the LecAPI JSON driver with %s", name, CapabilitySubmitNoRetry)
 		}
+		if name == CapabilityLecAPIRouteCost && !slices.Contains(meta.RequiredCapabilities, CapabilityLecAPIVideoPool) {
+			return fmt.Errorf("%s requires %s", name, CapabilityLecAPIVideoPool)
+		}
 		seenCapabilities[name] = true
 	}
 	seenUpstreams := make(map[string]bool, len(meta.Upstreams))

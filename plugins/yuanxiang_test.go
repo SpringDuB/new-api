@@ -222,7 +222,7 @@ func TestYuanxiangSharesSeedancePerRequestModelsWithLecAPI(t *testing.T) {
 			require.True(t, found)
 			cost, _, err := billingexpr.RunExprWithRequest(defaults.BillingExpr, billingexpr.TokenParams{}, billingexpr.RequestInput{Usage: facts})
 			require.NoError(t, err)
-			assert.InDelta(t, tc.price, cost*7.3, 1e-12)
+			assert.InDelta(t, tc.price, cost, 1e-12)
 			ctx["upstream"] = map[string]any{"kind": "new_api"}
 			chained := yuanxiangHook(t, yuanxiang, "buildSubmitRequest", ctx)["body"].(map[string]any)
 			assert.Equal(t, tc.public, chained["model"])

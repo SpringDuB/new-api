@@ -51,7 +51,8 @@ type requestDescriptor struct {
 	BodyType       string            `json:"bodyType"`
 	Parts          []requestPart     `json:"parts"`
 	// Used only by the LecAPI JSON video submission contract.
-	LecAPIRouteAlternatives []map[string]any `json:"lecapiRouteAlternatives"`
+	LecAPIRouteAlternatives []map[string]any           `json:"lecapiRouteAlternatives"`
+	LecAPIRouteCosts        map[string]lecapiRouteCost `json:"lecapiRouteCosts"`
 
 	// ContentPath and MimeType are read from buildContentRequest only: the
 	// artifact's bytes are a base64 string at that path of the JSON reply.

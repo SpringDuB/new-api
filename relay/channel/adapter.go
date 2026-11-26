@@ -141,6 +141,12 @@ type TaskBillingExpressionProvider interface {
 	ResolveBillingExpression(model, mappedModel string) (string, bool)
 }
 
+// TaskPricedRouteFilter filters validated upstream candidates before quota is reserved.
+// The chosen candidates must share the facts used to compute the task price.
+type TaskPricedRouteFilter interface {
+	FilterPricedTaskRoutes(info *relaycommon.RelayInfo) error
+}
+
 // TaskValidatedBillingProvider lets an adaptor reject invalid usage facts at
 // the existing estimate point, after model mapping and before quota
 // multiplication. Non-plugin task adaptors keep using EstimateBilling.
