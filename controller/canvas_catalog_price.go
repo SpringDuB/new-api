@@ -16,11 +16,18 @@ import (
 )
 
 type canvasCatalogPrice struct {
-	Currency              string                         `json:"currency"`
-	Rates                 []canvasPriceRate              `json:"rates,omitempty"`
-	Varies                bool                           `json:"varies,omitempty"`
-	Estimate              []canvasPriceAmount            `json:"estimate,omitempty"`
-	EstimatesByResolution map[string][]canvasPriceAmount `json:"estimates_by_resolution,omitempty"`
+	Currency                   string                              `json:"currency"`
+	Rates                      []canvasPriceRate                   `json:"rates,omitempty"`
+	Varies                     bool                                `json:"varies,omitempty"`
+	Estimate                   []canvasPriceAmount                 `json:"estimate,omitempty"`
+	EstimatesByResolution      map[string][]canvasPriceAmount      `json:"estimates_by_resolution,omitempty"`
+	VideoEstimatesByResolution map[string]canvasVideoPriceEstimate `json:"video_estimates_by_resolution,omitempty"`
+	VideoTokenEstimate         *jsplugin.VideoTokenEstimate        `json:"video_token_estimate,omitempty"`
+}
+
+type canvasVideoPriceEstimate struct {
+	WithoutReference []canvasPriceAmount `json:"without_reference,omitempty"`
+	WithReference    []canvasPriceAmount `json:"with_reference,omitempty"`
 }
 
 type canvasPriceRate struct {
@@ -39,7 +46,7 @@ type canvasPriceExpression struct {
 	schema map[string]jsplugin.UsageFieldSchema
 }
 
-func canvasPriceSummary(item model.Pricing, groups modelListGroups, plugins map[string]bool, resolutions []string) *canvasCatalogPrice {
+func canvasPriceSummary(item model.Pricing, groups modelListGroups, plugins map[string]bool, resolutions []string, video bool, tokenEstimate *jsplugin.VideoTokenEstimate) *canvasCatalogPrice {
 	price := &canvasCatalogPrice{Currency: operation_setting.GetCurrencySymbol()}
 	if price.Currency == "" {
 		price.Currency = "$"
@@ -70,17 +77,39 @@ func canvasPriceSummary(item model.Pricing, groups modelListGroups, plugins map[
 				expressions = append(expressions, parseCanvasPriceExpression(variant.BillingExpr, variant.BillingUsageSchema))
 			}
 		}
-		tiers = canvasPriceTiers(expressions, "")
+		tiers = canvasPriceTiers(expressions, nil)
 		if len(tiers) > 0 {
-			price.Estimate = canvasPriceEstimate(tiers, ratios)
+			price.Estimate = canvasPriceEstimate(tiers, ratios, false)
 		}
 		if len(price.Estimate) == 0 && len(expressions) > 0 {
 			for _, resolution := range resolutions {
-				if estimate := canvasPriceEstimate(canvasPriceTiers(expressions, resolution), ratios); len(estimate) > 0 {
+				if estimate := canvasPriceEstimate(canvasPriceTiers(expressions, map[string]string{"resolution": resolution}), ratios, false); len(estimate) > 0 {
 					if price.EstimatesByResolution == nil {
 						price.EstimatesByResolution = make(map[string][]canvasPriceAmount)
 					}
 					price.EstimatesByResolution[resolution] = estimate
+				}
+			}
+		}
+		if video && len(price.Estimate) == 0 && len(expressions) > 0 {
+			for _, resolution := range resolutions {
+				if len(price.EstimatesByResolution[resolution]) > 0 {
+					continue
+				}
+				allowTokens := tokenEstimate != nil && tokenEstimate.TokensPerSecond[resolution] > 0
+				quote := canvasVideoPriceEstimate{
+					WithoutReference: canvasPriceEstimate(canvasPriceTiers(expressions, map[string]string{"resolution": resolution, "video_input": "none"}), ratios, allowTokens),
+					WithReference:    canvasPriceEstimate(canvasPriceTiers(expressions, map[string]string{"resolution": resolution, "video_input": "video"}), ratios, allowTokens),
+				}
+				if len(quote.WithoutReference) == 0 && len(quote.WithReference) == 0 {
+					continue
+				}
+				if price.VideoEstimatesByResolution == nil {
+					price.VideoEstimatesByResolution = make(map[string]canvasVideoPriceEstimate)
+				}
+				price.VideoEstimatesByResolution[resolution] = quote
+				if allowTokens {
+					price.VideoTokenEstimate = tokenEstimate
 				}
 			}
 		}
@@ -90,7 +119,7 @@ func canvasPriceSummary(item model.Pricing, groups modelListGroups, plugins map[
 		}
 	} else if item.QuotaType == 1 {
 		tiers = []map[string]float64{{"request": item.ModelPrice}}
-		price.Estimate = canvasPriceEstimate(tiers, ratios)
+		price.Estimate = canvasPriceEstimate(tiers, ratios, false)
 	} else if _, ok, _ := ratio_setting.GetModelRatio(item.ModelName); ok {
 		base := item.ModelRatio * 2
 		tiers = []map[string]float64{{"input_tokens": base, "output_tokens": base * item.CompletionRatio}}
@@ -125,7 +154,7 @@ func canvasPriceSummary(item model.Pricing, groups modelListGroups, plugins map[
 
 // Canvas credits and the Stolas balance share the same face value. The price
 // list can display another currency, but the estimate must not use its FX rate.
-func canvasPriceEstimate(tiers []map[string]float64, ratios []float64) []canvasPriceAmount {
+func canvasPriceEstimate(tiers []map[string]float64, ratios []float64, allowVideoTokens bool) []canvasPriceAmount {
 	if len(tiers) == 0 || len(ratios) == 0 {
 		return nil
 	}
@@ -135,7 +164,10 @@ func canvasPriceEstimate(tiers []map[string]float64, ratios []float64) []canvasP
 		}
 	}
 	var estimate []canvasPriceAmount
-	for _, unit := range []string{"request", "second", "image", "reference_second", "reference_image"} {
+	for _, unit := range []string{"request", "second", "image", "reference_second", "reference_image", "video_tokens"} {
+		if unit == "video_tokens" && !allowVideoTokens {
+			continue
+		}
 		if base, ok := tiers[0][unit]; ok {
 			amount := base * ratios[0]
 			if amount < 0 || math.IsNaN(amount) || math.IsInf(amount, 0) || slices.ContainsFunc(ratios[1:], func(ratio float64) bool {
@@ -166,12 +198,12 @@ func parseCanvasPriceExpression(expression string, schema map[string]jsplugin.Us
 	return canvasPriceExpression{node: tree.Node, schema: schema}
 }
 
-func canvasPriceTiers(expressions []canvasPriceExpression, resolution string) []map[string]float64 {
+func canvasPriceTiers(expressions []canvasPriceExpression, knownUsage map[string]string) []map[string]float64 {
 	var tiers []map[string]float64
 	var collect func(ast.Node, map[string]jsplugin.UsageFieldSchema) bool
 	collect = func(node ast.Node, schema map[string]jsplugin.UsageFieldSchema) bool {
 		if branch, ok := node.(*ast.ConditionalNode); ok {
-			if matched, known := canvasResolutionCondition(branch.Cond, resolution); known {
+			if matched, known := canvasUsageCondition(branch.Cond, knownUsage); known {
 				if matched {
 					return collect(branch.Exp1, schema)
 				}
@@ -195,18 +227,21 @@ func canvasPriceTiers(expressions []canvasPriceExpression, resolution string) []
 	return tiers
 }
 
-// Only select branches that can be decided from the published resolution.
-// Unknown facts (e.g. reference usage or request rules) keep both branches.
-func canvasResolutionCondition(node ast.Node, resolution string) (matched, known bool) {
+// Unknown usage facts keep both branches.
+func canvasUsageCondition(node ast.Node, knownUsage map[string]string) (matched, known bool) {
 	part, ok := node.(*ast.BinaryNode)
-	if !ok || resolution == "" {
+	if !ok || len(knownUsage) == 0 {
 		return false, false
 	}
 	switch part.Operator {
 	case "&&", "and":
-		left, leftKnown := canvasResolutionCondition(part.Left, resolution)
-		right, rightKnown := canvasResolutionCondition(part.Right, resolution)
+		left, leftKnown := canvasUsageCondition(part.Left, knownUsage)
+		right, rightKnown := canvasUsageCondition(part.Right, knownUsage)
 		return left && right, (leftKnown && rightKnown) || (leftKnown && !left) || (rightKnown && !right)
+	case "||", "or":
+		left, leftKnown := canvasUsageCondition(part.Left, knownUsage)
+		right, rightKnown := canvasUsageCondition(part.Right, knownUsage)
+		return left || right, (leftKnown && rightKnown) || (leftKnown && left) || (rightKnown && right)
 	case "==", "!=":
 		call, ok := part.Left.(*ast.CallNode)
 		literal, literalOK := part.Right.(*ast.StringNode)
@@ -215,8 +250,10 @@ func canvasResolutionCondition(node ast.Node, resolution string) (matched, known
 		}
 		callee, calleeOK := call.Callee.(*ast.IdentifierNode)
 		key, keyOK := call.Arguments[0].(*ast.StringNode)
-		if calleeOK && callee.Value == "u" && keyOK && key.Value == "resolution" {
-			return (resolution == literal.Value) == (part.Operator == "=="), true
+		if calleeOK && callee.Value == "u" && keyOK {
+			if value, known := knownUsage[key.Value]; known {
+				return (value == literal.Value) == (part.Operator == "=="), true
+			}
 		}
 	}
 	return false, false

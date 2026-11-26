@@ -155,7 +155,9 @@ func TestCanvasModelCatalogDatabaseMatrix(t *testing.T) {
 			assert.Equal(t, "seedance-2.0", video.Family)
 			assert.Equal(t, "ByteDance.Color", video.Icon)
 			assert.Equal(t, []string{"video"}, video.Capabilities)
-			assert.Positive(t, video.Parameters["images"].Max)
+			assert.Equal(t, 3, video.Parameters["images"].Max)
+			assert.Equal(t, []string{"16:9", "9:16", "4:3", "3:4", "1:1"}, video.Parameters["aspect_ratio"].Values)
+			assert.Equal(t, canvasMediaParameter{Min: 5, Max: 15, Default: "5", Required: true}, video.Parameters["duration"])
 			require.NotNil(t, video.Price)
 			assert.NotEmpty(t, video.Price.Rates)
 			require.NoError(t, db.Model(&model.Channel{}).Where("id = ?", channels[0].Id).Update("status", common.ChannelStatusManuallyDisabled).Error)
@@ -170,19 +172,54 @@ func TestCanvasModelCatalogDatabaseMatrix(t *testing.T) {
 	}
 }
 
+func TestCanvasLecAPIVideoPoolRatios(t *testing.T) {
+	source, err := builtinplugins.Source("lecapi")
+	require.NoError(t, err)
+	plugin, err := jsplugin.NewRegistry().RegisterFactory(source, jsplugin.Options{Key: "lecapi"})
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		name   string
+		ratios []string
+	}{
+		{"seedance-2-5-per-second", []string{"16:9", "9:16", "1:1", "4:3", "3:4", "21:9"}},
+		{"seedance-2-5-per-token", []string{"16:9", "9:16", "1:1", "21:9", "4:3", "3:4", "adaptive"}},
+		{"seedance-2-0-per-second", []string{"16:9", "9:16", "1:1", "4:3", "3:4", "21:9"}},
+		{"seedance-2-0-per-token", []string{"16:9", "9:16", "1:1", "21:9", "4:3", "3:4"}},
+		{"seedance-2-0-fast-per-second", []string{"16:9", "9:16", "1:1", "auto", "4:3", "3:4", "21:9"}},
+		{"seedance-2-0-mini-per-second", []string{"16:9", "9:16", "1:1", "auto"}},
+		{"wan-3-0-per-second", []string{"16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "adaptive"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			defaults, ok := plugin.Meta.DefaultsForModel(tc.name)
+			require.True(t, ok)
+			for _, lang := range []string{"en", "zh"} {
+				params := canvasDocumentedParameters(defaults.Description[lang], "video")
+				assert.Equal(t, tc.ratios, params["aspect_ratio"].Values, lang)
+				assert.Equal(t, "16:9", params["aspect_ratio"].Default, lang)
+				assert.NotEmpty(t, params["resolution"].Values, lang)
+				assert.Positive(t, params["duration"].Max, lang)
+			}
+		})
+	}
+}
+
 func TestCanvasLecAPIVideoFramesFollowUpstreamModel(t *testing.T) {
 	source, err := builtinplugins.Source("lecapi")
 	require.NoError(t, err)
 	plugin, err := jsplugin.NewRegistry().RegisterFactory(source, jsplugin.Options{Key: "lecapi"})
 	require.NoError(t, err)
 	for _, name := range []string{"seedance-2-0-per-token", "seedance-2-0-fast-per-token", "seedance-2-0-mini-per-token", "seedance-2-5-per-token", "ap-muse-video-720-10s", "am-minimax-h3-official", "wan-3-0-per-second", "ms-minimax-h3"} {
-		assert.Equal(t, 2, canvasLecAPIFrameCapacity(plugin.Meta, name, &model.Channel{}), name)
+		_, frames := canvasLecAPIVideoContract(plugin.Meta, name, &model.Channel{})
+		assert.Equal(t, 2, frames, name)
 	}
 	mapping := `{"custom":"route","route":"lec-wan-3-0-per-second","wan-3-0-per-second":"wan-3-0-per-request"}`
 	channel := &model.Channel{ModelMapping: &mapping}
-	assert.Equal(t, 2, canvasLecAPIFrameCapacity(plugin.Meta, "custom", channel))
-	assert.Zero(t, canvasLecAPIFrameCapacity(plugin.Meta, "wan-3-0-per-second", channel))
-	assert.Zero(t, canvasLecAPIFrameCapacity(plugin.Meta, "seedance-2-5-01", channel))
+	_, frames := canvasLecAPIVideoContract(plugin.Meta, "custom", channel)
+	assert.Equal(t, 2, frames)
+	for _, name := range []string{"wan-3-0-per-second", "seedance-2-5-01"} {
+		_, frames := canvasLecAPIVideoContract(plugin.Meta, name, channel)
+		assert.Zero(t, frames, name)
+	}
 }
 
 func TestCanvasModelCatalogPriceSummary(t *testing.T) {
@@ -202,7 +239,7 @@ func TestCanvasModelCatalogPriceSummary(t *testing.T) {
 			if tc.name != "fixed" {
 				item.BillingUsageSchema = map[string]jsplugin.UsageFieldSchema{"seconds": {Unit: "second"}, "tokens": {Unit: "token"}}
 			}
-			price := canvasPriceSummary(item, group, nil, nil)
+			price := canvasPriceSummary(item, group, nil, nil, false, nil)
 			require.NotNil(t, price)
 			assert.Equal(t, tc.want, price.Rates)
 			assert.Equal(t, tc.varies, price.Varies)
@@ -223,7 +260,7 @@ func TestCanvasModelCatalogCreditEstimateMetadata(t *testing.T) {
 	item := model.Pricing{ModelName: "ap-muse-video-720-10s", ModelPrice: 0.6, QuotaType: 1, EnableGroup: []string{"default"}}
 	for _, display := range []string{operation_setting.QuotaDisplayTypeUSD, operation_setting.QuotaDisplayTypeCNY, operation_setting.QuotaDisplayTypeCustom, operation_setting.QuotaDisplayTypeTokens} {
 		settings.QuotaDisplayType = display
-		price := canvasPriceSummary(item, groups, nil, nil)
+		price := canvasPriceSummary(item, groups, nil, nil, false, nil)
 		require.NotNil(t, price)
 		assert.Equal(t, []canvasPriceAmount{{Unit: "request", Amount: 0.6}}, price.Estimate, display)
 	}
@@ -253,7 +290,7 @@ func TestCanvasModelCatalogResolutionEstimate(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			item := model.Pricing{EnableGroup: []string{"default"}, BillingExpr: tc.expression, BillingUsageSchema: schema}
-			price := canvasPriceSummary(item, groups, nil, resolutions)
+			price := canvasPriceSummary(item, groups, nil, resolutions, true, nil)
 			require.NotNil(t, price)
 			assert.Empty(t, price.Estimate)
 			assert.Equal(t, tc.want, price.EstimatesByResolution)
@@ -264,11 +301,51 @@ func TestCanvasModelCatalogResolutionEstimate(t *testing.T) {
 			{PluginKey: "one", BillingExpr: `tier("x", u("requests") * 4.2)`, BillingUsageSchema: schema},
 			{PluginKey: "two", BillingExpr: `tier("x", u("requests") * 6.6)`, BillingUsageSchema: schema},
 		}}
-		price := canvasPriceSummary(item, groups, map[string]bool{"one": true, "two": true}, resolutions)
+		price := canvasPriceSummary(item, groups, map[string]bool{"one": true, "two": true}, resolutions, true, nil)
 		require.NotNil(t, price)
 		assert.Empty(t, price.Estimate)
 		assert.Empty(t, price.EstimatesByResolution)
 	})
+}
+
+func TestCanvasLecAPIPriceEstimatesUseSelectedVideoInput(t *testing.T) {
+	source, err := builtinplugins.Source("lecapi")
+	require.NoError(t, err)
+	plugin, err := jsplugin.NewRegistry().RegisterFactory(source, jsplugin.Options{Key: "lecapi"})
+	require.NoError(t, err)
+	groups := modelListGroups{userGroup: "default", ownerGroups: []string{"default"}}
+	for _, tc := range []struct {
+		name, resolution string
+		plain, reference []canvasPriceAmount
+		tokensPerSecond  int
+	}{
+		{"seedance-2-5-per-second", "720p", []canvasPriceAmount{{"second", 0.57}}, []canvasPriceAmount{{"second", 1.06}, {"reference_second", 0.31}}, 0},
+		{"seedance-2-0-per-second", "720p", []canvasPriceAmount{{"second", 0.41}}, []canvasPriceAmount{{"second", 0.82}}, 0},
+		{"seedance-2-5-per-token", "1080p", []canvasPriceAmount{{"video_tokens", 48.7872}}, []canvasPriceAmount{{"video_tokens", 29.1456}}, 48_600},
+		{"seedance-2-0-per-token", "720p", []canvasPriceAmount{{"video_tokens", 29.1456}}, []canvasPriceAmount{{"video_tokens", 17.7408}}, 21_600},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			defaults, ok := plugin.Meta.DefaultsForModel(tc.name)
+			require.True(t, ok)
+			schema, _ := plugin.Meta.UsageForModel(tc.name)
+			item := model.Pricing{EnableGroup: []string{"default"}, BillingExpr: defaults.BillingExpr, BillingUsageSchema: schema}
+			price := canvasPriceSummary(item, groups, nil, schema["resolution"].Enum, true, defaults.VideoTokenEstimate)
+			quote := price.VideoEstimatesByResolution[tc.resolution]
+			for _, check := range []struct{ got, want []canvasPriceAmount }{{quote.WithoutReference, tc.plain}, {quote.WithReference, tc.reference}} {
+				require.Len(t, check.got, len(check.want))
+				for i, amount := range check.want {
+					assert.Equal(t, amount.Unit, check.got[i].Unit)
+					assert.InDelta(t, amount.Amount, check.got[i].Amount, 1e-9)
+				}
+			}
+			if tc.tokensPerSecond > 0 {
+				require.NotNil(t, price.VideoTokenEstimate)
+				assert.Equal(t, tc.tokensPerSecond, price.VideoTokenEstimate.TokensPerSecond[tc.resolution])
+				assert.Equal(t, 4, price.VideoTokenEstimate.ReferenceExtraSeconds)
+				assert.Equal(t, 180, price.VideoTokenEstimate.ReferencePercent)
+			}
+		})
+	}
 }
 
 func TestCanvasModelFamilies(t *testing.T) {

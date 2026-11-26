@@ -39,7 +39,16 @@
         "description": {"allOf": [{"$ref": "#/$defs/localizedText"}, {"if": {"type": "string"}, "then": {"maxLength": 4096}, "else": {"additionalProperties": {"maxLength": 4096}}}]},
         "icon": {"type": "string", "maxLength": 128},
         "tags": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 64}, "description": "Trimmed, unique, control-free tags. The host limits their comma-joined UTF-8 encoding to 255 bytes."},
-        "billingExpr": {"type": "string", "maxLength": 65536, "description": "Self-contained task billing expression following host monetary and quota semantics. The host enforces 64 KiB in UTF-8, selected usage-schema compatibility, no fixed(), and finite non-negative sample results. Empty means no default price."}
+        "billingExpr": {"type": "string", "maxLength": 65536, "description": "Self-contained task billing expression following host monetary and quota semantics. The host enforces 64 KiB in UTF-8, selected usage-schema compatibility, no fixed(), and finite non-negative sample results. Empty means no default price."},
+        "videoTokenEstimate": {
+          "type": "object", "additionalProperties": false,
+          "required": ["tokensPerSecond", "referenceExtraSeconds", "referencePercent"],
+          "properties": {
+            "tokensPerSecond": {"type": "object", "minProperties": 1, "maxProperties": 32, "additionalProperties": {"type": "integer", "minimum": 1, "maximum": 2147483647}},
+            "referenceExtraSeconds": {"type": "integer", "minimum": 0, "maximum": 3600},
+            "referencePercent": {"type": "integer", "minimum": 100, "maximum": 1000}
+          }
+        }
       }
     },
     "fileUploadRequest": {

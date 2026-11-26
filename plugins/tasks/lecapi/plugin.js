@@ -3638,6 +3638,9 @@ const PUBLIC_DISPLAY_NAMES = {
   "mw-vidu-q4-nopeak": "Vidu Q4",
 };
 
+const TOKEN_REFERENCE_EXTRA_SECONDS = 4;
+const TOKEN_REFERENCE_PERCENT = 180;
+
 const MODEL_DEFAULTS = Object.fromEntries(
   Object.entries(MODEL_MAPPING).map(([publicModel, name]) => {
       const profile = MODELS[name];
@@ -3653,6 +3656,14 @@ const MODEL_DEFAULTS = Object.fromEntries(
       else if (/image-2|^image2$/.test(name)) defaults.vendor = "OpenAI";
       const expression = defaultExpression(profile);
       if (expression) defaults.billingExpr = expression;
+      if (profile.billing.billing_unit === "million_tokens" && !profile.poolUnavailable) {
+        const rates = profile.billing.tokens_per_second;
+        defaults.videoTokenEstimate = {
+          tokensPerSecond: Object.fromEntries(profile.parameters.resolution.values.filter((resolution) => rates[resolution]).map((resolution) => [resolution, rates[resolution]])),
+          referenceExtraSeconds: TOKEN_REFERENCE_EXTRA_SECONDS,
+          referencePercent: TOKEN_REFERENCE_PERCENT,
+        };
+      }
       return [publicModel, defaults];
   })
 );
@@ -4093,7 +4104,7 @@ function submission(ctx, profile = modelProfile(ctx)) {
     const rate = profile.billing.tokens_per_second[body.resolution];
     // LecAPI freezes this estimate and later settles from total_tokens. Reference
     // video requests add four seconds or 80%, whichever reserves more tokens.
-    tokens = videoCount ? Math.max((seconds + 4) * rate, (seconds * rate * 18) / 10) : seconds * rate;
+    tokens = videoCount ? Math.max((seconds + TOKEN_REFERENCE_EXTRA_SECONDS) * rate, (seconds * rate * TOKEN_REFERENCE_PERCENT) / 100) : seconds * rate;
     if (!Number.isSafeInteger(tokens) || tokens <= 0 || tokens > 2147483647)
       throw new Error("estimated video tokens exceed the supported range");
   }

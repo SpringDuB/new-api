@@ -109,6 +109,9 @@ func canvasDocumentedParameters(description, kind string) map[string]canvasMedia
 			}
 			param.Inline = strings.Contains(note, "Base64 data URL")
 		case "aspect_ratio", "resolution", "quality", "output_format":
+			if kind == "video" && name == "aspect_ratio" && len(param.Values) == 0 {
+				param.Values = canvasVideoPoolRatios(note)
+			}
 			if len(param.Values) == 0 || ((name == "quality" || name == "output_format") && kind != "image") {
 				continue
 			}
@@ -126,6 +129,48 @@ func canvasDocumentedParameters(description, kind string) map[string]canvasMedia
 		result[name] = param
 	}
 	return result
+}
+
+// Canvas applies one ratio list to every resolution, so publish only ratios
+// supported at every documented resolution of the video pool.
+func canvasVideoPoolRatios(note string) []string {
+	groups, ok := strings.CutPrefix(note, "Aspect ratios by resolution:")
+	if !ok {
+		groups, ok = strings.CutPrefix(note, "各分辨率的可用画幅：")
+		if !ok {
+			return nil
+		}
+	}
+	var ratios []string
+	for group := range strings.SplitSeq(groups, "|") {
+		resolution, list, ok := strings.Cut(strings.TrimSpace(group), "(")
+		if !ok || !canvasParamValue.MatchString(strings.TrimSpace(resolution)) {
+			return nil
+		}
+		list, ok = strings.CutSuffix(list, ")")
+		if !ok {
+			return nil
+		}
+		var allowed []string
+		for option := range strings.SplitSeq(list, "/") {
+			value := strings.TrimSpace(option)
+			if !canvasParamValue.MatchString(value) {
+				return nil
+			}
+			if !slices.Contains(allowed, value) {
+				allowed = append(allowed, value)
+			}
+		}
+		if ratios == nil {
+			ratios = allowed
+			continue
+		}
+		ratios = slices.DeleteFunc(ratios, func(value string) bool { return !slices.Contains(allowed, value) })
+		if len(ratios) == 0 {
+			return nil
+		}
+	}
+	return ratios
 }
 
 func canvasModelIcon(family, icon string) string {

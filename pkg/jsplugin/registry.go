@@ -118,12 +118,30 @@ type Meta struct {
 // ModelDefaults supplies portable display metadata and USD task pricing for
 // one declared model. Administrator configuration takes precedence.
 type ModelDefaults struct {
-	DisplayName string        `json:"displayName,omitempty"`
-	Vendor      string        `json:"vendor,omitempty"`
-	Description LocalizedText `json:"description,omitempty"`
-	Icon        string        `json:"icon,omitempty"`
-	Tags        []string      `json:"tags,omitempty"`
-	BillingExpr string        `json:"billingExpr,omitempty"`
+	DisplayName        string              `json:"displayName,omitempty"`
+	Vendor             string              `json:"vendor,omitempty"`
+	Description        LocalizedText       `json:"description,omitempty"`
+	Icon               string              `json:"icon,omitempty"`
+	Tags               []string            `json:"tags,omitempty"`
+	BillingExpr        string              `json:"billingExpr,omitempty"`
+	VideoTokenEstimate *VideoTokenEstimate `json:"videoTokenEstimate,omitempty"`
+}
+
+// VideoTokenEstimate describes request-derived video tokens for display only.
+// A reference request uses the larger of the two reference adjustments.
+type VideoTokenEstimate struct {
+	TokensPerSecond       map[string]int `json:"tokensPerSecond"`
+	ReferenceExtraSeconds int            `json:"referenceExtraSeconds"`
+	ReferencePercent      int            `json:"referencePercent"`
+}
+
+func (e *VideoTokenEstimate) clone() *VideoTokenEstimate {
+	if e == nil {
+		return nil
+	}
+	copy := *e
+	copy.TokensPerSecond = maps.Clone(e.TokensPerSecond)
+	return &copy
 }
 
 // DefaultsForModel selects the first candidate's declared model entry, treating
@@ -138,6 +156,7 @@ func (m Meta) DefaultsForModel(names ...string) (ModelDefaults, bool) {
 			}
 			defaults.Description = maps.Clone(defaults.Description)
 			defaults.Tags = slices.Clone(defaults.Tags)
+			defaults.VideoTokenEstimate = defaults.VideoTokenEstimate.clone()
 			return defaults, true
 		}
 	}
@@ -951,6 +970,7 @@ func cloneMeta(meta Meta) Meta {
 		for model, entry := range meta.ModelDefaults {
 			entry.Description = maps.Clone(entry.Description)
 			entry.Tags = slices.Clone(entry.Tags)
+			entry.VideoTokenEstimate = entry.VideoTokenEstimate.clone()
 			defaults[model] = entry
 		}
 		meta.ModelDefaults = defaults
@@ -1579,6 +1599,19 @@ func normalizeV1Meta(meta *Meta) error {
 				return fmt.Errorf("plugin meta modelDefaults model %q billingExpr: %w", model, err)
 			}
 		}
+		if estimate := defaults.VideoTokenEstimate; estimate != nil {
+			schema, _ := meta.UsageForModel(model)
+			if schema["tokens"].Unit != "token" || len(estimate.TokensPerSecond) == 0 || len(estimate.TokensPerSecond) > 32 ||
+				estimate.ReferenceExtraSeconds < 0 || estimate.ReferenceExtraSeconds > relaycommon.MaxTaskDurationSeconds ||
+				estimate.ReferencePercent < 100 || estimate.ReferencePercent > 1000 {
+				return fmt.Errorf("plugin meta modelDefaults model %q has an invalid videoTokenEstimate", model)
+			}
+			for resolution, rate := range estimate.TokensPerSecond {
+				if !slices.Contains(schema["resolution"].Enum, resolution) || rate < 1 || rate > math.MaxInt32 {
+					return fmt.Errorf("plugin meta modelDefaults model %q has an invalid videoTokenEstimate rate for %q", model, resolution)
+				}
+			}
+		}
 		meta.ModelDefaults[model] = defaults
 	}
 	return nil
@@ -1597,7 +1630,7 @@ func decodeModelDefaults(value any) (map[string]ModelDefaults, error) {
 		}
 		for name := range entry {
 			switch name {
-			case "displayName", "vendor", "description", "icon", "tags", "billingExpr":
+			case "displayName", "vendor", "description", "icon", "tags", "billingExpr", "videoTokenEstimate":
 			default:
 				return nil, fmt.Errorf("plugin meta modelDefaults model %q has unknown field %q", model, name)
 			}
@@ -1621,6 +1654,19 @@ func decodeModelDefaults(value any) (map[string]ModelDefaults, error) {
 		}
 		if item.BillingExpr, err = stringMetaField(entry, "billingExpr"); err != nil {
 			return nil, fmt.Errorf("plugin meta modelDefaults model %q: %w", model, err)
+		}
+		if value, exists := entry["videoTokenEstimate"]; exists {
+			estimate, ok := value.(map[string]any)
+			if !ok || len(estimate) != 3 || estimate["tokensPerSecond"] == nil || estimate["referenceExtraSeconds"] == nil || estimate["referencePercent"] == nil {
+				return nil, fmt.Errorf("plugin meta modelDefaults model %q videoTokenEstimate must declare tokensPerSecond, referenceExtraSeconds and referencePercent", model)
+			}
+			encoded, err := common.Marshal(estimate)
+			if err != nil {
+				return nil, err
+			}
+			if err := common.Unmarshal(encoded, &item.VideoTokenEstimate); err != nil {
+				return nil, fmt.Errorf("plugin meta modelDefaults model %q videoTokenEstimate: %w", model, err)
+			}
 		}
 		defaults[model] = item
 	}
