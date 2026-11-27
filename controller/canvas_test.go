@@ -172,8 +172,9 @@ func TestCanvasModelCatalogDatabaseMatrix(t *testing.T) {
 
 			// The public square must not promise plugin limits for the generic OpenAI route above.
 			mapping := `{"square-sd25":"seedance-2-5-per-second"}`
-			square := model.Channel{Name: "square fixture", Key: "fixture", Type: constant.ChannelTypeTaskPlugin, Group: "default", Models: "square-sd25,seedance-2-5-per-request,ms-minimax-h3,ms-minimax-h3-upscale,ap-minimax-h3,st-gpt-image-2", ModelMapping: &mapping, Status: common.ChannelStatusEnabled}
-			square.SetSetting(dto.ChannelSettings{TaskPluginKey: "lecapi"})
+			square := model.Channel{Name: "square fixture", Key: "fixture", Type: constant.ChannelTypeNewAPI, Group: "default", Models: "square-sd25,seedance-2-5-per-request,seedance-2-0-per-request,ms-minimax-h3,ms-minimax-h3-upscale,ap-minimax-h3,st-gpt-image-2", ModelMapping: &mapping, Status: common.ChannelStatusEnabled}
+			// Binding order is not execution order on the shared /v1/videos endpoint.
+			square.SetSetting(dto.ChannelSettings{TaskExtendPluginKeys: []string{"yuanxiang", "lecapi"}})
 			require.NoError(t, square.Insert())
 			model.InitChannelCache()
 			model.InvalidatePricingCache()
@@ -197,7 +198,7 @@ func TestCanvasModelCatalogDatabaseMatrix(t *testing.T) {
 			require.Contains(t, entriesByName, "seedance-2-0-per-request")
 			assert.Empty(t, entriesByName["seedance-2-0-per-request"])
 			shared := entriesByName["seedance-2-5-per-request"]
-			require.Len(t, shared, 1, "only the bound LecAPI channel can quote SD2.5")
+			require.Len(t, shared, 1, "only the first bound endpoint candidate executes on the shared channel")
 			assert.Empty(t, shared[0].Provider)
 			for _, row := range shared {
 				assert.Equal(t, "720p", row.Resolution)
@@ -220,24 +221,31 @@ func TestCanvasModelCatalogDatabaseMatrix(t *testing.T) {
 			}
 			require.Len(t, entriesByName["ms-minimax-h3-upscale"], 1)
 			assert.True(t, entriesByName["ms-minimax-h3-upscale"][0].RequiresSourceTask)
-			// Remove the unrelated generic route, then publish both actual task providers for SD2.
-			for _, key := range []string{"lecapi", "yuanxiang"} {
-				ch := model.Channel{Name: key, Key: "fixture", Type: constant.ChannelTypeTaskPlugin, Group: "default", Models: "seedance-2-0-per-request", Status: common.ChannelStatusEnabled}
-				ch.SetSetting(dto.ChannelSettings{TaskPluginKey: key})
-				require.NoError(t, ch.Insert())
-			}
+			// Remove the generic relay; only the combined New API channel remains eligible.
 			require.NoError(t, db.Model(&channels[3]).Update("status", common.ChannelStatusManuallyDisabled).Error)
 			require.NoError(t, model.UpdateAbilityStatus(channels[3].Id, false))
-			model.InitChannelCache()
-			model.InvalidatePricingCache()
-			public.Data = nil // Decode a fresh response; omitted fields must not retain the previous catalog.
-			modelManagementRequest(t, GetPricing, http.MethodGet, "/api/pricing", nil, &public)
-			var sd2 []catalogVideoSpec
-			for _, entry := range public.Data {
-				if entry.ModelName == "seedance-2-0-per-request" {
-					sd2 = entry.VideoSpecs
+			readSD2 := func() []catalogVideoSpec {
+				model.InitChannelCache()
+				model.InvalidatePricingCache()
+				public.Data = nil
+				modelManagementRequest(t, GetPricing, http.MethodGet, "/api/pricing", nil, &public)
+				for _, entry := range public.Data {
+					if entry.ModelName == "seedance-2-0-per-request" {
+						return entry.VideoSpecs
+					}
 				}
+				return nil
 			}
+			sd2 := readSD2()
+			require.Len(t, sd2, 1)
+			assert.Empty(t, sd2[0].Provider)
+			assert.Equal(t, []canvasPriceAmount{{"request", 3.3}}, sd2[0].WithReference)
+			assert.True(t, slices.ContainsFunc(sd2[0].Combinations, func(c jsplugin.VideoInputCombination) bool { return c.Maxima[1] > 0 }))
+
+			backup := model.Channel{Name: "backup provider", Key: "fixture", Type: constant.ChannelTypeNewAPI, Group: "default", Models: "seedance-2-0-per-request", Status: common.ChannelStatusEnabled}
+			backup.SetSetting(dto.ChannelSettings{TaskExtendPluginKeys: []string{"yuanxiang"}})
+			require.NoError(t, backup.Insert())
+			sd2 = readSD2()
 			require.Len(t, sd2, 2)
 			var supportsVideo int
 			for _, row := range sd2 {

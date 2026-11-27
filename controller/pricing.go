@@ -231,6 +231,49 @@ func catalogProviderVideoSpecs(limits []jsplugin.VideoSpec, provider, expr strin
 	return specs
 }
 
+// Scope provider-specific quotes and limits to the channels visible to this viewer.
+func catalogReachablePricing(item model.Pricing, channels []*model.Channel, generation *jsplugin.RoutingGeneration) model.Pricing {
+	if len(item.BillingPluginVariants) < 2 {
+		return item
+	}
+	declared, ok := generation.CanonicalModel(item.ModelName)
+	if !ok {
+		target, _ := model.ResolveTaskModelAlias(generation, item.ModelName)
+		declared = target.Declared
+	}
+	sets := generation.CatalogSubmitCandidates(declared)
+	reachable := map[string]bool{}
+	for _, ch := range channels {
+		// Partial channel records: GetSetting may save malformed settings back to the DB.
+		var setting dto.ChannelSettings
+		if ch.Type == constant.ChannelTypeNewAPI || ch.Type == constant.ChannelTypeTaskPlugin {
+			if ch.Setting == nil || common.UnmarshalJsonStr(*ch.Setting, &setting) != nil {
+				continue
+			}
+		}
+		for _, candidates := range sets {
+			i := generation.ChannelCandidateIndex(candidates, ch.Type, setting)
+			if i >= 0 && (ch.Type != constant.ChannelTypeNewAPI || candidates[i].Meta.SupportsUpstream(jsplugin.UpstreamKindNewAPI)) {
+				reachable[candidates[i].Meta.Key] = true
+			}
+		}
+	}
+	var active []model.PricingPluginVariant
+	for _, variant := range item.BillingPluginVariants {
+		if reachable[variant.PluginKey] {
+			active = append(active, variant)
+		}
+	}
+	item.BillingPluginVariants = active
+	if len(active) == 1 {
+		item.VideoSpecs = active[0].VideoSpecs
+		item.ImageSpecs = active[0].ImageSpecs
+		item.BillingUsageSchema = active[0].BillingUsageSchema
+		item.BillingUsageExamples = active[0].BillingUsageExamples
+	}
+	return item
+}
+
 func GetPricing(c *gin.Context) {
 	pricing := model.GetPricing()
 	userId, exists := c.Get("id")
@@ -252,7 +295,7 @@ func GetPricing(c *gin.Context) {
 	}
 
 	usableGroup = service.GetUserUsableGroups(group)
-	pricing = distinctPricingCatalogModels(filterPricingByUsableGroups(pricing, usableGroup))
+	pricing = filterPricingByUsableGroups(pricing, usableGroup)
 	// A manifest declaration is not a route. Only shared models need their
 	// provider quotes narrowed to the live bindings in the viewer's groups.
 	var shared []string
@@ -266,44 +309,15 @@ func GetPricing(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	generation := jsplugin.DefaultRegistry.Generation()
+	for i, item := range pricing {
+		pricing[i] = catalogReachablePricing(item, routes[item.ModelName], generation)
+	}
+	pricing = distinctPricingCatalogModels(pricing)
 	catalog := make([]catalogPricingModel, len(pricing))
 	modelNames := make([]string, len(pricing))
-	generation := jsplugin.DefaultRegistry.Generation()
-	for i := range pricing {
-		item := pricing[i]
+	for i, item := range pricing {
 		modelNames[i] = item.ModelName
-		if len(item.BillingPluginVariants) > 1 {
-			var active []model.PricingPluginVariant
-			for _, variant := range item.BillingPluginVariants {
-				plugin, ok := generation.Get(variant.PluginKey)
-				if !ok {
-					continue
-				}
-				for _, route := range routes[item.ModelName] {
-					if route.Type == constant.ChannelTypeNewAPI && !plugin.Meta.SupportsUpstream(jsplugin.UpstreamKindNewAPI) {
-						continue
-					}
-					matches := slices.Contains(plugin.Meta.ChannelTypes, route.Type)
-					if route.Type == constant.ChannelTypeTaskPlugin || route.Type == constant.ChannelTypeNewAPI {
-						// These are partial channel records. Decode without GetSetting, which
-						// repairs malformed settings by saving the channel back to the DB.
-						var setting dto.ChannelSettings
-						matches = route.Setting != nil && common.UnmarshalJsonStr(*route.Setting, &setting) == nil && setting.BindsTaskPlugin(variant.PluginKey)
-					}
-					if matches {
-						active = append(active, variant)
-						break
-					}
-				}
-			}
-			item.BillingPluginVariants = active
-			if len(active) == 1 {
-				item.VideoSpecs = active[0].VideoSpecs
-				item.ImageSpecs = active[0].ImageSpecs
-				item.BillingUsageSchema = active[0].BillingUsageSchema
-				item.BillingUsageExamples = active[0].BillingUsageExamples
-			}
-		}
 		catalog[i] = catalogPricingModel{Pricing: item, ImageSpecs: catalogImageSpecs(item), VideoSpecs: catalogVideoSpecs(item)}
 	}
 	// check groupRatio contains usableGroup

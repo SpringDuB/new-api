@@ -79,6 +79,27 @@ func TestRegistryIndexesSharedEndpointCandidatesForDistinctLegacyProviders(t *te
 	assert.Empty(t, registry.RoutingErrors())
 }
 
+// Separate stream-only and background-only owners must not shadow the plugin
+// selected when a request sets both flags. A sync-only shadow never executes.
+func TestCatalogCandidatesForCombinedResponseMode(t *testing.T) {
+	registry := NewRegistry()
+	var plugins []*LoadedPlugin
+	for _, tc := range []struct{ key, modes, exports string }{
+		{"alpha", `["stream","sync"]`, responsesDecodeBoth}, {"beta", `["background"]`, responsesDecodeFinal},
+		{"gamma", `["stream","background"]`, responsesDecodeBoth}, {"shadow", `["sync"]`, responsesDecodeFinal},
+	} {
+		plugins = append(plugins, mustCompileRoutingPlugin(t, tc.key, 0, `["shared"]`,
+			`protocols:[{name:"openai_responses",supports:`+tc.modes+`}]`, tc.exports))
+	}
+	require.NoError(t, registry.ReplaceOverrides(plugins))
+	var winners []string
+	for _, candidates := range registry.Generation().CatalogSubmitCandidates("shared") {
+		winners = append(winners, candidates[0].Meta.Key)
+	}
+	assert.Contains(t, winners, "gamma")
+	assert.NotContains(t, winners, "shadow")
+}
+
 func TestSupportsRegisteredHostProtocols(t *testing.T) {
 	assert.True(t, SupportsHostProtocol("openai_responses"))
 	assert.True(t, SupportsHostProtocol("openai_video"))

@@ -639,30 +639,10 @@ func PinTaskPluginEndpoint() gin.HandlerFunc {
 		binding := candidates[0]
 		if definition, known := pluginruntime.HostProtocol(binding.Protocol); known && len(definition.DefinedModes()) > 0 {
 			stream, background := jsonBodyBoolFlags(c)
-			required := make([]string, 0, 2)
-			if stream {
-				required = append(required, "stream")
-			}
-			if background {
-				required = append(required, "background")
-			}
-			if !stream && !background {
-				required = append(required, "sync")
-			}
 			unfiltered := candidates
 			filtered := make([]pluginruntime.ProtocolBinding, 0, len(candidates))
 			for _, candidate := range candidates {
-				if candidate.Plugin == nil {
-					continue
-				}
-				supported := true
-				for _, mode := range required {
-					if !candidate.Plugin.Meta.ProtocolSupports(candidate.Protocol, mode) {
-						supported = false
-						break
-					}
-				}
-				if supported {
+				if candidate.SupportsRequestForm(stream, background) {
 					filtered = append(filtered, candidate)
 				}
 			}

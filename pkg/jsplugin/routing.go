@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/gin-gonic/gin"
 )
 
@@ -603,6 +604,82 @@ func (g *RoutingGeneration) LookupEndpointCandidates(method, path, model string)
 	}
 	bindings := g.protocolIndex[endpointIndexKey(normalizedMethod, path, model)]
 	return append([]ProtocolBinding(nil), bindings...)
+}
+
+// ChannelCandidateIndex selects the executing plugin from an already eligible,
+// generation-ordered request candidate set. Channel binding order is irrelevant.
+func (g *RoutingGeneration) ChannelCandidateIndex(candidates []*LoadedPlugin, channelType int, setting dto.ChannelSettings) int {
+	if channelType == constant.ChannelTypeTaskPlugin || channelType == constant.ChannelTypeNewAPI {
+		return slices.IndexFunc(candidates, func(p *LoadedPlugin) bool { return p != nil && setting.BindsTaskPlugin(p.Meta.Key) })
+	}
+	owner, ok := g.GetByChannelType(channelType)
+	if !ok {
+		return -1
+	}
+	return slices.Index(candidates, owner)
+}
+
+// SupportsRequestForm applies the Responses create flags together: a background
+// stream needs both modes; a request without either flag needs sync support.
+func (b ProtocolBinding) SupportsRequestForm(stream, background bool) bool {
+	if b.Plugin == nil {
+		return false
+	}
+	if !stream && !background {
+		return b.Plugin.Meta.ProtocolSupports(b.Protocol, "sync")
+	}
+	return (!stream || b.Plugin.Meta.ProtocolSupports(b.Protocol, "stream")) &&
+		(!background || b.Plugin.Meta.ProtocolSupports(b.Protocol, "background"))
+}
+
+// CatalogSubmitCandidates groups plugins that compete for the same public
+// submission. A plugin shadowed on one protocol can still win on another, or
+// for a request mode the earlier plugin does not serve. Provider-specific
+// URLs aren't alternative quotes for a model's shared protocol endpoint.
+func (g *RoutingGeneration) CatalogSubmitCandidates(model string) [][]*LoadedPlugin {
+	var sets [][]*LoadedPlugin
+	hasProtocol := map[*LoadedPlugin]bool{}
+	for _, protocol := range hostProtocols {
+		for _, op := range protocol.Operations {
+			if op.ModelField == "" {
+				continue
+			}
+			for _, method := range op.Methods {
+				bindings := g.LookupEndpointCandidates(method, op.Path, model)
+				if len(bindings) == 0 {
+					continue
+				}
+				for _, binding := range bindings {
+					hasProtocol[binding.Plugin] = true
+				}
+				type requestForm struct{ stream, background bool }
+				forms := []requestForm{{}}
+				if len(op.Modes) != 0 {
+					forms = []requestForm{{}, {stream: true}, {background: true}, {stream: true, background: true}}
+				}
+				for _, form := range forms {
+					var candidates []*LoadedPlugin
+					for _, binding := range bindings {
+						if len(op.Modes) == 0 || binding.SupportsRequestForm(form.stream, form.background) {
+							candidates = append(candidates, binding.Plugin)
+						}
+					}
+					if len(candidates) > 0 {
+						sets = append(sets, candidates)
+					}
+				}
+			}
+		}
+	}
+	// Native-only models remain addressable on their plugin's own submit URL.
+	for _, p := range g.PluginsByModel(model) {
+		if !hasProtocol[p] && slices.ContainsFunc(p.Meta.Routes, func(r Route) bool {
+			return r.Type != RouteTypeQuery && (len(r.Models) == 0 || slices.Contains(r.Models, model))
+		}) {
+			sets = append(sets, []*LoadedPlugin{p})
+		}
+	}
+	return sets
 }
 
 func (g *RoutingGeneration) Plugins() []*LoadedPlugin {
