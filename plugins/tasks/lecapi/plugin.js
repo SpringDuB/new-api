@@ -3981,7 +3981,7 @@ export const meta = {
   key: "lecapi",
   name: "LecAPI",
   icon: "text:LE",
-  version: "1.22.0",
+  version: "1.22.1",
   author: { name: "QuantumNous" },
   website: "https://api.lecapi.net/docs",
   baseUrl: "https://api.lecapi.net",
@@ -4742,11 +4742,17 @@ export function parseTaskResult(ctx, response) {
 
 export function parseSubmitResponse(ctx, response) {
   const body = responseObject(response.body);
+  // Preserve the vendor's structured classification without exposing it as the failure reason.
+  const error = response.body.error || body.error;
+  const failure = {
+    errorCode: typeof error?.code === "string" ? error.code : undefined,
+    errorType: typeof error?.type === "string" ? error.type : undefined,
+  };
   if (body.success === false || body.error)
     return {
       taskId: ctx.publicTaskId || utils.uuid(),
       taskData: response.body,
-      immediate: { status: "FAILURE", reason: body.error?.message || body.message || "LecAPI generation failed" },
+      immediate: { ...failure, status: "FAILURE", reason: body.error?.message || body.message || "LecAPI generation failed" },
     };
   const id = response.body.object === "lecapi.task" ? response.body.id : body.id || body.task_id || body.metadata?.task_id;
   const profile = modelProfile(ctx);
@@ -4768,7 +4774,7 @@ export function parseSubmitResponse(ctx, response) {
   const rawStatus = response.body.object === "lecapi.task" ? response.body.status : body.status;
   if (["failed", "failure", "cancelled", "canceled"].includes(String(rawStatus || "").toLowerCase())) {
     const taskId = typeof id === "string" && id.trim() ? id : ctx.publicTaskId || utils.uuid();
-    return { taskId: taskId, taskData: response.body, immediate: parseTaskResult({ ...ctx, taskId: taskId }, response.body), state: state };
+    return { taskId: taskId, taskData: response.body, immediate: { ...parseTaskResult({ ...ctx, taskId: taskId }, response.body), ...failure }, state: state };
   }
   const terminalSuccess = ["completed", "succeeded", "success"].includes(String(rawStatus || "").toLowerCase());
   if (terminalSuccess || (images.length && !rawStatus)) {

@@ -99,6 +99,8 @@ type submitResponse struct {
 	State     any         `json:"state"`
 }
 type taskResult struct {
+	ErrorCode        string  `json:"errorCode"`
+	ErrorType        string  `json:"errorType"`
 	Code             int     `json:"code"`
 	TaskID           string  `json:"taskId"`
 	Status           string  `json:"status"`
@@ -811,6 +813,7 @@ func (a *TaskAdaptor) ParseResponse(c *gin.Context, resp *http.Response, info *r
 	}
 	immediate := &relaycommon.TaskInfo{
 		Code: parsed.Immediate.Code, TaskID: parsed.Immediate.TaskID,
+		UpstreamErrorCode: parsed.Immediate.ErrorCode, UpstreamErrorType: parsed.Immediate.ErrorType,
 		Status: parsed.Immediate.Status, Progress: parsed.Immediate.Progress,
 		Reason: parsed.Immediate.Reason, Url: parsed.Immediate.URL, RemoteUrl: parsed.Immediate.RemoteURL,
 		CompletionTokens: positiveInt(parsed.Immediate.CompletionTokens), TotalTokens: positiveInt(parsed.Immediate.TotalTokens),

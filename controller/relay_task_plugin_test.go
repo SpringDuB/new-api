@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -19,7 +20,9 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	pluginruntime "github.com/QuantumNous/new-api/pkg/jsplugin"
 	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
+	builtinplugins "github.com/QuantumNous/new-api/plugins"
 	"github.com/QuantumNous/new-api/relay"
+	pluginadaptor "github.com/QuantumNous/new-api/relay/channel/task/jsplugin"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/types"
@@ -280,6 +283,33 @@ func TestTaskSubmissionMarketplaceSummary(t *testing.T) {
 			require.NotNil(t, outcome)
 		}
 	}
+	// Exercise the real plugin parser, including a failure nested by a chained gateway.
+	source, err := builtinplugins.Source("lecapi")
+	require.NoError(t, err)
+	plugin, err := pluginruntime.NewRegistry().RegisterFactory(source, pluginruntime.Options{Key: "lecapi"})
+	require.NoError(t, err)
+	const policy = `{"success":false,"error":{"code":"content_policy_violation","message":"Content was filtered"}}`
+	perfmetrics.RecordTaskSubmissionFailure(context.Background(), &relaycommon.RelayInfo{OriginModelName: name, UsingGroup: "default"}, &dto.TaskError{UpstreamSubmit: true, Code: "fail_to_fetch_task", StatusCode: 422, Message: policy})
+	for _, tc := range []struct{ model, body, reason string }{
+		{name, policy, "Content was filtered"},
+		{name, `{"object":"lecapi.task","output":{"error":{"type":"invalid_request_error","message":"bad parameter"}}}`, "bad parameter"},
+		{failed, `{"success":false,"error":{"code":"server_error","type":"invalid_request_error","message":"Content was filtered"}}`, "Content was filtered"},
+	} {
+		c := taskSubmissionTestContext()
+		info := taskSubmissionRelayInfo(nil)
+		info.PublicTaskID, info.OriginModelName, info.StartTime = model.GenerateTaskID(), tc.model, time.Now()
+		info.LockedChannel.(*model.Channel).Key = "fixture"
+		outcome, taskErr := executeTaskSubmissionWith(c, info, func(c *gin.Context, info *relaycommon.RelayInfo) (*relay.TaskSubmitResult, *dto.TaskError) {
+			adaptor := pluginadaptor.New(plugin)
+			adaptor.Init(info)
+			parsed, err := adaptor.ParseResponse(c, &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(tc.body))}, info)
+			require.Nil(t, err)
+			return &relay.TaskSubmitResult{Platform: "lecapi", UpstreamTaskID: parsed.UpstreamTaskID, Immediate: parsed.Immediate, TaskData: parsed.TaskData}, nil
+		})
+		require.Nil(t, taskErr)
+		require.Equal(t, model.TaskStatusFailure, string(outcome.Task.Status))
+		assert.Equal(t, tc.reason, outcome.Task.FailReason)
+	}
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodGet, "/api/perf-metrics/summary?hours=24&recent_model="+name+"&recent_model="+failed, nil)
@@ -295,7 +325,7 @@ func TestTaskSubmissionMarketplaceSummary(t *testing.T) {
 		name     string
 		requests int64
 		rate     float64
-	}{{name, 4, 75}, {failed, 2, 0}} {
+	}{{name, 4, 75}, {failed, 3, 0}} {
 		idx := slices.IndexFunc(response.Data.Models, func(m perfmetrics.ModelSummary) bool { return m.ModelName == want.name })
 		require.NotEqual(t, -1, idx, want.name)
 		m := response.Data.Models[idx]

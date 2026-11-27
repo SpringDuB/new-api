@@ -106,7 +106,7 @@ export interface SubmitEventDeltaResult {changes: readonly JSONChange[]; state: 
 /** With submit-sse-delta@1, state is small control data; changes build the separate response body. */
 export declare function parseSubmitEventDelta(ctx: DriverContext, event: SubmitEvent, previousState: JSONValue | null): SubmitEventDeltaResult;
 export declare function parseSubmitEvent(ctx: DriverContext, event: SubmitEvent, previousState: JSONValue | null): {state: JSONValue; done: boolean};
-export declare function parseSubmitResponse(ctx: DriverContext & { lecapiSubmitRoute?: string }, response: UpstreamResponse): {taskId: string; taskData?: unknown; immediate?: NormalizedTaskResult; state?: unknown};
+export declare function parseSubmitResponse(ctx: DriverContext & { lecapiSubmitRoute?: string }, response: UpstreamResponse): {taskId: string; taskData?: unknown; immediate?: NormalizedTaskResult & {errorCode?: string; errorType?: string}; state?: unknown};
 /** Query redirects retain credentials only within the channel host and meta.allowedHosts; SSRF checks and HTTPS downgrade protection still apply. */
 export declare function buildQueryRequest(ctx: TaskQueryContext): RequestDescriptor;
 export declare function buildBatchQueryRequest(ctx: BatchQueryContext, tasks: readonly TaskQueryContext[]): RequestDescriptor;

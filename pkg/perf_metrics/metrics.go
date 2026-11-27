@@ -146,6 +146,9 @@ func RecordImmediateTaskResult(info *relaycommon.RelayInfo, result *relaycommon.
 	if info == nil || info.PerformanceBusinessRejection || result == nil || (result.Status != model.TaskStatusSuccess && result.Status != model.TaskStatusFailure) {
 		return
 	}
+	if result.Status == model.TaskStatusFailure && classifyFailure(false, result.UpstreamErrorCode, result.UpstreamErrorType, 0) == OutcomeIgnored {
+		return
+	}
 	sample := Sample{
 		Model:     info.OriginModelName,
 		Group:     info.UsingGroup,

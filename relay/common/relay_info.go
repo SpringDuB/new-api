@@ -1129,6 +1129,10 @@ type TaskInfo struct {
 	TotalTokens      int             `json:"total_tokens,omitempty"`      // 用于按倍率计费
 	UsageFacts       map[string]any  `json:"usage_facts,omitempty"`
 	PluginState      json.RawMessage `json:"plugin_state,omitempty"`
+
+	// Structured upstream identifiers for immediate failure metrics only. Never expose or persist them.
+	UpstreamErrorCode string `json:"-"`
+	UpstreamErrorType string `json:"-"`
 }
 
 func FailTaskInfo(reason string) *TaskInfo {
