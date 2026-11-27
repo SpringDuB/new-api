@@ -210,10 +210,8 @@ describe('model library layout', () => {
     ).toHaveTextContent('/ request')
     expect(within(model).getByRole('button', { name: 'Details' })).toBeVisible()
     expect(
-      within(model).queryByLabelText(
-        'Performance metrics for the last 24 hours'
-      )
-    ).not.toBeInTheDocument()
+      within(model).getByRole('img', { name: 'Latest active hours' })
+    ).toBeVisible()
   })
 
   it('filters from the always-open sidebar and resets the group without clearing the model category', async () => {

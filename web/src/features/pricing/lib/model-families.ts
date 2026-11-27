@@ -32,6 +32,7 @@ const familyPriority = new Map(
 const versionedFamilyPattern =
   /(?:^|[^a-z0-9])(seedance|seedream)[-_. ]?(\d+)(?:[-_. ](\d+))?(?=$|[^a-z0-9])/
 const familyPatterns: readonly [RegExp, string][] = [
+  [/^(?:mg-magi-2|magi-2-per-second)$/, 'Magi-2'],
   [/(?:^|[^a-z0-9])(?:minimax|h3(?:video)?)(?=$|[^a-z0-9])/, 'MiniMax'],
   [/(?:^|[^a-z0-9])wan(?:x?\d+)?(?=$|[^a-z0-9])/, 'Wan'],
   [/(?:^|[^a-z0-9])muse[-_ ]video(?=$|[^a-z0-9])/, 'Muse Video'],

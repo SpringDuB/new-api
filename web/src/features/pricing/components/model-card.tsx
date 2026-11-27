@@ -47,9 +47,11 @@ import { MODEL_SQUARE_COLORS } from '../lib/model-square-display'
 import { formatPrice, formatRequestPrice } from '../lib/price'
 import { taskPriceLabel, taskUsageUnitLabel } from '../lib/task-price-display'
 import type { PricingModel, PriceType, TokenUnit } from '../types'
+import { ImageSpecPanel } from './image-spec-panel'
 import { ModelBillingModeBadge } from './model-billing-mode-badge'
 import { ModelPerfBadge, type ModelPerfBadgeData } from './model-perf-badge'
 import { ModelPromotionBadge } from './model-promotion-badge'
+import { VideoSpecPanel } from './video-spec-panel'
 
 export interface ModelCardProps {
   model: PricingModel
@@ -106,23 +108,17 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
   const isUnconfiguredTaskUsage = isUnconfiguredTaskUsageModel(props.model)
   const billingTime = useBillingTime(props.model.billing_expr)
   const currency = useSystemConfigStore((state) => state.config.currency)
+  const videoSpecs = props.model.video_specs
+  const imageSpecs = props.model.image_specs
+  const isSeedancePerCall = [
+    'seedance-2-0-per-request',
+    'seedance-2-5-per-request',
+  ].includes(props.model.model_name)
+  const hasSpecs = !!videoSpecs?.length || !!imageSpecs?.length
+  const imageFallback = !hasSpecs && getModelCategory(props.model) === 'image'
+  const inPanel = hasSpecs || imageFallback
   const tags = isDirectory ? [] : parseTags(props.model.tags)
   const artwork = isDirectory ? props.cover : undefined
-  const hasPerfMetrics =
-    props.perf != null &&
-    ([props.perf.avg_latency_ms, props.perf.avg_tps].some(
-      (value) => Number.isFinite(value) && value > 0
-    ) ||
-      (Number.isFinite(props.perf.success_rate) &&
-        props.perf.success_rate >= 0 &&
-        props.perf.success_rate <= 100) ||
-      props.perf.recent_success_series?.some(
-        (point) =>
-          Number.isFinite(point.ts) &&
-          Number.isFinite(point.success_rate) &&
-          point.success_rate >= 0 &&
-          point.success_rate <= 100
-      ))
   const dynamicPriceOptions = useMemo(
     () => ({
       now: billingTime === undefined ? undefined : new Date(billingTime),
@@ -146,22 +142,27 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
     ]
   )
   const dynamicSummary = useMemo(
-    () => getDynamicPricingSummary(props.model, dynamicPriceOptions),
+    () =>
+      hasSpecs
+        ? null
+        : getDynamicPricingSummary(props.model, dynamicPriceOptions),
     // Currency is read indirectly by the price formatter.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [props.model, dynamicPriceOptions, currency]
+    [props.model, dynamicPriceOptions, currency, hasSpecs]
   )
   const cardExamplePrice = useMemo(
     () =>
-      isDirectory
+      isDirectory || hasSpecs
         ? null
         : getCardExamplePrice(props.model, dynamicPriceOptions),
     // Currency is read indirectly by the price formatter.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [props.model, dynamicPriceOptions, currency, isDirectory]
+    [props.model, dynamicPriceOptions, currency, isDirectory, hasSpecs]
   )
   let priceSummary: ReactNode
-  if (dynamicSummary) {
+  if (hasSpecs) {
+    priceSummary = null // The specification panel owns pricing for this card.
+  } else if (dynamicSummary) {
     const cacheReadEntries = dynamicSummary.secondaryEntries.filter(
       (entry) => entry.field === 'cacheReadPrice' && entry.unit === 'token'
     )
@@ -391,13 +392,13 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
   const detailsAction = (
     <Button
       variant='ghost'
-      size={isDirectory ? 'icon-xs' : 'sm'}
+      size='sm'
       aria-label={isDirectory ? t('Details') : undefined}
       title={isDirectory ? t('Details') : undefined}
       onClick={() => props.onClick(props.model.model_name || '')}
-      className={cn(isDirectory && 'stolas-model-details')}
+      className={isDirectory ? 'stolas-model-details' : undefined}
     >
-      {!isDirectory && t('Details')}
+      {t('Details')}
       <ChevronRight aria-hidden data-icon='inline-end' />
     </Button>
   )
@@ -538,6 +539,34 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
           isDirectory && 'stolas-model-content'
         )}
       >
+        {!!videoSpecs?.length && (
+          <VideoSpecPanel
+            key={props.model.model_name}
+            specs={videoSpecs}
+            anonymousCallPricing={
+              isSeedancePerCall &&
+              videoSpecs.every((spec) =>
+                [
+                  ...(spec.without_reference ?? []),
+                  ...(spec.with_reference ?? []),
+                ].every((rate) => rate.unit === 'request')
+              )
+            }
+            priceOptions={dynamicPriceOptions}
+          />
+        )}
+        {!!imageSpecs?.length && (
+          <ImageSpecPanel
+            key={props.model.model_name}
+            specs={imageSpecs}
+            priceOptions={dynamicPriceOptions}
+          />
+        )}
+        {imageFallback && (
+          <div className='bg-muted/30 min-w-0 rounded-xl border px-3 py-2'>
+            {pricing}
+          </div>
+        )}
         <div
           className={cn(
             'flex min-w-0 flex-col gap-1.5',
@@ -547,12 +576,13 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
           <p
             className={cn(
               'text-muted-foreground text-[13px] leading-5 break-words',
-              isDirectory ? 'line-clamp-3' : 'line-clamp-2'
+              isDirectory && !inPanel ? 'line-clamp-3' : 'line-clamp-2',
+              inPanel && 'text-xs leading-4'
             )}
           >
             {props.model.description || t('No description available.')}
           </p>
-          {isDirectory && promotionNote}
+          {(isDirectory || hasSpecs) && promotionNote}
           {tags.length > 0 && (
             <div
               role='group'
@@ -571,7 +601,7 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
             </div>
           )}
         </div>
-        {!isDirectory && pricing}
+        {!inPanel && pricing}
         {!isDirectory && (groups.length > 0 || endpoints.length > 0) && (
           <dl
             className={cn(
@@ -629,16 +659,9 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
         )}
       >
         {isDirectory ? (
-          <>
-            {pricing}
+          <ModelPerfBadge directory perf={props.perf}>
             {detailsAction}
-            {hasPerfMetrics && (
-              <ModelPerfBadge
-                perf={props.perf}
-                className='stolas-model-metrics'
-              />
-            )}
-          </>
+          </ModelPerfBadge>
         ) : (
           <ModelPerfBadge
             perf={props.perf}

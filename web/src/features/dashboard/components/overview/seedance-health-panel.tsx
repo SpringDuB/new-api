@@ -102,6 +102,13 @@ function SeedanceModelActivity(props: {
         <p>{hasMetrics ? t('Recorded activity') : t('No recent requests')}</p>
       </div>
       <div className='stolas-health-history'>
+        <dl className='stolas-health-success'>
+          {' '}
+          <div>
+            <dt>{t('Success rate')}</dt>
+            <dd>{hasMetrics ? formatUptimePct(metrics.success_rate) : '—'}</dd>
+          </div>
+        </dl>
         <div
           className='stolas-health-slots'
           role='img'
@@ -133,10 +140,6 @@ function SeedanceModelActivity(props: {
         </span>
       </div>
       <dl className='stolas-health-model-metrics'>
-        <div>
-          <dt>{t('Success rate')}</dt>
-          <dd>{hasMetrics ? formatUptimePct(metrics.success_rate) : '—'}</dd>
-        </div>
         <div>
           <dt>{t('Average completion time')}</dt>
           <dd>{hasMetrics ? formatLatency(metrics.avg_latency_ms) : '—'}</dd>
@@ -312,13 +315,7 @@ export function SeedanceHealthPanel(props: SeedanceHealthPanelProps) {
           )}
           {!loading && !failed && modelNames.length > 0 && (
             <>
-              <SeedanceHealthPagination
-                label={t('Model performance')}
-                page={visiblePage}
-                pageCount={modelPageCount}
-                onPageChange={setModelPage}
-              />
-              <div>
+              <div className='stolas-health-cards'>
                 {visibleNames.map((name) => (
                   <SeedanceModelActivity
                     key={name}
@@ -328,6 +325,13 @@ export function SeedanceHealthPanel(props: SeedanceHealthPanelProps) {
                   />
                 ))}
               </div>
+              <SeedanceHealthPagination
+                label={t('Model performance')}
+                page={visiblePage}
+                pageCount={modelPageCount}
+                onPageChange={setModelPage}
+              />
+
               <p className='stolas-health-note'>
                 {t('Platform-wide observations for your available models.')}{' '}
                 {t(

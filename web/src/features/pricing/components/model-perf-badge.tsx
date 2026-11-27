@@ -20,12 +20,18 @@ import { memo, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover'
+import {
   formatLatency,
   formatThroughput,
   formatUptimePct,
   getSuccessRateDotClass,
 } from '@/features/performance-metrics/lib/format'
 import type { SuccessRatePoint } from '@/features/performance-metrics/types'
+import { toIntlLocale } from '@/i18n/languages'
 import { cn } from '@/lib/utils'
 
 export type ModelPerfBadgeData = {
@@ -38,6 +44,7 @@ export type ModelPerfBadgeData = {
 }
 
 export interface ModelPerfBadgeProps extends React.HTMLAttributes<HTMLDivElement> {
+  directory?: boolean
   perf: ModelPerfBadgeData | undefined
 }
 
@@ -46,7 +53,7 @@ const STATUS_SAMPLE_LIMIT = 24
 export const ModelPerfBadge = memo(function ModelPerfBadge(
   props: ModelPerfBadgeProps
 ) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const latencyText = formatLatency(props.perf?.avg_latency_ms ?? 0)
   const throughputText = formatThroughput(props.perf?.avg_tps ?? 0).replace(
     ' t/s',
@@ -81,6 +88,81 @@ export const ModelPerfBadge = memo(function ModelPerfBadge(
     statusSamples.length > 0
       ? t('Success rate')
       : t('No performance data available')
+
+  if (props.directory) {
+    const emptySlots = STATUS_SAMPLE_LIMIT - statusSamples.length
+    const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
+    const clock = new Intl.DateTimeFormat(locale, {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+    return (
+      <div
+        role='group'
+        aria-label={t('Success rate over the latest active hours')}
+        className='stolas-model-health'
+      >
+        <div className='text-muted-foreground flex items-baseline gap-1.5 text-xs'>
+          {t('Success rate')} <span aria-hidden='true'>·</span> {t('7 Days')}
+        </div>
+        <strong className='text-base font-semibold tabular-nums'>
+          {successRateText}
+        </strong>
+        <div
+          className='stolas-model-hours'
+          role='img'
+          aria-label={t('Latest active hours')}
+        >
+          {Array.from(
+            { length: emptySlots },
+            (_, i) => `empty-${emptySlots - i}`
+          ).map((key) => (
+            <span key={key} data-observed='false' />
+          ))}
+          {statusSamples.map(({ ts, success_rate }) => {
+            let color = 'bg-red-500'
+            if (success_rate >= 90) color = 'bg-emerald-500'
+            else if (success_rate >= 50) color = 'bg-amber-500'
+            return (
+              <span
+                key={ts}
+                data-observed='true'
+                className={color}
+                title={`${clock.format(ts * 1000)} · ${formatUptimePct(success_rate)}`}
+              />
+            )
+          })}
+        </div>
+        <div className='text-muted-foreground flex justify-between gap-2 text-[11px]'>
+          <span>{t('Latest 24 hours with requests')}</span>
+          <span>{t('Most recent')}</span>
+        </div>
+        <div className='mt-0.5 flex items-center justify-between gap-2'>
+          <Popover>
+            <PopoverTrigger
+              openOnHover
+              className='text-muted-foreground hover:text-foreground focus-visible:outline-ring rounded-sm py-1 text-xs underline decoration-dotted underline-offset-4'
+            >
+              {t('How this is calculated')}
+            </PopoverTrigger>
+            <PopoverContent
+              align='start'
+              side='top'
+              aria-label={t('How this is calculated')}
+              className='bg-foreground text-background w-72 max-w-[calc(100vw-2rem)] px-3 py-2 text-xs leading-relaxed'
+            >
+              {t(
+                'Hourly success: green ≥90%, yellow 50–<90%, red <50%. Gray means no valid samples. Identified policy, parameter and media rejections do not count as failures.'
+              )}
+            </PopoverContent>
+          </Popover>
+          {props.children}
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div

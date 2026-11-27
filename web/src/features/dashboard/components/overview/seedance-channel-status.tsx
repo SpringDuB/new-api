@@ -1,21 +1,3 @@
-/*
-Copyright (C) 2023-2026 QuantumNous
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU Affero General Public License as
-published by the Free Software Foundation, either version 3 of the
-License, or (at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-GNU Affero General Public License for more details.
-
-You should have received a copy of the GNU Affero General Public License
-along with this program. If not, see <https://www.gnu.org/licenses/>.
-
-For commercial licensing, please contact support@quantumnous.com
-*/
 import { useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import { useEffect } from 'react'
@@ -34,6 +16,25 @@ import { formatLatency } from '@/features/performance-metrics/lib/format'
 import { toIntlLocale } from '@/i18n/languages'
 import { ROLE } from '@/lib/roles'
 import { requireServerSuccess } from '@/lib/server-error-message'
+/*
+Copyright (C) 2023-2026 QuantumNous
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as
+published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+For commercial licensing, please contact support@quantumnous.com
+*/
+import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/auth-store'
 
 import {
@@ -116,12 +117,6 @@ export function SeedanceChannelStatus({
 
   return (
     <div>
-      <SeedanceHealthPagination
-        label={t('Channel status')}
-        page={page}
-        pageCount={pageCount}
-        onPageChange={onPageChange}
-      />
       <p className='stolas-health-note'>
         {t(
           'Channel state and saved test results are shown separately from model completion metrics.'
@@ -132,7 +127,10 @@ export function SeedanceChannelStatus({
       )}
       <div
         aria-busy={query.isPlaceholderData}
-        className={query.isPlaceholderData ? 'opacity-60' : undefined}
+        className={cn(
+          'stolas-health-cards',
+          query.isPlaceholderData && 'opacity-60'
+        )}
       >
         {channels.map((channel) => {
           const hasSeedanceTest =
@@ -190,6 +188,12 @@ export function SeedanceChannelStatus({
           )
         })}
       </div>
+      <SeedanceHealthPagination
+        label={t('Channel status')}
+        page={page}
+        pageCount={pageCount}
+        onPageChange={onPageChange}
+      />
       <footer className='stolas-health-channel-footer'>
         <Button
           variant='ghost'

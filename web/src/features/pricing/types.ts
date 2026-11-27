@@ -57,7 +57,55 @@ export type BillingPluginVariant = {
   billing_usage_examples?: BillingUsageExample[]
 }
 
+/** Display-only catalog metadata. Each row describes jointly attainable limits, not independent maxima across routes. */
+export type VideoInputCombination = {
+  minima: readonly [number, number, number]
+  maxima: readonly [number, number, number]
+  total: number
+  videoSeconds?: number
+  videoTotalSeconds?: number
+  videoWithinOutput?: boolean
+  nativeFace?: boolean
+}
+
+export type VideoUnitRate = {
+  unit:
+    | 'request'
+    | 'second'
+    | 'video_tokens'
+    | 'reference_second'
+    | 'reference_image'
+  amount: number
+}
+
+export type CatalogVideoSpec = {
+  provider?: string
+  duration_tier?: string
+  duration_label?: Record<string, string>
+  includedImages?: number
+  requiresSourceTask?: boolean
+  resolution: string
+  preferred?: boolean
+  combinations: VideoInputCombination[]
+  without_reference?: VideoUnitRate[]
+  with_reference?: VideoUnitRate[]
+}
+
+export type CatalogImageSpec = {
+  provider?: string
+  resolution?: string
+  imageSize?: string
+  action?: string
+  minImages?: number
+  maxImages?: number
+  maxOutputs?: number
+  requiresSourceTask?: boolean
+  rate: { unit: 'image' | 'request'; amount: number }
+}
+
 export type PricingModel = {
+  image_specs?: CatalogImageSpec[]
+  video_specs?: CatalogVideoSpec[]
   square_category?: import('./lib/model-categories').ModelCategory
   square_display?: import('./lib/model-square-display').ModelSquareDecoration
   billing_plugin_variants?: BillingPluginVariant[]

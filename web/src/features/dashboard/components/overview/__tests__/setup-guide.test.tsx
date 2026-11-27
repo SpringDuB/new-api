@@ -107,6 +107,55 @@ async function renderOverview() {
 }
 
 describe('overview setup guide', () => {
+  it('keeps announcements beside health after the shortcuts and opens the newest notice', async ({
+    onTestFinished,
+  }) => {
+    // The Base UI scroll viewport checks for active animations; jsdom has none.
+    if (!HTMLElement.prototype.getAnimations) {
+      Object.defineProperty(HTMLElement.prototype, 'getAnimations', {
+        configurable: true,
+        value: () => [],
+      })
+      onTestFinished(() => {
+        Reflect.deleteProperty(HTMLElement.prototype, 'getAnimations')
+      })
+    }
+    client.setQueryData(['status'], {
+      announcements_enabled: true,
+      announcements: [
+        { id: 1, content: 'Older notice', publishDate: '2026-11-01' },
+        {
+          id: 2,
+          content: 'Current notice',
+          publishDate: '2026-11-25',
+          extra: 'Full notice details',
+        },
+      ],
+    })
+    await renderOverview()
+    const heading = await screen.findByRole('heading', {
+      name: 'Announcements',
+    })
+    expect(
+      screen
+        .getByRole('heading', { name: 'API access' })
+        .compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+    const newest = screen.getByRole('button', { name: /Current notice/ })
+    expect(
+      newest.compareDocumentPosition(
+        screen.getByRole('button', { name: /Older notice/ })
+      ) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+    await userEvent.setup().click(newest)
+    expect(await screen.findByRole('dialog')).toHaveTextContent(
+      'Full notice details'
+    )
+    expect(
+      screen.queryByRole('tab', { name: 'Channel status' })
+    ).not.toBeInTheDocument()
+  })
+
   it('prioritizes the remaining credit and usage before quick actions and preserves the collapsed setup guide', async () => {
     await renderOverview()
 

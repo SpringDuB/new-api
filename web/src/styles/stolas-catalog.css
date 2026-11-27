@@ -347,29 +347,66 @@ For commercial licensing, please contact support@quantumnous.com
   font-size: 0.75rem;
   line-height: 1.4;
 }
+.stolas-video-spec-box .stolas-video-resolutions {
+  max-width: 100%;
+  flex-wrap: wrap;
+  gap: 0.125rem;
+  border: 1px solid var(--border);
+  border-radius: 0.8rem;
+  background: var(--muted);
+  padding: 0.125rem;
+}
+.stolas-video-resolutions [data-slot='toggle-group-item'] {
+  min-width: 0;
+  height: 1.5rem;
+  padding-inline: 0.5rem;
+  border-radius: 0.65rem;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+}
+.stolas-video-resolutions [aria-pressed='true'] {
+  background: var(--card);
+  color: var(--foreground);
+  font-weight: 600;
+  box-shadow: 0 0 0 1px var(--border);
+}
 .stolas-model-price-entry + .stolas-model-price-entry::before {
   content: ' · ';
   color: var(--muted-foreground);
 }
 .stolas-model-tile .stolas-model-footer {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 0.25rem;
+  display: block;
+  padding: 0.65rem 0.875rem 0.4rem;
   border-top: 1px solid var(--border);
-  padding: 0.5rem 0.625rem;
+  background: var(--card);
+}
+.stolas-model-health {
+  display: grid;
+  gap: 0.25rem;
+  min-width: 0;
+}
+.stolas-model-hours {
+  display: grid;
+  grid-template-columns: repeat(24, minmax(0, 1fr));
+  gap: 2px;
+  margin-block: 0.15rem 0.05rem;
+}
+.stolas-model-hours > span {
+  height: 0.85rem;
+  border-radius: 0.24rem;
+}
+.stolas-model-hours > [data-observed='false'] {
+  background: color-mix(in srgb, var(--muted-foreground) 20%, var(--card));
 }
 .stolas-model-tile .stolas-model-details {
-  color: var(--primary);
+  gap: 0.125rem;
+  height: 1.75rem;
+  padding-inline: 0.375rem;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
 }
-.stolas-model-tile[data-artwork] .stolas-model-details {
-  background: color-mix(in srgb, var(--primary) 10%, var(--card));
-}
-.stolas-model-tile[data-artwork] .stolas-model-details:hover {
-  background: color-mix(in srgb, var(--primary) 18%, var(--card));
-}
-.stolas-model-tile .stolas-model-metrics {
-  min-width: 0;
-  grid-column: 1 / -1;
+.stolas-model-tile .stolas-model-details:hover {
+  color: var(--foreground);
 }
 @media (min-width: 900px) {
   .stolas-model-tile:not([data-artwork]) .stolas-model-cover {
@@ -405,11 +442,6 @@ For commercial licensing, please contact support@quantumnous.com
     width: 100%;
     justify-content: space-between;
     gap: 0.75rem;
-  }
-
-  .stolas-model-tile .stolas-model-metrics > dl {
-    flex-wrap: wrap;
-    gap: 1rem;
   }
 }
 

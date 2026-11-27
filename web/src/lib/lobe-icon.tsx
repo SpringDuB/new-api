@@ -34,11 +34,22 @@ import {
   type ReactNode,
 } from 'react'
 
+import magiLogo from '@/assets/brand-icons/magi-2.jpg'
 import sglangLogo from '@/assets/brand-icons/sglang.svg'
 import { IconSub2api } from '@/assets/custom/icon-sub2api'
 import { IconWan } from '@/assets/custom/icon-wan'
 
 const CUSTOM_ICONS: Record<string, ComponentType<{ size?: number }>> = {
+  'Magi-2': (props) => (
+    <img
+      src={magiLogo}
+      alt=''
+      aria-hidden='true'
+      width={props.size ?? 20}
+      height={props.size ?? 20}
+      className='object-contain'
+    />
+  ),
   SGLang: (props) => (
     <img
       src={sglangLogo}

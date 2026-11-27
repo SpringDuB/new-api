@@ -59,7 +59,8 @@ import { requireServerSuccess } from '@/lib/server-error-message'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/auth-store'
 
-import { useApiInfo } from '../../hooks/use-status-data'
+import { useAnnouncements, useApiInfo } from '../../hooks/use-status-data'
+import { AnnouncementsPanel } from './announcements-panel'
 import { CreativeWorkspace } from './creative-workspace'
 import { SeedanceHealthPanel } from './seedance-health-panel'
 import { SummaryCards } from './summary-cards'
@@ -444,6 +445,7 @@ export function OverviewDashboard() {
   const setupGuideToggleRef = useRef<HTMLButtonElement>(null)
   const user = useAuthStore((state) => state.auth.user)
   const { items: apiInfoItems } = useApiInfo()
+  const { items: announcements } = useAnnouncements()
   const [manualSetupGuideExpanded, setManualSetupGuideExpanded] = useState<
     boolean | null
   >(() => getSavedSetupGuideExpanded())
@@ -754,12 +756,22 @@ export function OverviewDashboard() {
             </CardStaggerContainer>
           )}
 
-          <SeedanceHealthPanel
-            models={modelsQuery.data ?? []}
-            loading={modelsQuery.isPending}
-            error={modelsQuery.isError}
-            onRetry={() => void modelsQuery.refetch()}
-          />
+          <div className='stolas-overview-bottom'>
+            {announcements.length > 0 && (
+              <aside
+                aria-label={t('Announcements')}
+                className='stolas-overview-notices'
+              >
+                <AnnouncementsPanel items={announcements} />
+              </aside>
+            )}
+            <SeedanceHealthPanel
+              models={modelsQuery.data ?? []}
+              loading={modelsQuery.isPending}
+              error={modelsQuery.isError}
+              onRetry={() => void modelsQuery.refetch()}
+            />
+          </div>
         </div>
       </SectionPageLayout.Content>
     </SectionPageLayout>

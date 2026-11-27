@@ -17,12 +17,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { Megaphone } from 'lucide-react'
-import { memo, useState } from 'react'
+import { memo, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { IconBadge } from '@/components/ui/icon-badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { useAnnouncements } from '@/features/dashboard/hooks/use-status-data'
 import { getPreviewText } from '@/features/dashboard/lib'
 import type { AnnouncementItem } from '@/features/dashboard/types'
 import { getAnnouncementColorClass } from '@/lib/colors'
@@ -45,9 +44,17 @@ const AnnouncementStatusDot = memo(function AnnouncementStatusDot(props: {
   )
 })
 
-export function AnnouncementsPanel() {
+export function AnnouncementsPanel({ items }: { items: AnnouncementItem[] }) {
   const { t } = useTranslation()
-  const { items: list, loading } = useAnnouncements()
+  const list = useMemo(
+    () =>
+      [...items].sort(
+        (a, b) =>
+          (Date.parse(b.publishDate ?? '') || 0) -
+          (Date.parse(a.publishDate ?? '') || 0)
+      ),
+    [items]
+  )
   const [selectedAnnouncement, setSelectedAnnouncement] =
     useState<AnnouncementItem | null>(null)
   const [isDialogOpen, setIsDialogOpen] = useState(false)
@@ -60,21 +67,19 @@ export function AnnouncementsPanel() {
   return (
     <PanelWrapper
       title={
-        <span className='flex items-center gap-2'>
+        <h2 className='stolas-editorial flex items-center gap-2 text-lg'>
           <IconBadge tone='warning' size='sm'>
             <Megaphone />
           </IconBadge>
           {t('Announcements')}
-        </span>
+        </h2>
       }
       description={t('Latest platform updates and notices')}
-      loading={loading}
       empty={!list.length}
       emptyMessage={t('No announcements at this time')}
-      height='h-72'
       contentClassName='p-0'
     >
-      <ScrollArea className='h-72'>
+      <ScrollArea className='max-h-80 [&_[data-slot=scroll-area-viewport]]:max-h-80'>
         <div>
           {list.map((item: AnnouncementItem, idx: number) => {
             const key = item.id ?? `announcement-${idx}`
@@ -91,8 +96,14 @@ export function AnnouncementsPanel() {
                 <div className='flex items-start gap-2.5'>
                   <AnnouncementStatusDot type={item.type} />
                   <div className='flex min-w-0 flex-1 flex-col gap-1'>
-                    <p className='line-clamp-1 text-sm font-medium'>
-                      {getPreviewText(item.content)}
+                    <p
+                      className={
+                        idx === 0
+                          ? 'line-clamp-2 text-base leading-snug font-semibold'
+                          : 'line-clamp-1 text-sm font-medium'
+                      }
+                    >
+                      {getPreviewText(item.content, idx === 0 ? 120 : 60)}
                     </p>
                     <div className='flex items-center justify-between'>
                       {item.publishDate && (

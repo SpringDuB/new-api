@@ -107,3 +107,14 @@ export function replaceModelInPath(path: string, modelName: string): string {
 export function isTokenBasedModel(model: PricingModel): boolean {
   return model.quota_type === QUOTA_TYPE_VALUES.TOKEN
 }
+
+// K labels refer to canvas width, p labels to height (2K/4K ≈ 1080p/2160p).
+export function resolutionHeight(value: string): number {
+  const match = /^(\d+(?:\.\d+)?)([pk])$/i.exec(value)
+  if (!match) {
+    return /^\d+(?:\.\d+)?$/.test(value)
+      ? Number(value)
+      : Number.MAX_SAFE_INTEGER
+  }
+  return Number(match[1]) * (match[2].toLowerCase() === 'k' ? 540 : 1)
+}

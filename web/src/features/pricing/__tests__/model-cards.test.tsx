@@ -91,6 +91,182 @@ afterEach(() => {
 })
 
 describe('model cards', () => {
+  it('quotes the selected image tier, with the lowest first and no invented reference cap', async () => {
+    const onClick = vi.fn()
+    const user = userEvent.setup()
+    render(
+      <ModelCard
+        onClick={onClick}
+        presentation='directory'
+        selectedGroup='premium'
+        model={pricingModel({
+          image_specs: [
+            {
+              resolution: '4K',
+              rate: { unit: 'image', amount: 0.06 },
+              maxImages: 9,
+            },
+            { resolution: '1K', rate: { unit: 'image', amount: 0.032 } },
+          ],
+        })}
+      />
+    )
+    const prices = screen.getByRole('group', { name: 'Pricing' })
+    expect(prices).toHaveTextContent('0.096')
+    expect(prices).toHaveTextContent('/ image')
+    expect(screen.getByText('Reference images')).toBeVisible()
+    await user.click(screen.getByRole('button', { name: '4K' }))
+    expect(prices).toHaveTextContent('0.18')
+    expect(screen.getByText('Reference images ≤9')).toBeVisible()
+    expect(onClick).not.toHaveBeenCalled()
+  })
+  it('switches resolution, its quote and its actual input combinations without opening Details', async () => {
+    const user = userEvent.setup()
+    const onClick = vi.fn()
+    useSystemConfigStore.getState().setConfig({
+      currency: {
+        ...DEFAULT_CURRENCY_CONFIG,
+        quotaDisplayType: 'CNY',
+        usdExchangeRate: 1,
+      },
+    })
+    const combo = {
+      minima: [0, 0, 0],
+      maxima: [9, 3, 3],
+      total: 12,
+      nativeFace: true,
+    } as const
+    const model = pricingModel({
+      video_specs: [
+        {
+          resolution: '1080p',
+          preferred: true,
+          combinations: [
+            { minima: [0, 0, 0], maxima: [30, 0, 0], total: 30 },
+            { minima: [0, 1, 0], maxima: [0, 1, 0], total: 1 },
+          ],
+          without_reference: [{ unit: 'second', amount: 0.65 }],
+          with_reference: [{ unit: 'second', amount: 0.65 }],
+        },
+        {
+          resolution: '720p',
+          combinations: [combo],
+          without_reference: [{ unit: 'second', amount: 0.39 }],
+          with_reference: [
+            { unit: 'second', amount: 0.39 },
+            { unit: 'reference_second', amount: 0.31 },
+          ],
+        },
+      ],
+    })
+    const { rerender } = render(
+      <ModelCard presentation='directory' model={model} onClick={onClick} />
+    )
+    const prices = () => screen.getByRole('group', { name: 'Pricing' })
+    expect(prices()).toHaveTextContent('¥0.39')
+    expect(prices()).toHaveTextContent('¥0.31')
+    expect(screen.getByText('Native face support')).toBeVisible()
+    await user.click(screen.getByRole('button', { name: '1080p' }))
+    expect(prices()).toHaveTextContent('¥0.65')
+    expect(prices()).not.toHaveTextContent('¥0.31')
+    const shapes = within(
+      screen.getByRole('list', { name: 'Reference material limits' })
+    ).getAllByRole('listitem')
+    expect(shapes).toHaveLength(2)
+    expect(shapes[0]).toHaveTextContent('30')
+    expect(shapes[0]).not.toHaveTextContent('Videos')
+    expect(shapes[1]).toHaveTextContent('Videos')
+    expect(screen.queryByText('Native face support')).toBeNull()
+    expect(onClick).not.toHaveBeenCalled()
+    rerender(
+      <ModelCard
+        presentation='directory'
+        model={model}
+        selectedGroup='premium'
+        onClick={onClick}
+      />
+    )
+    expect(prices()).toHaveTextContent('¥1.95')
+    await user.click(screen.getByRole('button', { name: 'Details' }))
+    expect(onClick).toHaveBeenCalledWith(model.model_name)
+  })
+
+  it('keeps material limits and duration-specific surcharges tied to the selected provider', async () => {
+    const user = userEvent.setup()
+    const base = {
+      resolution: '768P',
+      combinations: [{ minima: [0, 0, 0], maxima: [9, 0, 0], total: 9 }],
+    } as const
+    const rows: NonNullable<PricingModel['video_specs']> = [
+      ...['short', 'long'].map((band, i) => ({
+        ...base,
+        combinations: [...base.combinations],
+        provider: 'MS',
+        duration_tier: band,
+        duration_label: { en: i ? 'Over 15 seconds' : 'Up to 15 seconds' },
+        includedImages: 5,
+        without_reference: [
+          { unit: 'second' as const, amount: i ? 0.24 : 0.14 },
+          { unit: 'reference_image' as const, amount: 0.24 },
+        ],
+      })),
+      {
+        ...base,
+        provider: 'Other',
+        combinations: [{ minima: [0, 0, 0], maxima: [1, 0, 0], total: 1 }],
+        without_reference: [{ unit: 'request', amount: 6 }],
+      },
+    ]
+    render(
+      <ModelCard
+        model={pricingModel({ video_specs: rows })}
+        onClick={vi.fn()}
+      />
+    )
+    const prices = screen.getByRole('group', { name: 'Pricing' })
+    expect(prices).toHaveTextContent('$0.14')
+    await user.click(screen.getByRole('button', { name: 'Over 15 seconds' }))
+    expect(prices).not.toHaveTextContent('$0.14')
+    expect(prices).toHaveTextContent('After 5 images')
+    await user.click(screen.getByRole('button', { name: 'Other' }))
+    expect(prices).toHaveTextContent('$6')
+    expect(prices).not.toHaveTextContent('After 5 images')
+    expect(
+      screen.getByRole('list', { name: 'Reference material limits' })
+    ).toHaveTextContent('Images ≤1')
+  })
+
+  it.each([
+    ['request', 5.5, 'call'],
+    ['video_tokens', 48.7872, '1M tokens'],
+  ] as const)(
+    'shows a static resolution and the %s billing denominator',
+    (unit, amount, label) => {
+      render(
+        <ModelCard
+          onClick={vi.fn()}
+          model={pricingModel({
+            video_specs: [
+              {
+                resolution: '720p',
+                preferred: true,
+                combinations: [
+                  { minima: [0, 0, 0], maxima: [1, 0, 0], total: 1 },
+                ],
+                without_reference: [{ unit, amount }],
+              },
+            ],
+          })}
+        />
+      )
+      expect(screen.getByText('720p')).toBeVisible()
+      expect(screen.queryByRole('button', { name: '720p' })).toBeNull()
+      expect(screen.getByRole('group', { name: 'Pricing' })).toHaveTextContent(
+        label
+      )
+    }
+  )
+
   it('shows the display name and API model ID without a vendor label', async () => {
     const user = userEvent.setup()
     const onClick = vi.fn()
@@ -118,7 +294,7 @@ describe('model cards', () => {
     undefined,
     { avg_latency_ms: Number.NaN, avg_tps: 0, success_rate: Number.NaN },
   ])(
-    'omits empty directory metrics and keeps the details action: %j',
+    'shows 24 unmeasured hours and keeps the details action: %j',
     async (perf) => {
       const onClick = vi.fn()
       render(
@@ -133,11 +309,11 @@ describe('model cards', () => {
       expect(
         within(entry).getByRole('group', { name: 'Pricing' })
       ).toBeVisible()
-      expect(
-        within(entry).queryByLabelText(
-          'Performance metrics for the last 24 hours'
-        )
-      ).not.toBeInTheDocument()
+      const strip = within(entry).getByRole('img', {
+        name: 'Latest active hours',
+      })
+      expect(strip.children).toHaveLength(24)
+      expect(within(entry).getByText('—')).toBeVisible()
       await userEvent
         .setup()
         .click(within(entry).getByRole('button', { name: 'Details' }))
@@ -159,45 +335,143 @@ describe('model cards', () => {
       />
     )
     const metrics = screen.getByLabelText(
-      'Performance metrics for the last 24 hours'
+      'Success rate over the latest active hours'
     )
     expect(within(metrics).getByText('0.00%')).toBeVisible()
   })
 
-  it('shows the colored success history alongside the metrics below the price', () => {
+  it('shows the latest active hours across seven days and the grading notes without opening model details', async () => {
+    const end = 200 * 3600 + 135
+    const onClick = vi.fn()
     render(
       <ModelCard
         model={pricingModel()}
-        onClick={vi.fn()}
         presentation='directory'
+        onClick={onClick}
         perf={{
-          avg_latency_ms: 1200,
-          avg_tps: 42,
-          success_rate: 99.8,
+          window_end: end,
+          success_rate: 72.35,
+          avg_latency_ms: 31020,
+          avg_tps: 0,
           recent_success_series: [
-            { ts: 7200, success_rate: 100 },
-            { ts: 3600, success_rate: 0 },
-          ],
+            [36, 100],
+            [77, 50],
+            [79, 0],
+            [98, 89.99],
+            [99, 90],
+            [100, 49.99],
+          ].map(([hour, success_rate]) => ({ ts: hour * 3600, success_rate })),
         }}
       />
     )
-    const metrics = screen.getByLabelText(
-      'Performance metrics for the last 24 hours'
-    )
-    expect(within(metrics).getByText('1.20s')).toBeVisible()
-    expect(within(metrics).getByText('99.80%')).toBeVisible()
-    expect(within(metrics).getByText('42.0t/s')).toBeVisible()
-    const history = within(metrics).getByRole('img', { name: 'Success rate' })
-    expect(history.children[0]).toHaveClass('bg-red-500')
-    expect(history.children[1]).toHaveClass('bg-emerald-500')
-    for (const item of [
-      screen.getByRole('group', { name: 'Pricing' }),
-      screen.getByRole('button', { name: 'Details' }),
-    ]) {
-      expect(
-        item.compareDocumentPosition(metrics) & Node.DOCUMENT_POSITION_FOLLOWING
-      ).toBeTruthy()
+    expect(screen.getByText('72.35%')).toBeVisible()
+    const cells = screen.getByRole('img', {
+      name: 'Latest active hours',
+    }).children
+    expect(cells).toHaveLength(24)
+    expect(cells[17]).toHaveAttribute('data-observed', 'false')
+    expect(cells[18]).toHaveClass('bg-emerald-500')
+    expect(cells[19]).toHaveClass('bg-amber-500')
+    expect(cells[20]).toHaveClass('bg-red-500')
+    expect(cells[21]).toHaveClass('bg-amber-500')
+    expect(cells[22]).toHaveClass('bg-emerald-500')
+    expect(cells[23]).toHaveClass('bg-red-500')
+    await userEvent
+      .setup()
+      .click(screen.getByRole('button', { name: 'How this is calculated' }))
+    expect(await screen.findByRole('dialog')).toHaveTextContent('90%')
+    expect(onClick).not.toHaveBeenCalled()
+  })
+
+  it.each(['seedance-2-0-per-request', 'seedance-2-5-per-request'])(
+    'shows material limits and description alongside anonymous call prices for %s',
+    (name) => {
+      const sd2 = name.includes('2-0')
+      render(
+        <ModelCard
+          model={pricingModel({
+            model_name: name,
+            description: `Actual description for ${name}`,
+            video_specs: [
+              {
+                provider: 'LecAPI',
+                resolution: '720p',
+                combinations: [
+                  {
+                    minima: [0, 0, 0],
+                    maxima: sd2 ? [9, 3, 3] : [30, 10, 10],
+                    total: sd2 ? 15 : 50,
+                  },
+                ],
+                without_reference: [
+                  { unit: 'request', amount: sd2 ? 2.9 : 5.5 },
+                ],
+                with_reference: [{ unit: 'request', amount: sd2 ? 3.3 : 5.5 }],
+              },
+            ],
+          })}
+          onClick={vi.fn()}
+          presentation='directory'
+        />
+      )
+      expect(screen.getByText('720p')).toBeVisible()
+      const price = screen.getByRole('group', { name: 'Pricing' })
+      expect(price).toHaveTextContent(sd2 ? '2.9' : '5.5')
+      if (sd2) expect(price).toHaveTextContent('3.3')
+      const materials = screen.getByRole('list', {
+        name: 'Reference material limits',
+      })
+      expect(materials).toHaveTextContent(sd2 ? 'Images ≤9' : 'Images ≤30')
+      expect(materials).toHaveTextContent(sd2 ? 'Videos ≤3' : 'Videos ≤10')
+      expect(materials).toHaveTextContent(sd2 ? 'Audio ≤3' : 'Audio ≤10')
+      expect(screen.getByText(`Actual description for ${name}`)).toHaveClass(
+        'line-clamp-2'
+      )
+      expect(screen.queryByText('LecAPI')).not.toBeInTheDocument()
     }
+  )
+
+  it('shows all routable call prices without a provider switch or losing the video-only quote', () => {
+    render(
+      <ModelCard
+        onClick={vi.fn()}
+        presentation='directory'
+        model={pricingModel({
+          model_name: 'seedance-2-0-per-request',
+          video_specs: [
+            {
+              provider: 'A',
+              resolution: '720p',
+              combinations: [
+                { minima: [0, 0, 0], maxima: [3, 0, 0], total: 3 },
+              ],
+              without_reference: [{ unit: 'request', amount: 3 }],
+            },
+            {
+              provider: 'B',
+              resolution: '720p',
+              combinations: [
+                { minima: [0, 0, 0], maxima: [3, 0, 0], total: 3 },
+                { minima: [0, 1, 0], maxima: [1, 1, 0], total: 2 },
+              ],
+              without_reference: [{ unit: 'request', amount: 2.9 }],
+              with_reference: [{ unit: 'request', amount: 3.3 }],
+            },
+          ],
+        })}
+      />
+    )
+    const price = screen.getByRole('group', { name: 'Pricing' })
+    expect(price).toHaveTextContent(/2\.9.*–.*3/)
+    expect(price).toHaveTextContent(/With reference video.*3\.3/)
+    expect(screen.queryByLabelText('Provider')).not.toBeInTheDocument()
+    const limits = screen.getByRole('list', {
+      name: 'Reference material limits',
+    })
+    const choices = within(limits).getAllByRole('listitem')
+    expect(choices).toHaveLength(2)
+    expect(choices[0]).toHaveTextContent('Images ≤3')
+    expect(choices[1]).toHaveTextContent('Videos 1')
   })
 
   it('uses a paginated tile gallery while preserving promotions, group metadata, and task price units', async () => {

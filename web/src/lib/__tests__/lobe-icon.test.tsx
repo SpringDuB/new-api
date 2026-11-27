@@ -121,7 +121,7 @@ describe('Lobe icons', () => {
     expect(screen.getByText('M')).toHaveStyle({ width: '36px', height: '36px' })
   })
 
-  it('keeps placeholders for missing names and preserves custom icons', () => {
+  it('keeps placeholders for missing names and preserves custom icons', async () => {
     const { rerender } = render(getLobeIcon('NotAnInstalledIcon', 30))
     expect(screen.getByText('N')).toHaveStyle({ width: '30px', height: '30px' })
     rerender(getLobeIcon('  '))
@@ -131,12 +131,18 @@ describe('Lobe icons', () => {
       'width',
       '24'
     )
+    rerender(getLobeIcon('Magi-2', 24))
+    expect(screen.getByRole('presentation', { hidden: true })).toHaveAttribute(
+      'src',
+      (await import('@/assets/brand-icons/magi-2.jpg')).default
+    )
     expect(getLobeIconNames()).toEqual(
       expect.arrayContaining([
         'OpenAI',
         'Claude.Color',
         'SGLang',
         'Sub2API',
+        'Magi-2',
         'Wan',
       ])
     )
