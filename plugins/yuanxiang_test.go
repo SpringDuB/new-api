@@ -241,8 +241,7 @@ func TestYuanxiangSharesSeedancePerRequestModelsWithLecAPI(t *testing.T) {
 		accept *jsplugin.LoadedPlugin
 		reject *jsplugin.LoadedPlugin
 	}{
-		{sd25, map[string]any{"resolution": "480p"}, nil, lecapi},
-		{sd25, map[string]any{"resolution": "480p"}, nil, yuanxiang},
+		{sd25, map[string]any{"resolution": "480p"}, lecapi, yuanxiang},
 		{sd20, map[string]any{"quality": "真人模特", "duration": 10}, yuanxiang, lecapi},
 		{sd20, map[string]any{"videos": []string{"https://media.example/ref.mp4"}, "images": []string{"https://media.example/ref.png"}, "duration": 5}, lecapi, yuanxiang},
 		{sd25, map[string]any{"channel": "arbitrary"}, nil, yuanxiang},

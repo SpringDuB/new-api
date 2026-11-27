@@ -198,11 +198,14 @@ func TestCanvasModelCatalogDatabaseMatrix(t *testing.T) {
 			require.Contains(t, entriesByName, "seedance-2-0-per-request")
 			assert.Empty(t, entriesByName["seedance-2-0-per-request"])
 			shared := entriesByName["seedance-2-5-per-request"]
-			require.Len(t, shared, 1, "only the first bound endpoint candidate executes on the shared channel")
-			assert.Empty(t, shared[0].Provider)
+			require.Len(t, shared, 2, "one price per resolution of the first bound endpoint candidate")
+			rates := map[string]float64{"480p": 4.2, "720p": 5.5}
 			for _, row := range shared {
-				assert.Equal(t, "720p", row.Resolution)
-				assert.Equal(t, []canvasPriceAmount{{"request", 5.5}}, row.WithoutReference)
+				assert.Empty(t, row.Provider)
+				require.Contains(t, rates, row.Resolution)
+				assert.Equal(t, []canvasPriceAmount{{"request", rates[row.Resolution]}}, row.WithoutReference)
+				assert.Equal(t, row.WithoutReference, row.WithReference)
+				delete(rates, row.Resolution)
 			}
 			ms := entriesByName["ms-minimax-h3"]
 			require.Len(t, ms, 5)
@@ -249,8 +252,10 @@ func TestCanvasModelCatalogDatabaseMatrix(t *testing.T) {
 			require.Len(t, sd2, 2)
 			var supportsVideo int
 			for _, row := range sd2 {
-				require.Equal(t, []canvasPriceAmount{{"request", 2.9}}, row.WithoutReference)
-				if len(row.WithReference) > 0 {
+				if len(row.WithReference) == 0 {
+					require.Equal(t, []canvasPriceAmount{{"request", 2.9}}, row.WithoutReference)
+				} else {
+					assert.Empty(t, row.WithoutReference)
 					supportsVideo++
 					assert.Equal(t, []canvasPriceAmount{{"request", 3.3}}, row.WithReference)
 				}
@@ -279,7 +284,7 @@ func TestCanvasLecAPIVideoPoolRatios(t *testing.T) {
 		{"seedance-2-5-per-second", []string{"16:9", "9:16", "1:1", "4:3", "3:4", "21:9"}},
 		{"seedance-2-5-per-token", []string{"16:9", "9:16", "1:1", "21:9", "4:3", "3:4", "adaptive"}},
 		{"seedance-2-0-per-second", []string{"16:9", "9:16", "1:1", "4:3", "3:4", "21:9"}},
-		{"seedance-2-0-per-token", []string{"16:9", "9:16", "1:1", "21:9", "4:3", "3:4"}},
+
 		{"seedance-2-0-fast-per-second", []string{"16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "auto"}},
 		{"seedance-2-0-mini-per-second", []string{"16:9", "9:16", "1:1", "auto"}},
 		{"wan-3-0-per-second", []string{"16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "adaptive"}},
@@ -303,7 +308,7 @@ func TestCanvasLecAPIVideoFramesFollowUpstreamModel(t *testing.T) {
 	require.NoError(t, err)
 	plugin, err := jsplugin.NewRegistry().RegisterFactory(source, jsplugin.Options{Key: "lecapi"})
 	require.NoError(t, err)
-	for _, name := range []string{"seedance-2-0-per-token", "seedance-2-0-fast-per-token", "seedance-2-0-mini-per-token", "seedance-2-5-per-token", "ap-muse-video-720-10s", "am-minimax-h3-official", "wan-3-0-per-second", "ms-minimax-h3"} {
+	for _, name := range []string{"seedance-2-5-per-token", "ap-muse-video-720-10s", "am-minimax-h3-official", "wan-3-0-per-second", "ms-minimax-h3"} {
 		_, frames := canvasLecAPIVideoContract(plugin.Meta, name, &model.Channel{})
 		assert.Equal(t, 2, frames, name)
 	}
@@ -415,9 +420,9 @@ func TestCanvasLecAPIPriceEstimatesUseSelectedVideoInput(t *testing.T) {
 		tokensPerSecond  int
 	}{
 		{"seedance-2-5-per-second", "720p", []canvasPriceAmount{{"second", 0.39}}, []canvasPriceAmount{{"second", 0.39}, {"reference_second", 0.31}}, 0},
+		{"seedance-2-5-per-second", "1080p", []canvasPriceAmount{{"second", 0.65}}, nil, 0},
 		{"seedance-2-0-per-second", "720p", []canvasPriceAmount{{"second", 0.35}}, nil, 0},
 		{"seedance-2-5-per-token", "1080p", []canvasPriceAmount{{"video_tokens", 48.7872}}, []canvasPriceAmount{{"video_tokens", 29.1456}}, 48_600},
-		{"seedance-2-0-per-token", "720p", []canvasPriceAmount{{"video_tokens", 29.1456}}, []canvasPriceAmount{{"video_tokens", 17.7408}}, 21_600},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			defaults, ok := plugin.Meta.DefaultsForModel(tc.name)
@@ -477,6 +482,9 @@ func TestCatalogVideoSpecsOnlyQuoteEffectivePrices(t *testing.T) {
 		if tc.model == "seedance-2-5-per-second" && tc.resolution == "720p" {
 			assert.True(t, spec.Preferred)
 			assert.Contains(t, spec.WithReference, canvasPriceAmount{Unit: "reference_second", Amount: 0.31})
+		}
+		if tc.model == "seedance-2-5-per-second" && tc.resolution == "1080p" {
+			assert.Equal(t, []canvasPriceAmount{{"second", 0.65}}, spec.WithReference)
 		}
 		item.BillingPluginVariants[0].BillingExpr = `tier("custom", u("seconds") * u("seconds"))`
 		assert.Empty(t, catalogVideoSpecs(item), "never substitute the global price for an unquotable provider override")

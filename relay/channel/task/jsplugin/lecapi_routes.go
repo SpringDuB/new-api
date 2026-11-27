@@ -477,6 +477,33 @@ func (a *TaskAdaptor) RetryTaskAfterFailure(ctx context.Context, task *model.Tas
 		return false, err
 	}
 
+	// Recheck the frozen routes against the current factory catalog before dispatch,
+	// including a claim that was persisted before the gateway restarted.
+	pending := append([]lecapiRouteCandidate{*inFlight}, candidates...)
+	names := make([]string, len(pending))
+	for i, candidate := range pending {
+		names[i] = candidate.Route
+	}
+	var active []string
+	if err := a.plugin.Engine.CallInto(ctx, &active, "filterLecAPIRetryRoutes", names); err != nil {
+		return false, err
+	}
+	pending = slices.DeleteFunc(pending, func(candidate lecapiRouteCandidate) bool {
+		return !slices.Contains(active, candidate.Route)
+	})
+	if len(pending) == 0 {
+		delete(state, "lecapiRetryInFlight")
+		delete(state, "lecapiRetryCandidates")
+		task.PrivateData.PluginState, err = encodeLecAPIRetryState(state)
+		return false, err
+	}
+	inFlight, candidates = &pending[0], pending[1:]
+	state["lecapiRetryInFlight"], state["lecapiRetryCandidates"] = inFlight, candidates
+	task.PrivateData.PluginState, err = encodeLecAPIRetryState(state)
+	if err != nil {
+		return false, err
+	}
+
 	var payload lecapiRetryPayload
 	if len(task.PrivateData.LecAPIRetryPayload) > 0 {
 		if err := common.Unmarshal(task.PrivateData.LecAPIRetryPayload, &payload); err != nil || len(payload.Routes) == 0 {
