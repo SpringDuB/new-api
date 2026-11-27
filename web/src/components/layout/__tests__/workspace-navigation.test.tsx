@@ -23,7 +23,14 @@ import {
   createRouter,
   RouterProvider,
 } from '@tanstack/react-router'
-import { act, cleanup, render, screen, within } from '@testing-library/react'
+import {
+  act,
+  cleanup,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -81,7 +88,7 @@ async function renderWorkspace(
   client.setQueryData(['status'], {
     system_name: 'New API',
     canvas_enabled: options.canvasEnabled ?? true,
-    canvas_url: 'https://canvas.stolas.cc',
+    canvas_url: 'https://canvas.example.test',
     chats: [{ Studio: 'https://chat.example.test' }],
     SidebarModulesAdmin: options.adminModules
       ? JSON.stringify(options.adminModules)
@@ -120,7 +127,7 @@ async function renderWorkspace(
 
 describe('Stolas workspace navigation', () => {
   it.each([390, 1440])(
-    'places the model library before the wallet balance at %ipx',
+    'places the canvas shortcut between the model library and wallet balance at %ipx',
     async (width) => {
       vi.stubGlobal('innerWidth', width)
       await renderWorkspace('/keys', { walletQuota: 1250000 })
@@ -128,11 +135,25 @@ describe('Stolas workspace navigation', () => {
       const balance = await within(header).findByRole('group', {
         name: 'Current Balance',
       })
-      const library = within(header).getByRole('button', {
+      const library = within(header).getByRole('link', {
         name: 'Model library',
       })
+      expect(library).toHaveAttribute('href', '/pricing')
+      const canvas = within(header).getByRole('link', {
+        name: 'Infinite Canvas',
+      })
+      expect(canvas).toHaveAttribute(
+        'href',
+        'https://canvas.example.test/api/auth/stolas/start'
+      )
+      expect(canvas).toHaveAttribute('target', '_blank')
+      expect(canvas).toHaveAttribute('rel', 'noopener noreferrer')
       expect(
-        library.compareDocumentPosition(balance) &
+        library.compareDocumentPosition(canvas) &
+          Node.DOCUMENT_POSITION_FOLLOWING
+      ).toBeTruthy()
+      expect(
+        canvas.compareDocumentPosition(balance) &
           Node.DOCUMENT_POSITION_FOLLOWING
       ).toBeTruthy()
       expect(await within(balance).findByText('$2.5')).toBeVisible()
@@ -145,6 +166,21 @@ describe('Stolas workspace navigation', () => {
       ).toBeTruthy()
     }
   )
+
+  it('previews on hover and navigates directly when the model library label is clicked', async () => {
+    const user = userEvent.setup()
+    const router = await renderWorkspace('/dashboard/overview')
+    const library = within(screen.getByRole('banner')).getByRole('link', {
+      name: 'Model library',
+    })
+    await user.hover(library)
+    const menu = await screen.findByRole('dialog', { name: 'Model library' })
+    await user.hover(within(menu).getByRole('link', { name: 'All models' }))
+    expect(menu).toBeVisible()
+    await user.click(library)
+    await waitFor(() => expect(router.state.location.href).toBe('/pricing'))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
 
   it('marks the current page and keeps links reachable with the rail collapsed', async () => {
     await renderWorkspace('/keys')
@@ -187,7 +223,7 @@ describe('Stolas workspace navigation', () => {
         },
       ],
     })
-    const menu = screen.getByRole('button', { name: 'Model library' })
+    const menu = screen.getByRole('button', { name: 'Model categories' })
     menu.focus()
     await userEvent.setup().keyboard('{Enter}')
     const family = await screen.findByRole('link', {
@@ -258,7 +294,9 @@ describe('Stolas workspace navigation', () => {
       'page'
     )
     expect(
-      screen.getByRole('link', { name: 'Infinite Canvas' })
+      within(
+        screen.getByRole('navigation', { name: 'Workspace pages' })
+      ).getByRole('link', { name: 'Infinite Canvas' })
     ).toHaveAttribute('target', '_blank')
   })
   it('opens a mobile drawer and dismisses it on Escape or navigation', async () => {
@@ -282,10 +320,17 @@ describe('Stolas workspace navigation', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 
-  it('hides the canvas entry when integration is disabled', async () => {
-    await renderWorkspace('/keys', { canvasEnabled: false })
-    expect(
-      screen.queryByRole('link', { name: /Infinite Canvas/ })
-    ).not.toBeInTheDocument()
-  })
+  it.each([
+    { canvasEnabled: false },
+    { adminModules: { chat: { canvas: false } } },
+    { userModules: { chat: { canvas: false } } },
+  ])(
+    'hides disabled canvas entries including in the header (%j)',
+    async (options) => {
+      await renderWorkspace('/keys', options)
+      expect(
+        screen.queryByRole('link', { name: /Infinite Canvas/ })
+      ).not.toBeInTheDocument()
+    }
+  )
 })

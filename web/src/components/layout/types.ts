@@ -92,6 +92,7 @@ export type SidebarData = {
  * Top navigation link type
  */
 export type TopNavLink = {
+  module?: 'canvas'
   title: string
   href: string
   isActive?: boolean

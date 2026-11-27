@@ -21,7 +21,8 @@ import { ArrowRight, ChevronDown, ChevronRight, Shapes } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { Button } from '@/components/ui/button'
+import { Button, buttonVariants } from '@/components/ui/button'
+import { ButtonGroup } from '@/components/ui/button-group'
 import {
   Popover,
   PopoverContent,
@@ -87,12 +88,14 @@ export function ModelLibraryNavigation({
   className,
   side = 'bottom',
   compact = false,
+  directLink = false,
 }: {
   title: string
   active?: boolean
   className: string
   side?: 'bottom' | 'right'
   compact?: boolean
+  directLink?: boolean
 }) {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
@@ -125,25 +128,68 @@ export function ModelLibraryNavigation({
         if (!nextOpen) setPreview(null)
       }}
     >
-      <PopoverTrigger
-        openOnHover
-        delay={90}
-        closeDelay={150}
-        aria-current={active ? 'page' : undefined}
-        data-active={active || undefined}
-        title={compact ? title : undefined}
-        className={className}
-        render={<Button variant='ghost' />}
-      >
-        <StolasNavigationIcon destination='/pricing' />
-        <span className={compact ? 'sr-only' : 'truncate'}>{title}</span>
-        {!compact && (
-          <ChevronDown
-            aria-hidden='true'
-            className='stolas-library-chevron size-3'
-          />
-        )}
-      </PopoverTrigger>
+      {directLink ? (
+        <ButtonGroup aria-label={title}>
+          <PopoverTrigger
+            openOnHover
+            delay={90}
+            closeDelay={150}
+            nativeButton={false}
+            role='link'
+            aria-haspopup={undefined}
+            aria-expanded={undefined}
+            title={compact ? title : undefined}
+            className={buttonVariants({
+              variant: 'ghost',
+              size: compact ? 'icon' : 'default',
+              className,
+            })}
+            render={<Link to='/pricing' search={{}} />}
+            onClick={(event) => {
+              event.preventBaseUIHandler()
+              setOpen(false)
+              setPreview(null)
+            }}
+          >
+            <StolasNavigationIcon destination='/pricing' />
+            <span className={compact ? 'sr-only' : undefined}>{title}</span>
+          </PopoverTrigger>
+          <PopoverTrigger
+            openOnHover
+            delay={90}
+            closeDelay={150}
+            aria-label={t('Model categories')}
+            aria-expanded={open}
+            className='stolas-library-trigger w-6'
+            render={<Button variant='ghost' size='icon' />}
+          >
+            <ChevronDown
+              aria-hidden='true'
+              className='stolas-library-chevron size-3'
+            />
+          </PopoverTrigger>
+        </ButtonGroup>
+      ) : (
+        <PopoverTrigger
+          openOnHover
+          delay={90}
+          closeDelay={150}
+          aria-current={active ? 'page' : undefined}
+          data-active={active || undefined}
+          title={compact ? title : undefined}
+          className={className}
+          render={<Button variant='ghost' />}
+        >
+          <StolasNavigationIcon destination='/pricing' />
+          <span className={compact ? 'sr-only' : 'truncate'}>{title}</span>
+          {!compact && (
+            <ChevronDown
+              aria-hidden='true'
+              className='stolas-library-chevron size-3'
+            />
+          )}
+        </PopoverTrigger>
+      )}
       <PopoverContent
         side={side}
         align={side === 'right' ? 'end' : 'start'}

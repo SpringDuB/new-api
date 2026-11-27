@@ -24,7 +24,7 @@ import { ConfigDrawer } from '@/components/config-drawer'
 import { NotificationPopover } from '@/components/notification-popover'
 import { ProfileDropdown } from '@/components/profile-dropdown'
 import { Search } from '@/components/search'
-import { Button } from '@/components/ui/button'
+import { Button, buttonVariants } from '@/components/ui/button'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -38,13 +38,16 @@ import { SystemUpdateAction } from '@/features/system-update/system-update-actio
 import { useWalletUser } from '@/features/wallet/hooks/use-wallet-user'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { useNotifications } from '@/hooks/use-notifications'
+import { useIsSidebarModuleVisible } from '@/hooks/use-sidebar-config'
 import { useTopNavLinks } from '@/hooks/use-top-nav-links'
+import { INFINITE_CANVAS_URL } from '@/lib/constants'
 import { formatQuota } from '@/lib/format'
 import { useSystemConfigStore } from '@/stores/system-config-store'
 
 import { defaultTopNavLinks } from '../config/top-nav.config'
 import type { TopNavLink } from '../types'
 import { ModelLibraryNavigation } from './model-library-navigation'
+import { StolasNavigationIcon } from './stolas-navigation-icon'
 import { SystemBrand } from './system-brand'
 
 /**
@@ -123,7 +126,13 @@ export function AppHeader({
   const { t } = useTranslation()
   // Prioritize dynamically generated links from backend
   const dynamicLinks = useTopNavLinks()
-  const links = dynamicLinks.length > 0 ? dynamicLinks : navLinks
+  const showCanvas = useIsSidebarModuleVisible(INFINITE_CANVAS_URL)
+  const links = (dynamicLinks.length > 0 ? dynamicLinks : navLinks).filter(
+    (link) => link.module !== 'canvas' || showCanvas
+  )
+  const canvas = links.find(
+    (link) => link.module === 'canvas' && !link.disabled
+  )
   const library = links.find(
     (link) => link.href === '/pricing' && !link.disabled
   )
@@ -146,7 +155,25 @@ export function AppHeader({
                 title={library.title}
                 className='stolas-library-trigger'
                 compact={isMobile}
+                directLink
               />
+            )}
+            {showTopNav && canvas && (
+              <a
+                href={canvas.href}
+                target='_blank'
+                rel='noopener noreferrer'
+                title={isMobile ? canvas.title : undefined}
+                className={buttonVariants({
+                  variant: 'ghost',
+                  size: isMobile ? 'icon' : 'default',
+                })}
+              >
+                <StolasNavigationIcon destination='canvas' />
+                <span className={isMobile ? 'sr-only' : undefined}>
+                  {canvas.title}
+                </span>
+              </a>
             )}
             <WorkspaceBalance />
             {showTopNav && (
@@ -238,11 +265,11 @@ function WorkspaceBalance() {
       role='group'
       aria-label={label}
       title={`${label}: ${balance}`}
-      className='border-border me-1 flex max-w-28 min-w-0 items-center gap-1.5 border-e pe-2 text-xs tabular-nums sm:max-w-40'
+      className='border-border me-1 flex max-w-28 min-w-0 items-center gap-1.5 border-e pe-2 text-xs tabular-nums max-[400px]:max-w-20 sm:max-w-40'
     >
       <Wallet
         aria-hidden='true'
-        className='text-muted-foreground size-4 shrink-0'
+        className='text-muted-foreground size-4 shrink-0 max-[400px]:hidden'
       />
       <span className='truncate font-medium'>{balance}</span>
     </div>

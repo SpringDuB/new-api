@@ -419,6 +419,18 @@ For commercial licensing, please contact support@quantumnous.com
     grid-template-columns: minmax(0, 1fr);
   }
 }
+@media (max-width: 400px) {
+  .stolas-masthead-inner {
+    gap: 0.25rem;
+    padding-inline: 0.5rem;
+  }
+  .stolas-masthead .stolas-account-trigger {
+    padding-inline: 0.25rem;
+  }
+  .stolas-masthead .stolas-account-trigger > svg {
+    display: none;
+  }
+}
 .stolas-launch-actions {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

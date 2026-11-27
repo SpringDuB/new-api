@@ -19,18 +19,13 @@ For commercial licensing, please contact support@quantumnous.com
 import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import type { TopNavLink } from '@/components/layout/types'
 import { getCanvasStartURL } from '@/features/canvas-connect/connection'
 import { useStatus } from '@/hooks/use-status'
 import { parseHeaderNavModulesFromStatus } from '@/lib/nav-modules'
 import { useAuthStore } from '@/stores/auth-store'
 
-export type TopNavLink = {
-  title: string
-  href: string
-  disabled?: boolean
-  requiresAuth?: boolean
-  external?: boolean
-}
+export type { TopNavLink } from '@/components/layout/types'
 
 /**
  * Generate top navigation links based on HeaderNavModules configuration from backend /api/status
@@ -70,6 +65,7 @@ export function useTopNavLinks(): TopNavLink[] {
 
   if (status?.canvas_enabled !== false) {
     links.push({
+      module: 'canvas',
       title: t('Infinite Canvas'),
       href: getCanvasStartURL(status),
       external: true,
