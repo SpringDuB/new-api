@@ -119,6 +119,34 @@ func (a *TaskAdaptor) FilterPricedTaskRoutes(info *relaycommon.RelayInfo) error 
 	return nil
 }
 
+// Synchronous images have no pollable task to recover. A timeout or an
+// ambiguous reply ends submission; only a definitive refusal permits replay.
+func (a *TaskAdaptor) submitLecAPIImagePool(c *gin.Context, info *relaycommon.RelayInfo, body io.Reader) (*http.Response, error) {
+	if a.submit.ResponseType != "json" || a.submit.BodyType == "multipart" || c.Request.Method != http.MethodPost {
+		return nil, errors.New("invalid LecAPI image pool submission")
+	}
+	resp, err := channel.DoTaskApiRequest(a, c, info, body)
+	for _, alternative := range a.submit.LecAPIImageAlternatives[:min(2, len(a.submit.LecAPIImageAlternatives))] {
+		if err != nil || resp == nil || c.Request.Context().Err() != nil || !lecapiDefinitiveRouteRejection(resp) {
+			return resp, err
+		}
+		resp.Body.Close()
+		value, err := inlineJSONFilePlaceholders(c, alternative)
+		if err != nil {
+			return nil, err
+		}
+		encoded, err := common.Marshal(value)
+		if err != nil {
+			return nil, err
+		}
+		resp, err = channel.DoTaskApiRequest(a, c, info, bytes.NewReader(encoded))
+		if err != nil {
+			return nil, err
+		}
+	}
+	return resp, err
+}
+
 // The plugin validates each body before quota reservation. All alternatives use
 // the same descriptor and reservation, and only an explicit refusal can advance.
 func (a *TaskAdaptor) submitLecAPIVideoPool(c *gin.Context, info *relaycommon.RelayInfo, body io.Reader) (*http.Response, error) {

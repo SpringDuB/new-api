@@ -53,6 +53,7 @@ type requestDescriptor struct {
 	// Used only by the LecAPI JSON video submission contract.
 	LecAPIRouteAlternatives []map[string]any           `json:"lecapiRouteAlternatives"`
 	LecAPIRouteCosts        map[string]lecapiRouteCost `json:"lecapiRouteCosts"`
+	LecAPIImageAlternatives []map[string]any           `json:"lecapiImageAlternatives"`
 
 	// ContentPath and MimeType are read from buildContentRequest only: the
 	// artifact's bytes are a base64 string at that path of the JSON reply.
@@ -612,7 +613,9 @@ func (a *TaskAdaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, bod
 	}
 	var resp *http.Response
 	var err error
-	if info.ChannelType != constant.ChannelTypeNewAPI && a.submit != nil && a.submit.LecAPIRouteAlternatives != nil && slices.Contains(a.plugin.Meta.RequiredCapabilities, pluginruntime.CapabilityLecAPIVideoPool) {
+	if info.ChannelType != constant.ChannelTypeNewAPI && a.submit != nil && len(a.submit.LecAPIImageAlternatives) > 0 && slices.Contains(a.plugin.Meta.RequiredCapabilities, pluginruntime.CapabilityLecAPIImagePool) {
+		resp, err = a.submitLecAPIImagePool(c, info, body)
+	} else if info.ChannelType != constant.ChannelTypeNewAPI && a.submit != nil && a.submit.LecAPIRouteAlternatives != nil && slices.Contains(a.plugin.Meta.RequiredCapabilities, pluginruntime.CapabilityLecAPIVideoPool) {
 		resp, err = a.submitLecAPIVideoPool(c, info, body)
 	} else {
 		resp, err = channel.DoTaskApiRequest(a, c, info, body)

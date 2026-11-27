@@ -61,7 +61,7 @@ func TestLecAPICatalogDelistsUnavailableModelsAndPreservesHistoricalQueries(t *t
 	plugin := loadLecAPIPlugin(t)
 	for _, model := range []string{
 		"seedance-2-5-per-request", "seedance-2-5-per-second", "seedance-2-5-per-token", "seedance-2-5-flash-per-second", "mf-video-upscale",
-		"ap-muse-video-720-10s", "muse-zr-700",
+		"ap-muse-video-720-10s", "muse-zr-700", "st-gpt-image-2", "st-image-2.5", "st-gpt-image-2.6",
 	} {
 		assert.Contains(t, plugin.Meta.Models, model)
 	}
@@ -296,6 +296,57 @@ func TestLecAPITemporaryMarkupCapAppliesOnlyToPerRequestPricing(t *testing.T) {
 	}
 }
 
+func TestLecAPIImagePoolsBillAndRouteByRequestedResolution(t *testing.T) {
+	plugin := loadLecAPIPlugin(t)
+	for _, tc := range []struct {
+		model, nw, batch string
+		prices           [3]float64
+	}{
+		{"st-gpt-image-2", "lec-nw-image-2", "lec-s9-image-2", [3]float64{0.032, 0.036, 0.060}},
+		{"st-image-2.5", "lec-nw-image-2-5", "lec-s9-image-2-5", [3]float64{0.032, 0.036, 0.060}},
+		{"st-gpt-image-2.6", "lec-nw-image-2-6", "", [3]float64{0.048, 0.060, 0.084}},
+	} {
+		t.Run(tc.model, func(t *testing.T) {
+			defaults, ok := plugin.Meta.DefaultsForModel(tc.model)
+			require.True(t, ok)
+			for i, resolution := range []string{"1K", "2K", "4K"} {
+				for _, n := range []int{1, 3} {
+					ctx := lecAPIContext(tc.model, map[string]any{"prompt": "boat", "metadata": map[string]any{"resolution": strings.ToLower(resolution), "n": n}})
+					if n > 1 && tc.batch == "" {
+						_, err := plugin.Engine.Call(t.Context(), "buildSubmitRequest", ctx)
+						require.Error(t, err)
+						continue
+					}
+					request := lecAPIHook(t, plugin, "buildSubmitRequest", ctx)
+					body := request["body"].(map[string]any)
+					want := tc.nw
+					if tc.batch != "" && (n > 1 || resolution == "4K") {
+						want = tc.batch
+					}
+					assert.Equal(t, want, body["model"])
+					assert.Equal(t, resolution, body["resolution"])
+					facts := lecAPIHook(t, plugin, "extractUsage", ctx)
+					assert.Equal(t, resolution, facts["resolution"])
+					assert.Equal(t, float64(n), facts["image_count"])
+					cost, _, err := billingexpr.RunExprWithRequest(defaults.BillingExpr, billingexpr.TokenParams{}, billingexpr.RequestInput{Usage: facts})
+					require.NoError(t, err)
+					assert.InDelta(t, tc.prices[i]*float64(n), cost, 1e-12)
+					ctx["upstream"] = map[string]any{"kind": "new_api"}
+					chained := lecAPIHook(t, plugin, "buildSubmitRequest", ctx)
+					assert.Equal(t, tc.model, chained["body"].(map[string]any)["model"])
+					assert.NotContains(t, chained, "lecapiImageAlternatives")
+				}
+			}
+		})
+	}
+	for _, old := range []string{"s9-image-2", "s9-image-2-5", "ac-image-2", "ac-image-2-5-flare", "ac-image-2-5-sunburst", "nw-image-2", "nw-image-2-5", "nw-image-2-6", "tinysnow-image-2", "tinysnow-image-2-5-flare", "tinysnow-image-2-5-sunburst", "image-2", "image2"} {
+		assert.NotContains(t, plugin.Meta.Models, old)
+		ctx := lecAPIContext(old, map[string]any{"prompt": "boat"})
+		_, err := plugin.Engine.Call(t.Context(), "buildSubmitRequest", ctx)
+		require.ErrorContains(t, err, "public LecAPI image")
+	}
+}
+
 func TestLecAPIVideoPoolsBillAndRouteByRequestedResolution(t *testing.T) {
 	plugin := loadLecAPIPlugin(t)
 	for _, tc := range []struct {
@@ -424,6 +475,7 @@ func TestLecAPISeedancePoolsSupportMappedLegacyIDs(t *testing.T) {
 
 	source, err := builtinplugins.Source("lecapi")
 	require.NoError(t, err)
+	source = strings.ReplaceAll(source, "\r\n", "\n")
 	prefix := `"lec-mf-seedance-2-5-30ref": {` + "\n    kind:"
 	require.Contains(t, source, prefix)
 	source = strings.Replace(source, prefix, strings.Replace(prefix, "kind:", "retired: true,\n    kind:", 1), 1)
@@ -562,11 +614,11 @@ func TestLecAPIBindsCatalogModelsToTheirMediaProtocol(t *testing.T) {
 			assert.NotContains(t, description, "lec-")
 		}
 	}
-	assert.Equal(t, len(plugin.Meta.Models)-3, priced)
+	assert.Equal(t, len(plugin.Meta.Models)-2, priced)
 	usage, _ := plugin.Meta.UsageForModel("seedance-2-5-per-second")
 	assert.Equal(t, "Reference video input unit price", usage["reference_seconds"].Description["en"])
 	assert.Equal(t, "参考视频输入单价", usage["reference_seconds"].Description["zh"])
-	for _, name := range []string{"image2", "nano-banana-2", "vp-seedance-2-9-301010"} {
+	for _, name := range []string{"nano-banana-2", "vp-seedance-2-9-301010"} {
 		assert.Contains(t, plugin.Meta.Models, name)
 		defaults, found := plugin.Meta.DefaultsForModel(name)
 		require.True(t, found)
@@ -608,7 +660,7 @@ func TestLecAPIBindsCatalogModelsToTheirMediaProtocol(t *testing.T) {
 		assert.Equal(t, "https://lec.example/v1/videos/historical%2Fid", lecAPIHook(t, plugin, "buildQueryRequest", query)["url"])
 	}
 	for _, tc := range []struct{ name, vendor string }{
-		{"wan-3-0-per-second", "Wan"}, {"ms-minimax-h3", "Minimax"}, {"ac-image-2", "OpenAI"},
+		{"wan-3-0-per-second", "Wan"}, {"ms-minimax-h3", "Minimax"}, {"st-gpt-image-2", "OpenAI"},
 		{"ac-seedream-5-0-lite", "ByteDance"}, {"seedance-2-0-per-request", "ByteDance"},
 		{"nw-nano-banana-2-1", "Google"}, {"sl-midjourney", "Midjourney"},
 	} {
@@ -666,7 +718,7 @@ func TestLecAPIBindsCatalogModelsToTheirMediaProtocol(t *testing.T) {
 		require.True(t, found)
 		assert.Equal(t, "lecapi", binding.Plugin.Meta.Key)
 	}
-	imageModels := []string{"ac-image-2-5-flare", "ac-image-2-5-sunburst", "ac-image-2", "nw-image-2", "nw-image-2-5", "nw-image-2-6", "nw-nano-banana-2-1", "sl-midjourney", "sl-midjourney-niji", "ac-seedream-5-0-lite", "ac-seedream-5-0-pro", "ty-seedream-5-pro", "tinysnow-banana-3-1", "tinysnow-banana-3", "tinysnow-image-2", "tinysnow-image-2-5-flare", "tinysnow-image-2-5-sunburst", "image-2", "image2", "nano-banana-2", "ty-seedream-5-5"}
+	imageModels := []string{"st-gpt-image-2", "st-image-2.5", "st-gpt-image-2.6", "nw-nano-banana-2-1", "sl-midjourney", "sl-midjourney-niji", "ac-seedream-5-0-lite", "ac-seedream-5-0-pro", "ty-seedream-5-pro", "tinysnow-banana-3-1", "tinysnow-banana-3", "nano-banana-2", "ty-seedream-5-5"}
 	for _, modelName := range plugin.Meta.Models {
 		path, protocol := "/v1/videos", "openai_video"
 		for _, imageModel := range imageModels {
@@ -680,8 +732,8 @@ func TestLecAPIBindsCatalogModelsToTheirMediaProtocol(t *testing.T) {
 		assert.Equal(t, protocol, binding.Protocol, modelName)
 	}
 	for _, tc := range []struct{ model, path, protocol string }{
-		{"image-2", "/v1/images/generations", "openai_image"},
-		{"ac-image-2-5-flare", "/v1/images/generations", "openai_image"},
+		{"st-gpt-image-2", "/v1/images/generations", "openai_image"},
+		{"st-image-2.5", "/v1/images/generations", "openai_image"},
 		{"ty-seedream-5-pro", "/v1/images/generations", "openai_image"},
 		{"ty-seedream-5-5", "/v1/images/generations", "openai_image"},
 		{"seedance-2-0-per-request", "/v1/videos", "openai_video"},
@@ -701,8 +753,7 @@ func TestLecAPIBindsCatalogModelsToTheirMediaProtocol(t *testing.T) {
 func TestLecAPIPublicModelsPreserveVendorRoutingAndGatewayChaining(t *testing.T) {
 	plugin := loadLecAPIPlugin(t)
 	for _, tc := range []struct{ public, vendor string }{
-		{"ac-image-2", "lec-ac-image-2"}, {"ty-seedream-5-5", "lec-ty-seedream-5-5"},
-		{"image-2", "lec-image-2"},
+		{"ac-seedream-5-0-pro", "lec-ac-seedream-5-0-pro"}, {"ty-seedream-5-5", "lec-ty-seedream-5-5"},
 
 		{"ap-seedance-2-0-ot", "lec-ap-seedance-2-0-ot"},
 		{"ap-seedance-2-0-ot-fast", "lec-ap-seedance-2-0-ot-fast"},
@@ -811,9 +862,9 @@ func TestLecAPIConvertsImageSizesWithoutChangingGenerationSettings(t *testing.T)
 		{"1280x1024", "4:3"}, {"1024x1280", "3:4"},
 	} {
 		t.Run(tc.size, func(t *testing.T) {
-			ctx := lecAPIContext("tinysnow-image-2-5-flare", map[string]any{"prompt": "boat", "size": tc.size, "resolution": "4k", "quality": "high", "n": 2})
+			ctx := lecAPIContext("st-image-2.5", map[string]any{"prompt": "boat", "size": tc.size, "resolution": "4k", "quality": "high", "n": 2})
 			body := lecAPIHook(t, plugin, "buildSubmitRequest", ctx)["body"].(map[string]any)
-			assert.Equal(t, "lec-tinysnow-image-2-5-flare", body["model"])
+			assert.Equal(t, "lec-s9-image-2-5", body["model"])
 			assert.Equal(t, tc.ratio, body["aspect_ratio"])
 			assert.Equal(t, "4K", body["resolution"])
 			assert.Equal(t, "high", body["quality"])
@@ -824,7 +875,7 @@ func TestLecAPIConvertsImageSizesWithoutChangingGenerationSettings(t *testing.T)
 			assert.Equal(t, body["n"], facts["image_count"])
 		})
 	}
-	for _, name := range []string{"tinysnow-image-2", "tinysnow-image-2-5-sunburst"} {
+	for _, name := range []string{"st-gpt-image-2", "st-image-2.5"} {
 		ctx := lecAPIContext(name, map[string]any{"prompt": "boat", "ratio": "16:9", "metadata": map[string]any{
 			"size": "1920x1080", "extra": map[string]any{"parameters": map[string]any{"resolution_name": "2k", "quality": "HIGH", "n": 10}},
 		}})
@@ -839,19 +890,19 @@ func TestLecAPIConvertsImageSizesWithoutChangingGenerationSettings(t *testing.T)
 		assert.Equal(t, name, lecAPIHook(t, plugin, "buildSubmitRequest", ctx)["body"].(map[string]any)["model"])
 	}
 	for _, tc := range []struct{ model, size, resolution string }{
-		{"tinysnow-image-2", "4k", "4K"}, {"tinysnow-image-2", "1536x1024", "1K"},
-		{"ac-image-2", "3840x2160", "4K"}, {"ac-seedream-5-0-pro", "1920x1080", "2K"},
+		{"st-gpt-image-2", "4k", "4K"}, {"st-gpt-image-2", "1536x1024", "1K"},
+		{"st-image-2.5", "3840x2160", "4K"}, {"ac-seedream-5-0-pro", "1920x1080", "2K"},
 		{"wan-3-0-per-second", "1080p", "1080p"},
 	} {
 		request := map[string]any{"prompt": "boat", "size": tc.size}
-		if tc.model == "ac-image-2" || tc.model == "ac-seedream-5-0-pro" {
+		if tc.model == "st-image-2.5" || tc.model == "ac-seedream-5-0-pro" {
 			request["resolution"] = strings.ToLower(tc.resolution)
 		}
 		ctx := lecAPIContext(tc.model, request)
 		body := lecAPIHook(t, plugin, "buildSubmitRequest", ctx)["body"].(map[string]any)
 		assert.Equal(t, tc.resolution, body["resolution"], "%s must retain its resolution rules", tc.model)
 		assert.Equal(t, tc.resolution, lecAPIHook(t, plugin, "extractUsage", ctx)["resolution"])
-		if tc.model == "ac-image-2" || tc.model == "ac-seedream-5-0-pro" {
+		if tc.model == "st-image-2.5" || tc.model == "ac-seedream-5-0-pro" {
 			assert.Equal(t, "16:9", body["aspect_ratio"])
 			assert.NotContains(t, body, "size")
 		}
@@ -878,7 +929,7 @@ func TestLecAPIConvertsImageSizesWithoutChangingGenerationSettings(t *testing.T)
 		request := maps.Clone(invalid)
 		request["prompt"] = "boat"
 		for _, hook := range []string{"buildSubmitRequest", "extractUsage"} {
-			_, err := plugin.Engine.Call(t.Context(), hook, lecAPIContext("tinysnow-image-2", request))
+			_, err := plugin.Engine.Call(t.Context(), hook, lecAPIContext("st-gpt-image-2", request))
 			require.Error(t, err, "%s must reject invalid or conflicting settings: %v", hook, invalid)
 		}
 	}
@@ -899,8 +950,8 @@ func TestLecAPIEnforcesModelSpecificMaterialsAndOptions(t *testing.T) {
 		{"ms-minimax-h3", map[string]any{"prompt": "boat", "resolution": "480p", "videos": []any{"https://media.example/source.mp4"}}},
 		{"sl-midjourney", map[string]any{"prompt": "boat", "action": "blend"}},
 		{"sl-midjourney", map[string]any{"prompt": "boat", "version": "8.2", "draft": true}},
-		{"tinysnow-image-2", map[string]any{"prompt": "boat", "n": 11}},
-		{"image-2", map[string]any{"prompt": "boat", "metadata": map[string]any{"n": 11}}},
+		{"st-gpt-image-2", map[string]any{"prompt": "boat", "n": 11}},
+		{"st-image-2.5", map[string]any{"prompt": "boat", "metadata": map[string]any{"n": 11}}},
 		{"ap-muse-video-720-10s", map[string]any{"prompt": "boat", "duration": 5}},
 		{"seedance-2-0-01", map[string]any{"prompt": "boat", "images": []any{"https://media.example/source.png"}, "duration": 16}},
 		{"mw-vidu-q4-nopeak", map[string]any{"prompt": "boat"}},
@@ -1101,7 +1152,7 @@ func TestLecAPIMidjourneySelectsAndBillsActionsFromReferenceImages(t *testing.T)
 
 func TestLecAPIImageSettlementCountsPayloads(t *testing.T) {
 	plugin := loadLecAPIPlugin(t)
-	ctx := lecAPIContext("tinysnow-image-2", map[string]any{"prompt": "boat", "n": 3})
+	ctx := lecAPIContext("st-gpt-image-2", map[string]any{"prompt": "boat", "n": 3})
 	assert.Equal(t, float64(3), lecAPIHook(t, plugin, "extractUsage", ctx)["image_count"])
 	for _, tc := range []struct {
 		data  any
@@ -1256,11 +1307,11 @@ func TestLecAPIChargesThePublishedBillingUnit(t *testing.T) {
 		{"mw-vidu-q4-nopeak", map[string]any{"prompt": "boat", "images": []any{"https://media.example/ref.png"}}, 1.1},
 		{"mw-vidu-q4-nopeak", map[string]any{"prompt": "boat", "resolution": "1080p", "images": []any{"https://media.example/ref.png"}}, 1.4},
 
-		{"tinysnow-image-2", map[string]any{"prompt": "boat", "n": 3}, 0.18},
-		{"image-2", map[string]any{"prompt": "boat", "n": 3, "resolution": "4K", "quality": "high"}, 0.12},
-		{"ac-image-2-5-flare", map[string]any{"prompt": "boat", "size": "3840x2160", "resolution": "4k"}, 0.12},
-		{"ac-image-2-5-flare", map[string]any{"prompt": "boat", "size": "3840x2160"}, 0.06},
-		{"nw-image-2", map[string]any{"prompt": "boat", "size": "1920x1080", "resolution": "2k", "quality": "high"}, 0.036},
+		{"st-gpt-image-2", map[string]any{"prompt": "boat", "n": 3}, 0.096},
+		{"st-gpt-image-2", map[string]any{"prompt": "boat", "n": 3, "resolution": "4K", "quality": "high"}, 0.18},
+		{"st-image-2.5", map[string]any{"prompt": "boat", "size": "3840x2160", "resolution": "4k"}, 0.06},
+		{"st-image-2.5", map[string]any{"prompt": "boat", "size": "3840x2160"}, 0.032},
+		{"st-gpt-image-2", map[string]any{"prompt": "boat", "size": "1920x1080", "resolution": "2k", "quality": "high"}, 0.036},
 		{"ms-minimax-h3", map[string]any{"prompt": "boat", "duration": 16, "resolution": "480p"}, 2.72},
 		{"ms-minimax-h3", map[string]any{"prompt": "boat", "duration": 16, "resolution": "768P"}, 3.84},
 		{"ap-muse-video-720-10s", map[string]any{"prompt": "boat"}, 0.6},
@@ -1405,7 +1456,7 @@ func TestLecAPIResolvesOwnedOriginsAndPreservesZeroIndex(t *testing.T) {
 
 func TestLecAPIMaterialUploadsKeepFileRefsAndRejectCountBypasses(t *testing.T) {
 	plugin := loadLecAPIPlugin(t)
-	ctx := lecAPIContext("ac-image-2-5-flare", map[string]any{"prompt": "boat"})
+	ctx := lecAPIContext("ac-seedream-5-0-pro", map[string]any{"prompt": "boat"})
 	ctx["files"] = []any{map[string]any{"ref": "request_file:image[]", "field": "image[]", "filename": "boat.png", "mimeType": "image/png", "size": 12}}
 	body := lecAPIHook(t, plugin, "buildSubmitRequest", ctx)["body"].(map[string]any)
 	images := body["images"].([]any)
@@ -1747,6 +1798,59 @@ func (transport lecAPIFixtureTransport) RoundTrip(request *http.Request) (*http.
 	return transport(request)
 }
 
+func TestLecAPIImagePoolRetriesOnlyBeforeAcceptance(t *testing.T) {
+	plugin := loadLecAPIPlugin(t)
+	service.InitHttpClient()
+	client := service.GetHttpClient()
+	previous := client.Transport
+	t.Cleanup(func() { client.Transport = previous })
+	for _, tc := range []struct {
+		name     string
+		status   int
+		reply    string
+		fallback bool
+	}{
+		{"explicit rejection", http.StatusTooManyRequests, `{"error":{"code":"rate_limit_exceeded"}}`, true},
+		{"ambiguous timeout", http.StatusGatewayTimeout, `{"error":{"message":"timeout"}}`, false},
+		{"already accepted", http.StatusTooManyRequests, `{"task_id":"accepted","error":{"code":"rate_limit_exceeded"}}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var routes []string
+			client.Transport = lecAPIFixtureTransport(func(r *http.Request) (*http.Response, error) {
+				var body map[string]any
+				require.NoError(t, common.DecodeJson(r.Body, &body))
+				routes = append(routes, body["model"].(string))
+				assert.Equal(t, "4K", body["resolution"])
+				assert.Equal(t, "boat", body["prompt"])
+				assert.Equal(t, []any{"https://media.example/ref.png"}, body["images"])
+				status, reply := tc.status, tc.reply
+				if len(routes) == 2 {
+					status, reply = http.StatusOK, `{"data":[{"url":"https://media.example/out.png"}]}`
+				}
+				return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(reply)), Request: r}, nil
+			})
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", nil)
+			c.Set("task_request", map[string]any{"prompt": "boat", "resolution": "4k", "images": []string{"https://media.example/ref.png"}})
+			info := &relaycommon.RelayInfo{OriginModelName: "st-gpt-image-2", TaskRelayInfo: &relaycommon.TaskRelayInfo{}, ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "st-gpt-image-2", ChannelBaseUrl: "https://lec.example", ApiKey: "stub"}}
+			adaptor := taskplugin.New(plugin)
+			adaptor.Init(info)
+			body, err := adaptor.BuildRequestBody(c, info)
+			require.NoError(t, err)
+			resp, err := adaptor.DoRequest(c, info, body)
+			require.NoError(t, err)
+			defer resp.Body.Close()
+			if tc.fallback {
+				assert.Equal(t, []string{"lec-s9-image-2", "lec-nw-image-2"}, routes)
+				assert.Equal(t, http.StatusOK, resp.StatusCode)
+			} else {
+				assert.Equal(t, []string{"lec-s9-image-2"}, routes)
+				assert.Equal(t, tc.status, resp.StatusCode)
+			}
+		})
+	}
+}
+
 func TestLecAPIPoolOnlyRetriesDefinitiveRouteRejections(t *testing.T) {
 	plugin := loadLecAPIPlugin(t)
 	t.Setenv("SQL_DSN", "")
@@ -2068,16 +2172,16 @@ func TestLecAPIHostReservesAndSettlesDefaultPricesWithoutSavedConfiguration(t *t
 		free      bool
 		unitPrice float64
 	}{
-		{name: "active version", unitPrice: 0.06},
-		{name: "updated after pinning", update: true, unitPrice: 0.06},
-		{name: "new request after update", update: true, current: true, unitPrice: 0.12},
-		{name: "disabled after pinning", disable: true, unitPrice: 0.06},
+		{name: "active version", unitPrice: 0.032},
+		{name: "updated after pinning", update: true, unitPrice: 0.032},
+		{name: "new request after update", update: true, current: true, unitPrice: 0.040},
+		{name: "disabled after pinning", disable: true, unitPrice: 0.032},
 		{name: "explicit free override after update", update: true, free: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			pinned := jsplugin.PinnedPlugin{Plugin: plugin, Generation: jsplugin.DefaultRegistry.Generation()}
 			if tc.update {
-				updated := strings.Replace(source, "const PRICE_MARKUP = 1.2;", "const PRICE_MARKUP = 2.4;", 1)
+				updated := strings.Replace(source, `const IMAGE_2_PRICES = { "1K": 0.032`, `const IMAGE_2_PRICES = { "1K": 0.040`, 1)
 				require.NotEqual(t, source, updated)
 				newPlugin, err := jsplugin.DefaultRegistry.Register(updated, jsplugin.Options{Key: "lecapi"})
 				require.NoError(t, err)
@@ -2107,14 +2211,14 @@ func TestLecAPIHostReservesAndSettlesDefaultPricesWithoutSavedConfiguration(t *t
 				assert.Equal(t, "Bearer test-key", request.Header.Get("Authorization"))
 				var body map[string]any
 				require.NoError(t, common.DecodeJson(request.Body, &body))
-				assert.Equal(t, "lec-tinysnow-image-2", body["model"])
+				assert.Equal(t, "lec-s9-image-2", body["model"])
 				assert.Equal(t, float64(3), body["n"])
 				return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"data":[{"url":"https://media.example/a.png"},{"url":"https://media.example/b.png"},{"revised_prompt":"two pictures"}]}`)), Request: request}, nil
 			})
 			c, _ := gin.CreateTestContext(httptest.NewRecorder())
 			c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", nil)
 			c.Set("task_request", map[string]any{"model": "local-lecapi-alias", "prompt": "boat", "n": 3})
-			c.Set("model_mapping", `{"local-lecapi-alias":"tinysnow-image-2"}`)
+			c.Set("model_mapping", `{"local-lecapi-alias":"st-gpt-image-2"}`)
 			c.Set(jsplugin.ContextKeyPinnedPlugin, pinned)
 			common.SetContextKey(c, constant.ContextKeyChannelType, constant.ChannelTypeTaskPlugin)
 			common.SetContextKey(c, constant.ContextKeyChannelBaseUrl, "https://lecapi-fixture.invalid")

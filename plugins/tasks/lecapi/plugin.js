@@ -10,6 +10,36 @@
 // TinySnow Image 2 follows its Base64-only docs rather than the url capability.
 // Missing or unverifiable prices remain unconfigured.
 const MODELS = {
+  "lec-s9-image-2": {
+    kind: "image",
+    name: "Image 2（S9）",
+    icon: "OpenAI",
+    tags: ["image", "per_request"],
+    parameters: {
+      prompt: { type: "string", required: true },
+      images: { type: "array", constraints: { url_schemes: ["https"], allow_data_url: true } },
+      n: { type: "integer", default: 1, min: 1, max: 10 },
+      aspect_ratio: { type: "enum", default: "1:1", values: ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"] },
+      resolution: { type: "enum", default: "1K", values: ["1K", "2K", "4K", "auto"] },
+      quality: { type: "enum", default: "auto", values: ["auto", "low", "medium", "high"] },
+    },
+    billing: { billing_unit: "request", price_per_image: 0.03 },
+  },
+  "lec-s9-image-2-5": {
+    kind: "image",
+    name: "Image 2.5（S9）",
+    icon: "OpenAI",
+    tags: ["image", "per_request"],
+    parameters: {
+      prompt: { type: "string", required: true },
+      images: { type: "array", constraints: { url_schemes: ["https"], allow_data_url: true } },
+      n: { type: "integer", default: 1, min: 1, max: 10 },
+      aspect_ratio: { type: "enum", default: "1:1", values: ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"] },
+      resolution: { type: "enum", default: "1K", values: ["1K", "2K", "4K", "auto"] },
+      quality: { type: "enum", default: "auto", values: ["auto", "low", "medium", "high"] },
+    },
+    billing: { billing_unit: "request", price_per_image: 0.03 },
+  },
   "lec-ap-seedance-2-0-ot": {
     kind: "video",
     name: "Seedance 2.0 官转（AP）",
@@ -3026,6 +3056,28 @@ for (const model of [
   if (!MODELS[model]) MODELS[model] = { kind: "video", retired: true, historicalPool: true, parameters: { duration: { min: 4, max: 30 } }, billing: { billing_unit: "request" } };
 }
 
+// Per-image sale prices in the same 1:1 CNY setup as the video pools. NW
+// supplies inexpensive single images; S9 supports batches at a flat 0.03.
+// Only reviewed routes are candidates. Unknown-price and premium siblings
+// remain readable for old tasks but can never be used as fallbacks.
+const IMAGE_2_PRICES = { "1K": 0.032, "2K": 0.036, "4K": 0.060 };
+const IMAGE_POOLS = {
+  "st-gpt-image-2": { prices: IMAGE_2_PRICES, routes: ["lec-nw-image-2", "lec-s9-image-2"] },
+  "st-image-2.5": { prices: IMAGE_2_PRICES, routes: ["lec-nw-image-2-5", "lec-s9-image-2-5"] },
+  "st-gpt-image-2.6": { prices: { "1K": 0.048, "2K": 0.060, "4K": 0.084 }, routes: ["lec-nw-image-2-6"] },
+};
+const INTERNAL_IMAGE_MODELS = new Set(Object.keys(MODELS).filter((name) => MODELS[name].kind === "image" && (/^lec-(?:.*-)?image-2(?:-|$)/.test(name) || name === "image2")));
+for (const [model, { prices, routes }] of Object.entries(IMAGE_POOLS)) {
+  const single = MODELS[routes[0]];
+  const batch = MODELS[routes[1]];
+  const parameters = { ...single.parameters };
+  if (batch) {
+    parameters.n = batch.parameters.n;
+    parameters.images = { ...parameters.images, constraints: { ...parameters.images.constraints, allow_data_url: true, allow_files: true } };
+  }
+  MODELS[model] = { ...single, parameters, imageRoutes: routes, billing: { billing_unit: "image", resolution_prices: prices } };
+}
+
 // Public identities stay independent from LecAPI's exact wire model names.
 const MODEL_MAPPING = {};
 const PUBLIC_MODEL_NAMES = {};
@@ -3036,7 +3088,7 @@ for (const vendorModel of Object.keys(MODELS)) {
   if (Object.prototype.hasOwnProperty.call(MODEL_MAPPING, publicModel)) throw new Error("LecAPI public model id collision: " + publicModel);
   const profile = MODELS[vendorModel];
   const legacySeedance = /^lec-.*seedance-2-[05](?:-|$)|^seedance-2-[05]-0[1-4]$/.test(vendorModel);
-  if (!legacySeedance && !profile.retired && !profile.poolUnavailable && !profile.legacyPool && !INTERNAL_VIDEO_MODELS.has(vendorModel))
+  if (!legacySeedance && !profile.retired && !profile.poolUnavailable && !profile.legacyPool && !INTERNAL_VIDEO_MODELS.has(vendorModel) && !INTERNAL_IMAGE_MODELS.has(vendorModel))
     MODEL_MAPPING[publicModel] = vendorModel;
   PUBLIC_MODEL_NAMES[vendorModel] = publicModel;
   for (const name of [publicModel, vendorModel]) {
@@ -3095,7 +3147,7 @@ const TOKEN_VIDEO_USAGE_SCHEMA = {
 function defaultExpression(profile) {
   const billing = profile.billing;
   const quantity =
-    billing.price_per_image !== undefined
+    billing.billing_unit === "image" || billing.price_per_image !== undefined
       ? "image_count"
       : billing.billing_unit === "million_tokens"
         ? "tokens"
@@ -3104,7 +3156,7 @@ function defaultExpression(profile) {
           : "requests";
   const priceWithFee = (price) => {
     // Keep integer rates as decimal literals so tier() receives a float.
-    if (profile.uniformVideoPool) return Number.isInteger(price) ? price.toFixed(1) : String(price);
+    if (profile.uniformVideoPool || profile.imageRoutes) return Number.isInteger(price) ? price.toFixed(1) : String(price);
     const markedUp = price * PRICE_MARKUP;
     const salePrice =
       profile.kind === "video" && ["request", "second"].includes(billing.billing_unit)
@@ -3673,7 +3725,7 @@ export const meta = {
   key: "lecapi",
   name: "LecAPI",
   icon: "text:LE",
-  version: "1.19.0",
+  version: "1.21.0",
   author: { name: "QuantumNous" },
   website: "https://api.lecapi.net/docs",
   baseUrl: "https://api.lecapi.net",
@@ -3681,7 +3733,7 @@ export const meta = {
     en: "LecAPI image and video generation with model parameters, reference materials and published default pricing",
     zh: "LecAPI 图片与视频生成，包含模型参数、参考素材要求及公开默认定价",
   },
-  requiredCapabilities: ["submit-no-retry@1", "media-duration@1", "lecapi-video-pool@1", "lecapi-route-cost@1"],
+  requiredCapabilities: ["submit-no-retry@1", "media-duration@1", "lecapi-video-pool@1", "lecapi-route-cost@1", "lecapi-image-pool@1"],
   upstreams: ["vendor", "new_api"],
   fetchMode: "per_task",
   models: Object.keys(MODEL_MAPPING),
@@ -3700,6 +3752,7 @@ export const meta = {
         schema.fps = { enum: profile.parameters.fps.values.map(String), description: { en: "Output frame rate", zh: "输出帧率" } };
       }
       const usageProfile = { models: [publicModel], schema };
+      if (profile.imageRoutes) usageProfile.examples = resolutions.map((resolution) => ({ label: resolution, facts: { requests: 1, image_count: 1, resolution, action: "imagine" } }));
       if (tokenPriced) {
         usageProfile.examples = [
           {
@@ -4205,8 +4258,41 @@ export function listLecAPIVideoRoutes() {
   })).filter(({ resolutions }) => resolutions.length));
 }
 
+function imagePoolSubmission(ctx, profile, includeAlternatives) {
+  // Normalize once against the public contract, including nested resolution,
+  // quantities and file references. Never downgrade a request to fit a route.
+  const request = submission(ctx, profile);
+  const resolution = request.body.resolution;
+  const candidates = [];
+  for (const vendorModel of profile.imageRoutes) {
+    const candidate = MODELS[vendorModel];
+    if (candidate.retired) continue;
+    const { billing, parameters } = candidate;
+    const cost = billing.price_per_image ?? billing.resolution_prices?.[resolution];
+    if (!Number.isFinite(cost) || cost <= 0 || !(cost < profile.billing.resolution_prices[resolution])) continue;
+    if (request.outputCount > (parameters.n?.max ?? 1)) continue;
+    const constraints = parameters.images.constraints;
+    if ((request.body.images || []).some((image) => {
+      // Multipart uploads are inlined as data URLs by the host.
+      if (typeof image !== "string" || image.startsWith("data:")) return !constraints.allow_data_url;
+      return !constraints.url_schemes.includes(image.slice(0, image.indexOf(":")).toLowerCase());
+    })) continue;
+    const body = { ...request.body, model: vendorModel };
+    if (!parameters.n) delete body.n;
+    candidates.push({ cost, body });
+  }
+  if (!candidates.length) throw new Error("No affordable LecAPI image route supports this resolution, image count and reference material combination");
+  if (ctx.upstream?.kind === "new_api") return request;
+  candidates.sort((a, b) => a.cost - b.cost);
+  return { ...request, body: candidates[0].body,
+    ...(includeAlternatives ? { imageAlternatives: candidates.slice(1).map(({ body }) => body) } : {}) };
+}
+
 function resolveSubmission(ctx, includeAlternatives = false) {
   const profile = modelProfile(ctx);
+  if (INTERNAL_IMAGE_MODELS.has(profile.vendorModel) || INTERNAL_IMAGE_MODELS.has(vendorModelName(ctx.model)))
+    throw new Error("Use a public LecAPI image model instead of a private route");
+  if (profile.imageRoutes) return imagePoolSubmission(ctx, profile, includeAlternatives);
   if (profile.poolUnavailable) throw new Error("No LecAPI route is currently available for this model");
   if (!profile.retired && (INTERNAL_VIDEO_MODELS.has(profile.vendorModel) || INTERNAL_VIDEO_MODELS.has(vendorModelName(ctx.model))))
     throw new Error("Use a public LecAPI video entry instead of a retired route model name");
@@ -4234,13 +4320,14 @@ export function buildSubmitRequest(ctx) {
     action: request.profile.kind === "image" ? request.body.action || "imagine" : "generate",
     ...(request.routeAlternatives ? { lecapiRouteAlternatives: request.routeAlternatives } : {}),
     ...(request.routeCosts ? { lecapiRouteCosts: request.routeCosts } : {}),
+    ...(request.imageAlternatives?.length ? { lecapiImageAlternatives: request.imageAlternatives } : {}),
   };
 }
 
 export function extractUsage(ctx) {
   const request = resolveSubmission(ctx);
   if (ctx.usagePurpose === "billing_ratios")
-    return request.profile.kind === "image" && request.profile.billing.price_per_image !== undefined ? { image_count: request.outputCount } : { requests: 1 };
+    return request.profile.kind === "image" && (request.profile.imageRoutes || request.profile.billing.price_per_image !== undefined) ? { image_count: request.outputCount } : { requests: 1 };
   if (request.profile.kind === "image")
     return { requests: 1, image_count: request.outputCount, resolution: request.body.resolution || "unspecified", action: request.body.action || "imagine" };
   const facts = {
@@ -4585,6 +4672,8 @@ function decodeRequest(ctx, kind, nativeRoute) {
   const vendorModel = vendorModelName(requestedModel);
   const model = ctx.model || (vendorModel ? PUBLIC_MODEL_NAMES[vendorModel] : requestedModel);
   if (typeof model !== "string" || !model.trim()) throw new Error("model is required");
+  if (INTERNAL_IMAGE_MODELS.has(vendorModel) || INTERNAL_IMAGE_MODELS.has(vendorModelName(body.model)))
+    throw new Error("Use a public LecAPI image model instead of a private route");
   if (vendorModel && MODELS[vendorModel].retired) throw new Error(PUBLIC_MODEL_NAMES[vendorModel] + " is no longer available on LecAPI");
   if (vendorModel && MODELS[vendorModel].poolUnavailable) throw new Error("No LecAPI route is currently available for this model");
   if (INTERNAL_VIDEO_MODELS.has(vendorModel) || INTERNAL_VIDEO_MODELS.has(vendorModelName(body.model)))
@@ -4614,7 +4703,7 @@ function nativeTask(ctx, task) {
   const model = ctx.model || task.properties?.origin_model_name;
   const mapped = vendorModelName(task.properties?.upstream_model_name || model);
   const profile = MODELS[mapped];
-  const output = publicResponse(task.data || {}, profile?.routes || profile?.historicalPool ? model : "");
+  const output = publicResponse(task.data || {}, profile?.routes || profile?.imageRoutes || profile?.historicalPool ? model : "");
   if (typeof model === "string") output.model = PUBLIC_MODEL_NAMES[vendorModelName(model)] || model;
   return {
     object: "lecapi.task",
@@ -4635,7 +4724,7 @@ function publicResponse(value, poolModel = "") {
     Object.entries(value).map(([key, item]) => [
       key,
       ["model", "model_name", "origin_model_name", "upstream_model_name"].includes(key) && typeof item === "string"
-        ? (poolModel && MODELS[vendorModelName(item)]?.kind === "video" ? poolModel : PUBLIC_MODEL_NAMES[vendorModelName(item)]) || item
+        ? (poolModel && (MODELS[vendorModelName(item)]?.kind === "video" || INTERNAL_IMAGE_MODELS.has(vendorModelName(item))) ? poolModel : PUBLIC_MODEL_NAMES[vendorModelName(item)]) || item
         : publicResponse(item, poolModel),
     ])
   );
