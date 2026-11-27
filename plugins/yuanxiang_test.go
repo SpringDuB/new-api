@@ -202,8 +202,8 @@ func TestYuanxiangSharesSeedancePerRequestModelsWithLecAPI(t *testing.T) {
 		{sd20, "Sd 2.0 · 特价按次 · 漫剧短剧专线", "", "4:3", "", 10, 2.9},
 		{sd20, "SD 2.0 · 特价按次 · 电商专线", "", "9:16", "真人模特", 15, 2.9},
 		{sd20, "SD2.0 · 即梦满血版", "", "16:9", "", 12, 2.9},
-		{sd25, "SD 2.5 · 特价按次", "line:stable-longsupply-item", "1:1", "", 30, 6},
-		{sd25, "SD 2.5 · 特价按次", "line:economy-sd25", "21:9", "", 4, 6},
+		{sd25, "SD 2.5 · 特价按次", "line:stable-longsupply-item", "1:1", "", 30, 5.5},
+		{sd25, "SD 2.5 · 特价按次", "line:economy-sd25", "21:9", "", 4, 5.5},
 	} {
 		t.Run(tc.wire+"/"+tc.line, func(t *testing.T) {
 			input := map[string]any{"model": tc.public, "prompt": "boat", "duration": tc.seconds, "aspect_ratio": tc.ratio}

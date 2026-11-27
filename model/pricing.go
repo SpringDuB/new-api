@@ -16,6 +16,8 @@ import (
 )
 
 type PricingPluginVariant struct {
+	ImageSpecs           []jsplugin.ImageSpec                 `json:"-"`
+	VideoSpecs           []jsplugin.VideoSpec                 `json:"-"`
 	PluginKey            string                               `json:"plugin_key"`
 	PluginName           string                               `json:"plugin_name"`
 	Icon                 string                               `json:"icon,omitempty"`
@@ -26,6 +28,8 @@ type PricingPluginVariant struct {
 }
 
 type Pricing struct {
+	ImageSpecs             []jsplugin.ImageSpec                 `json:"-"`
+	VideoSpecs             []jsplugin.VideoSpec                 `json:"-"` // Public limits; the pricing endpoint adds the effective unit rates.
 	BillingPluginVariants  []PricingPluginVariant               `json:"billing_plugin_variants,omitempty"`
 	ModelName              string                               `json:"model_name"`
 	DisplayName            string                               `json:"display_name,omitempty"`
@@ -271,6 +275,7 @@ func updatePricing() {
 	}
 
 	modelGroupsMap := make(map[string]*types.Set[string])
+	nonTaskChannelTypes := make(map[string][]int)
 
 	for _, ability := range enableAbilities {
 		groups, ok := modelGroupsMap[ability.Model]
@@ -279,6 +284,9 @@ func updatePricing() {
 			modelGroupsMap[ability.Model] = groups
 		}
 		groups.Add(ability.Group)
+		if kind := ability.ChannelType; kind != constant.ChannelTypeTaskPlugin && kind != constant.ChannelTypeNewAPI && !slices.Contains(nonTaskChannelTypes[ability.Model], kind) {
+			nonTaskChannelTypes[ability.Model] = append(nonTaskChannelTypes[ability.Model], kind)
+		}
 	}
 
 	//这里使用切片而不是Set，因为一个模型可能支持多个端点类型，并且第一个端点是优先使用端点
@@ -434,9 +442,18 @@ func updatePricing() {
 				usageModel = target.Declared
 			}
 		}
+		providers := pluginGeneration.PluginsByModel(model)
+		if len(providers) == 0 && ok && plugin != nil {
+			providers = pluginGeneration.PluginsByModel(usageModel)
+		}
 		if ok && plugin != nil {
 			if defaults, exists := taskPluginModelDefaults(pluginGeneration, model); exists {
 				pricing.DisplayName = defaults.DisplayName
+				// A single plugin cannot promise limits for a second plugin or a generic channel.
+				if len(providers) == 1 && !slices.ContainsFunc(nonTaskChannelTypes[model], func(kind int) bool { return !slices.Contains(plugin.Meta.ChannelTypes, kind) }) {
+					pricing.VideoSpecs = defaults.VideoSpecs
+					pricing.ImageSpecs = defaults.ImageSpecs
+				}
 				if usageModel != model && defaults.DisplayName != "" {
 					pricing.CatalogAliasOf = usageModel
 				}
@@ -444,10 +461,6 @@ func updatePricing() {
 			usageSchema, usageExamples := plugin.Meta.UsageForModel(usageModel)
 			pricing.BillingUsageSchema = jsplugin.CloneUsageSchema(usageSchema)
 			pricing.BillingUsageExamples = jsplugin.CloneUsageExamples(usageExamples)
-		}
-		providers := pluginGeneration.PluginsByModel(model)
-		if len(providers) == 0 && ok && plugin != nil {
-			providers = pluginGeneration.PluginsByModel(usageModel)
 		}
 		hasProviderOverride := false
 		for _, provider := range providers {
@@ -476,8 +489,15 @@ func updatePricing() {
 				if mode == billing_setting.BillingModeTieredExpr && !billing_setting.TaskExprCompatible(expression, schema) {
 					expression = ""
 				}
+				var specs []jsplugin.VideoSpec
+				var imageSpecs []jsplugin.ImageSpec
+				if len(providers) > 1 && !slices.ContainsFunc(nonTaskChannelTypes[model], func(kind int) bool { return !slices.Contains(provider.Meta.ChannelTypes, kind) }) {
+					defaults, _ := provider.Meta.DefaultsForModel(usageModel)
+					specs = defaults.VideoSpecs
+					imageSpecs = defaults.ImageSpecs
+				}
 				pricing.BillingPluginVariants = append(pricing.BillingPluginVariants, PricingPluginVariant{
-					PluginKey: provider.Meta.Key, PluginName: provider.Meta.Name, Icon: provider.Meta.Icon,
+					ImageSpecs: imageSpecs, VideoSpecs: specs, PluginKey: provider.Meta.Key, PluginName: provider.Meta.Name, Icon: provider.Meta.Icon,
 					BillingExpr: expression, BillingMode: mode,
 					BillingUsageSchema: jsplugin.CloneUsageSchema(schema), BillingUsageExamples: jsplugin.CloneUsageExamples(examples),
 				})

@@ -54,7 +54,7 @@ export const meta = {
   name: "Yuanxiang AI",
   icon: "text:YX",
   description: { en: "Yuanxiang Seedance 2.0 and 2.5 video generation with per-request pricing", zh: "元象 Seedance 2.0 和 2.5 视频生成，按次计费" },
-  version: "1.2.0",
+  version: "1.2.1",
   author: { name: "QuantumNous" },
   website: "https://yuanxiangai.cc/api-docs",
   baseUrl: "https://yuanxiangai.cc",
@@ -66,11 +66,13 @@ export const meta = {
   modelDefaults: {
     [SD20_PER_REQUEST]: {
       displayName: "Seedance 2.0 · 按次",
+      videoSpecs: [{ resolution: "720p", combinations: [{ minima: [0, 0, 0], maxima: [9, 0, 3], total: 12 }] }],
       billingExpr: 'tier("720p", u("requests") * 2.9)',
     },
     [SD25_PER_REQUEST]: {
       displayName: "Seedance 2.5 · 按次",
-      billingExpr: 'tier("720p", u("requests") * 6.0)',
+      videoSpecs: [{ resolution: "720p", combinations: [{ minima: [0, 0, 0], maxima: [30, 10, 10], total: 50 }] }],
+      billingExpr: 'tier("720p", u("requests") * 5.5)',
     },
   },
   usageSchema: {

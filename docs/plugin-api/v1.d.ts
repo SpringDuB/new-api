@@ -1,6 +1,6 @@
 export type JSONValue = null | boolean | number | string | readonly JSONValue[] | {readonly [key: string]: JSONValue};
 /** json-clone@1, submit-sse-delta@1 and duration-auto@1 are accepted for earlier hosts; new plugins need none of them. */
-export type HostCapability = "json-clone@1" | "submit-sse-delta@1" | "json-order@1" | "duration-auto@1" | "submit-no-retry@1" | "media-duration@1" | "json-file-upload@1" | "lecapi-video-pool@1" | "lecapi-route-cost@1" | "lecapi-image-pool@1";
+export type HostCapability = "json-clone@1" | "submit-sse-delta@1" | "json-order@1" | "duration-auto@1" | "submit-no-retry@1" | "media-duration@1" | "json-file-upload@1" | "lecapi-video-pool@1" | "lecapi-route-cost@1" | "lecapi-video-order@1" | "lecapi-image-pool@1";
 /** Kinds of upstream a driver can address: the vendor API itself, or another New API gateway with the same plugin installed. */
 export type UpstreamKind = "vendor" | "new_api";
 /** Host-injected on every driver hook context. With "new_api" the driver uses its own native-route prefix and the host already set Bearer credentials. */
@@ -64,7 +64,14 @@ export type UsageFieldSchema =
 export type UsageExample = {label: string; facts: Readonly<Record<string, string | number | boolean>>};
 export type UsageProfile = {models: readonly string[]; schema: Readonly<Record<string, UsageFieldSchema>>; examples?: readonly UsageExample[]};
 /** Portable runtime metadata and task price fallbacks. Keys must exactly match meta.models; administrator configuration takes precedence. */
-export interface ModelDefaults {displayName?: string; /** Model manufacturer name, matched against existing vendors without creating database records. */ vendor?: string; /** Localized description, at most 4096 runes per locale. */ description?: LocalizedText; icon?: string; /** Trimmed unique tags, at most 64 runes each and 255 UTF-8 bytes joined by commas. */ tags?: readonly string[]; /** Self-contained task billing expression with host monetary/quota semantics; at most 64 KiB, no fixed(). Empty means no default price. */ billingExpr?: string; /** Display-only estimate for a token-priced video model. */ videoTokenEstimate?: {tokensPerSecond: Readonly<Record<string, number>>; referenceExtraSeconds: number; referencePercent: number}}
+export interface VideoInputCombination {
+  /** Ordered image, video and audio reference counts. */
+  minima: readonly [number, number, number]; maxima: readonly [number, number, number]; total: number;
+  videoSeconds?: number; videoTotalSeconds?: number; videoWithinOutput?: boolean; nativeFace?: boolean;
+}
+export interface VideoSpec {requiresSourceTask?: boolean; includedImages?: number; durationTiers?: readonly string[]; resolution: string; preferred?: boolean; combinations: readonly VideoInputCombination[]}
+export interface ImageSpec {resolution?: string; imageSize?: string; action?: string; minImages?: number; maxImages?: number; maxOutputs?: number; requiresSourceTask?: boolean}
+export interface ModelDefaults {imageSpecs?: readonly ImageSpec[]; /** Display-only, resolution-specific reference combinations. */ videoSpecs?: readonly VideoSpec[]; displayName?: string; /** Model manufacturer name, matched against existing vendors without creating database records. */ vendor?: string; /** Localized description, at most 4096 runes per locale. */ description?: LocalizedText; icon?: string; /** Trimmed unique tags, at most 64 runes each and 255 UTF-8 bytes joined by commas. */ tags?: readonly string[]; /** Self-contained task billing expression with host monetary/quota semantics; at most 64 KiB, no fixed(). Empty means no default price. */ billingExpr?: string; /** Display-only estimate for a token-priced video model. */ videoTokenEstimate?: {tokensPerSecond: Readonly<Record<string, number>>; referenceExtraSeconds: number; referencePercent: number}}
 export interface Meta {requiredCapabilities?: readonly HostCapability[]; submitResponseTypes?: readonly ("json" | "sse")[]; sortPriority?: number; website?: string; apiVersion: 1; key: string; name: string; icon?: string; description?: LocalizedText; version: string; author: {name: string; url?: string}; baseUrl?: string; channelTypes?: readonly number[]; models: readonly string[]; modelDefaults?: Readonly<Record<string, ModelDefaults>>; fetchMode: "per_task" | "batch"; allowedHosts?: readonly string[]; upstreams?: readonly UpstreamKind[]; routes?: readonly NativeRoute[]; protocols?: readonly ProtocolClaim[]; usageSchema?: Readonly<Record<string, UsageFieldSchema>>; usageExamples?: readonly UsageExample[]; usageProfiles?: readonly UsageProfile[]; auth?: "none" | "api_key" | "vertex_oauth" | {type: "none" | "api_key" | "oauth2_jwt"}}
 /** Public data keeps provider metadata; with OSS enabled, exact video source URLs use the host's direct-or-stored delivery policy. Driver snapshots remain unchanged. */
 export interface TaskView {task_id: string; status: string; progress?: string; fail_reason?: string; created_at?: number; updated_at?: number; data?: unknown; properties?: Record<string, unknown>}
@@ -89,7 +96,7 @@ export declare const protocols: {
   openai_image?: {decodeRequest(ctx: ProtocolDecodeContext): SubmitIntent; render(ctx: unknown, task: TaskView): {created?: number; data: readonly ImageResponseEntry[]} & Record<string, unknown>};
 };
 /** The LecAPI JSON hooks can return private, same-usage fallback request bodies. */
-export declare function buildSubmitRequest(ctx: DriverContext): RequestDescriptor & { lecapiImageAlternatives?: readonly Readonly<Record<string, unknown>>[]; lecapiRouteAlternatives?: readonly Readonly<Record<string, unknown>>[]; lecapiRouteCosts?: Readonly<Record<string, {outputSecond: number; referenceSecond: number; durations: readonly number[]}>> };
+export declare function buildSubmitRequest(ctx: DriverContext): RequestDescriptor & { lecapiImageAlternatives?: readonly Readonly<Record<string, unknown>>[]; lecapiKeepRouteOrder?: boolean; lecapiRouteAlternatives?: readonly Readonly<Record<string, unknown>>[]; lecapiRouteCosts?: Readonly<Record<string, {outputSecond: number; referenceSecond: number; durations: readonly number[]}>> };
 export interface SubmitEvent {event: string; id: string; data: string}
 export type JSONPath = readonly (string | number)[];
 export type JSONChange =

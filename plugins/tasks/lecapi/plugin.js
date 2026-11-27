@@ -1,4 +1,4 @@
-// LecAPI public media catalog and pricing snapshot: 2026-11-25.
+// LecAPI public media catalog and pricing snapshot: 2026-11-27.
 // Sources: https://api.lecapi.net/api/media-models/catalog, /api/pricing, and authenticated /v1/models.
 // Catalog version: sha256:0b7c754c716bb8ba0303cac97f39eb718b909624ef8b524bf57566c28ac5feb3.
 // Pricing version: a42d372ccf0b5dd13ecf71203521f9d2.
@@ -10,6 +10,71 @@
 // TinySnow Image 2 follows its Base64-only docs rather than the url capability.
 // Missing or unverifiable prices remain unconfigured.
 const MODELS = {
+  "lec-qora-seedance-2-5-flash": {
+    kind: "video",
+    name: "Seedance 2.5 Flash 官渠（QR）",
+    icon: "Doubao.Color",
+    tags: ["image", "audio", "per_second"],
+    parameters: {
+      prompt: { type: "string", required: true, maxLength: 5000 },
+      duration: { type: "integer", default: 4, min: 4, max: 30, step: 1 },
+      aspect_ratio: { type: "enum", default: "16:9", values: ["21:9", "16:9", "4:3", "1:1", "3:4", "9:16"] },
+      resolution: { type: "enum", default: "480p", values: ["480p", "720p"] },
+      images: { type: "array", constraints: { max_items: 10, url_schemes: ["https"] } },
+      audios: { type: "array", constraints: { max_items: 5, url_schemes: ["https"] } },
+    },
+    max_reference_total: 15,
+    billing: { billing_unit: "second", resolution_prices: { "480p": 0.12, "720p": 0.15 } },
+  },
+  "lec-vg-seedance-2-5-flash-eco": {
+    kind: "video",
+    name: "Seedance 2.5 Flash 经济版（VG）",
+    icon: "Doubao.Color",
+    tags: ["image", "audio", "video", "per_second"],
+    parameters: {
+      prompt: { type: "string", required: true },
+      duration: { type: "integer", required: true, default: 4, min: 4, max: 30, step: 1 },
+      aspect_ratio: { type: "enum", default: "21:9", values: ["21:9", "16:9", "4:3", "1:1", "3:4", "9:16"] },
+      resolution: { type: "enum", default: "720p", values: ["720p", "480p"] },
+      images: { type: "array", constraints: { max_items: 10, url_schemes: ["http", "https"], allow_data_url: true } },
+      audios: { type: "array", constraints: { max_items: 5, url_schemes: ["http", "https"], allow_data_url: true } },
+      videos: { type: "array", constraints: { max_items: 5, url_schemes: ["https"] } },
+    },
+    billing: { billing_unit: "second", resolution_prices: { "480p": 0.13, "720p": 0.18 } },
+  },
+  "lec-mg-magi-2": {
+    kind: "video",
+    name: "MAGI-2（MG）",
+    icon: "Magi-2",
+    tags: ["image", "video", "audio", "per_request"],
+    parameters: {
+      prompt: { type: "string", required: true, maxLength: 20000 },
+      duration: { type: "integer", required: true, default: 5, min: 4, max: 30, step: 1 },
+      aspect_ratio: { type: "enum", default: "21:9", values: ["21:9", "16:9", "4:3", "1:1", "3:4", "9:16"] },
+      images: { type: "array", constraints: { max_items: 10, url_schemes: ["https"] } },
+      videos: { type: "array", constraints: { max_items: 3, url_schemes: ["https"] } },
+      audios: { type: "array", constraints: { max_items: 3, url_schemes: ["https"] } },
+      resolution: { type: "enum", default: "1080p", values: ["1080p"] },
+    },
+    audiovisual_requires_image: true,
+    billing: { billing_unit: "request", price_per_request: 3.5 },
+  },
+  "lec-seedance-2-0-full-933-720p": {
+    kind: "video",
+    name: "Seedance 2.0 满血 933（HN）",
+    icon: "Doubao.Color",
+    tags: ["image", "video", "audio", "per_request"],
+    parameters: {
+      prompt: { type: "string", required: true },
+      duration: { type: "integer", default: 4, min: 4, max: 15, step: 1 },
+      aspect_ratio: { type: "enum", default: "16:9", values: ["16:9", "9:16", "1:1"] },
+      images: { type: "array", constraints: { max_items: 9, url_schemes: ["https"] } },
+      videos: { type: "array", constraints: { max_items: 3, url_schemes: ["https"] } },
+      audios: { type: "array", constraints: { max_items: 3, url_schemes: ["https"] } },
+      resolution: { type: "enum", default: "720p", values: ["720p"] },
+    },
+    billing: { billing_unit: "request", price_per_request: 5.2 },
+  },
   "lec-s9-image-2": {
     kind: "image",
     name: "Image 2（S9）",
@@ -211,6 +276,7 @@ const MODELS = {
     billing: { billing_unit: "request", resolution_prices: { "720p": 4.2 } },
   },
   "lec-ny-seedance-2-5": {
+    retired: true,
     kind: "video",
     name: "Seedance 2.5（NY）",
     icon: "Doubao.Color",
@@ -223,7 +289,6 @@ const MODELS = {
     billing: { billing_unit: "request", resolution_prices: { "720p": 4.2 } },
   },
   "lec-md-seedance-2-5-900-720p": {
-    retired: true,
     kind: "video",
     name: "Seedance 2.5 900（MD）",
     icon: "Video.Color",
@@ -232,7 +297,7 @@ const MODELS = {
       prompt: { type: "string", required: true },
       duration: { type: "integer", required: true, default: 30, values: [5, 10, 15, 30], min: 5, max: 30 },
       aspect_ratio: { type: "enum", required: true, default: "16:9", values: ["16:9", "9:16", "1:1", "4:3", "3:4"] },
-      images: { type: "array", constraints: { max_items: 9, url_schemes: ["https"], allow_data_url: true } },
+      images: { type: "array", constraints: { max_items: 10, url_schemes: ["https"], allow_data_url: true } },
       process_face: { type: "boolean" },
       resolution: { type: "enum", default: "720p", values: ["720p"] },
     },
@@ -555,6 +620,7 @@ const MODELS = {
   "lec-mg-seedance-2-5": {
     kind: "video",
     name: "Seedance 2.5（MG）",
+    face_policy: "native",
     icon: "Doubao.Color",
     tags: ["720p", "image", "video", "audio", "native", "per_request"],
     parameters: {
@@ -571,6 +637,7 @@ const MODELS = {
   "lec-ty-seedance-2-5-1050-flxd": {
     kind: "video",
     name: "Seedance 2.5 1050 FLXD（TY）",
+    face_policy: "native",
     icon: "Doubao.Color",
     tags: ["full", "1050", "multi", "image", "audio", "native", "per_request"],
     parameters: {
@@ -972,6 +1039,7 @@ const MODELS = {
   "lec-mf-seedance-2-5-30ref": {
     kind: "video",
     name: "Seedance 2.5 30参（MF）",
+    face_policy: "native",
     icon: "Doubao.Color",
     tags: ["30-ref", "per_request", "720p", "image", "video", "audio", "native"],
     parameters: {
@@ -1266,6 +1334,7 @@ const MODELS = {
   "lec-vp-seedance-2-5-301010-49": {
     kind: "video",
     name: "Seedance 2.5 301010（VP）",
+    face_policy: "native",
     icon: "Doubao.Color",
     tags: ["full", "301010", "720p", "image", "video", "audio", "native", "per_request"],
     parameters: {
@@ -2162,6 +2231,7 @@ const MODELS = {
     billing: {},
   },
   "lec-vp-seedance-2-9-301010": {
+    retired: true,
     kind: "video",
     name: "Seedance 2.9 301010 (VP)",
     icon: "Doubao.Color",
@@ -2372,6 +2442,7 @@ const MODELS = {
     billing: { billing_unit: "second", equivalent_second_price: 0.18, resolution_prices: { "480p": 0.18, "720p": 0.23 } },
   },
   "lec-vp-wan-3-0-native": {
+    retired: true,
     kind: "video",
     name: "Wan 3.0 满参（VP）",
     icon: "AlibabaCloud.Color",
@@ -2522,6 +2593,7 @@ const MODELS = {
   "lec-vp-seedance-2-5-bd": {
     kind: "video",
     name: "Seedance 2.5 BD (VP)",
+    face_policy: "native",
     icon: "Doubao.Color",
     tags: ["image", "video", "audio", "native", "per_request"],
     parameters: {
@@ -2649,11 +2721,41 @@ const MODELS = {
   },
 };
 
+// LL variants share the normal-generation contract. Edit and extend use
+// task_mode and are not part of the generation pool.
+for (const [version, suffix, title, minimum, rates] of [
+  ["2-5", "", "Seedance 2.5", 4, { "480p": 0.28, "720p": 0.43 }],
+  ["2-5", "-flash", "Seedance 2.5 Flash", 4, { "480p": 0.17, "720p": 0.28 }],
+  ["2-0", "", "Seedance 2.0", 5, { "480p": 0.17, "720p": 0.27 }],
+  ["2-0", "-fast", "Seedance 2.0 Fast", 4, { "480p": 0.13, "720p": 0.17 }],
+  ["2-0", "-mini", "Seedance 2.0 Mini", 4, { "480p": 0.07, "720p": 0.12 }],
+]) {
+  const full = version === "2-5";
+  MODELS["lec-ll-seedance-" + version + suffix] = {
+    kind: "video",
+    name: title + "（LL）",
+    icon: "Doubao.Color",
+    tags: ["image", "video", "audio", "per_second"],
+    parameters: {
+      prompt: { type: "string", required: true, maxLength: 15000 },
+      duration: { type: "integer", default: minimum, min: minimum, max: full ? 30 : 15 },
+      aspect_ratio: { type: "enum", default: "16:9", values: ["16:9", "9:16", "1:1", "auto"] },
+      resolution: { type: "enum", default: "480p", values: ["480p", "720p"] },
+      images: { type: "array", constraints: { max_items: full ? 30 : 9, url_schemes: ["https"] } },
+      videos: { type: "array", constraints: { max_items: full ? 10 : 3, url_schemes: ["https"] } },
+      audios: { type: "array", constraints: { max_items: full ? 10 : 3, url_schemes: ["https"] } },
+    },
+    max_reference_total: full ? 50 : 15,
+    billing: { billing_unit: "second", resolution_prices: rates },
+  };
+}
+
 for (const [suffix, rates] of [
   ["", { "480p": 0.31, "720p": 0.47 }],
   ["-flash", { "480p": 0.19, "720p": 0.31 }],
 ]) {
   MODELS["lec-ap-seedance-2-5" + suffix + "-pf"] = {
+    retired: true,
     kind: "video",
     icon: "Doubao.Color",
     tags: ["image", "video", "audio", "per_second"],
@@ -2699,6 +2801,7 @@ for (const [suffix, minimum, rates] of [
   const tokenProfile = MODELS["lec-ap-seedance-2-0-ot" + suffix];
   MODELS["lec-ap-seedance-2-0" + suffix + "-pf"] = {
     ...tokenProfile,
+    retired: true,
     parameters: {
       ...tokenProfile.parameters,
       duration: { type: "integer", default: minimum, min: minimum, max: 15 },
@@ -2711,6 +2814,7 @@ for (const [suffix, minimum, rates] of [
 }
 
 MODELS["lec-mf-seedance-2-0-fast-yb903"] = {
+  retired: true,
   kind: "video", icon: "Doubao.Color", tags: ["image", "audio", "per_request"],
   parameters: {
     prompt: { type: "string", required: true, maxLength: 8000 },
@@ -2734,7 +2838,23 @@ MODELS["lec-am-seedance-2-0-fast-dola"] = {
   billing: { billing_unit: "request", price_per_request: 1.3 },
 };
 
+// JW offers the same 1080p contract on two independent billing lanes.
+const jwMagi = {
+  kind: "video", icon: "Magi-2", max_reference_total: 16,
+  parameters: {
+    ...MODELS["lec-mg-magi-2"].parameters,
+    aspect_ratio: { type: "enum", default: "16:9", values: ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "auto"] },
+  },
+};
+MODELS["lec-jw-magi-2"] = { ...jwMagi, tags: ["image", "video", "audio", "per_request"], billing: { billing_unit: "request", price_per_request: 3 } };
+MODELS["lec-jw-magi-2-sec"] = { ...jwMagi, tags: ["image", "video", "audio", "per_second"], billing: { billing_unit: "second", resolution_prices: { "1080p": 0.18 } } };
+
 const FIXED_VIDEO_OUTPUTS = {
+  "lec-jw-magi-2": { resolution: "1080p" },
+  "lec-jw-magi-2-sec": { resolution: "1080p" },
+  "lec-ap-minimax-h3": { resolution: "720p" },
+  "lec-mg-magi-2": { resolution: "1080p" },
+  "lec-seedance-2-0-full-933-720p": { resolution: "720p" },
   "lec-ny-seedance-2-5": { resolution: "720p", duration: 30 },
   "lec-vg-minimax-h3-2k": { resolution: "1440p" },
   "lec-am-seedance-2-0-fast-dola": { resolution: "720p", duration: 15 },
@@ -2789,15 +2909,15 @@ const VIDEO_POOLS = {
 
 const SEEDANCE_POOLS = {
   "seedance-2-0-per-request": [
-    "lec-vg-seedance-2-0-full-933", "lec-ty-seedance-2-0-full-933-w-720p",
+    "lec-vg-seedance-2-0-full-933", "lec-ty-seedance-2-0-full-933-w-720p", "lec-seedance-2-0-full-933-720p",
   ],
   "seedance-2-0-fast-per-request": [
     "lec-vg-seedance-2-0-fast-cc", "lec-mf-seedance-2-0-fast-yb903", "lec-am-seedance-2-0-fast-dola", "lec-seedance-2-0-fast-933-720p",
   ],
   "seedance-2-0-mini-per-request": ["lec-seedance-2-0-mini-b1-480p", "lec-seedance-2-0-mini-c9-933-720p"],
-  "seedance-2-0-per-second": ["lec-ap-seedance-2-0-pf", "lec-mf-seedance-2-0-gz"],
-  "seedance-2-0-fast-per-second": ["lec-ap-seedance-2-0-fast-pf", "lec-mf-seedance-2-0-fast-gz"],
-  "seedance-2-0-mini-per-second": ["lec-ap-seedance-2-0-mini-pf"],
+  "seedance-2-0-per-second": ["lec-ll-seedance-2-0", "lec-mf-seedance-2-0-gz"],
+  "seedance-2-0-fast-per-second": ["lec-ll-seedance-2-0-fast", "lec-mf-seedance-2-0-fast-gz"],
+  "seedance-2-0-mini-per-second": ["lec-ll-seedance-2-0-mini"],
   "seedance-2-0-per-token": ["lec-ap-seedance-2-0-ot"],
   "seedance-2-0-fast-per-token": ["lec-ap-seedance-2-0-ot-fast"],
   "seedance-2-0-mini-per-token": ["lec-ap-seedance-2-0-ot-mini"],
@@ -2805,15 +2925,15 @@ const SEEDANCE_POOLS = {
     "lec-ny-seedance-2-5", "lec-vg-seedance-2-5-op", "lec-mg-seedance-2-5",
     "lec-mf-seedance-2-5-30ref", "lec-mm-seedance-2-5", "lec-mm-seedance-2-5-full",
     "lec-vp-seedance-2-5-301010-49", "lec-mj-seedance-2-5-bd-720p",
-    "lec-shuikule-seedance-2-5-bd", "lec-vp-seedance-2-5-bd",
+    "lec-shuikule-seedance-2-5-bd", "lec-vp-seedance-2-5-bd", "lec-md-seedance-2-5-900-720p",
   ],
   "seedance-2-5-per-second": [
-    "lec-ap-seedance-2-5-pf", "lec-haya-seedance-2-5-m", "lec-ap-seedance-2-5-yz", "lec-mg-seedance-2-5-6",
+    "lec-ll-seedance-2-5", "lec-haya-seedance-2-5-m", "lec-ap-seedance-2-5-yz", "lec-mg-seedance-2-5-6",
     "lec-vg-seedance-2-5-pa", "lec-vg-seedance-2-5-wd", "lec-mf-seedance-2-5-gz", "lec-shuikule-seedance-2-5-m",
     "lec-mw-seedance-2-5-slow",
   ],
   "seedance-2-5-per-token": ["lec-ap-seedance-2-5-ot"],
-  "seedance-2-5-flash-per-second": ["lec-ap-seedance-2-5-flash-pf", "lec-mf-seedance-2-5-flash-gz"],
+  "seedance-2-5-flash-per-second": ["lec-ll-seedance-2-5-flash", "lec-mf-seedance-2-5-flash-gz", "lec-qora-seedance-2-5-flash", "lec-vg-seedance-2-5-flash-eco"],
 };
 
 // Customer prices are in CNY for the site's 1:1 billing setup. Route costs do
@@ -2829,15 +2949,14 @@ const SEEDANCE_PRICES = {
     billing_unit: "request", resolution_prices: { "480p": 1.8, "720p": 3 },
   },
   "seedance-2-0-per-second": {
-    billing_unit: "second", resolution_prices: { "480p": 0.3, "720p": 0.41, "1080p": 0.57 },
-    video_reference_prices: { "480p": 0.60, "720p": 0.82, "1080p": 1.13 },
+    billing_unit: "second", resolution_prices: { "480p": 0.26, "720p": 0.35, "1080p": 0.57 },
+    video_reference_prices: { "480p": 0.26, "720p": 0.35, "1080p": 1.13 },
   },
   "seedance-2-0-fast-per-second": {
-    billing_unit: "second", resolution_prices: { "480p": 0.23, "720p": 0.29 },
-    video_reference_prices: { "480p": 0.46, "720p": 0.58 },
+    billing_unit: "second", resolution_prices: { "480p": 0.20, "720p": 0.25 },
   },
   "seedance-2-0-mini-per-second": {
-    billing_unit: "second", resolution_prices: { "480p": 0.10, "720p": 0.17 },
+    billing_unit: "second", resolution_prices: { "480p": 0.10, "720p": 0.15 },
   },
   "seedance-2-0-per-token": {
     billing_unit: "million_tokens", token_prices_per_million: {
@@ -2852,13 +2971,12 @@ const SEEDANCE_PRICES = {
   },
   "seedance-2-5-per-request": {
     billing_unit: "request",
-    resolution_prices: { "720p": 6 },
+    resolution_prices: { "720p": 5.5 },
   },
   "seedance-2-5-per-second": {
     billing_unit: "second",
-    // Base costs by resolution: 0.32, 0.47, 1.75, and 2.50 CNY. Add 20% and round up to cents.
-    resolution_prices: { "480p": 0.39, "720p": 0.57, "1080p": 2.10, "4k": 3 },
-    video_reference_prices: { "480p": 0.68, "720p": 1.06, "1080p": 2.10, "4k": 3 },
+    resolution_prices: { "480p": 0.29, "720p": 0.39, "1080p": 0.65, "4k": 2.60 },
+    video_reference_prices: { "480p": 0.29, "720p": 0.39, "1080p": 0.65, "4k": 2.60 },
     video_reference_input_prices: { "480p": 0.22, "720p": 0.31, "1080p": 2.16, "4k": 2.7 },
   },
   "seedance-2-5-per-token": {
@@ -2870,9 +2988,18 @@ const SEEDANCE_PRICES = {
   },
   "seedance-2-5-flash-per-second": {
     billing_unit: "second",
-    resolution_prices: { "480p": 0.27, "720p": 0.36 },
-    video_reference_prices: { "480p": 0.53, "720p": 0.72 },
+    resolution_prices: { "480p": 0.25, "720p": 0.35 },
   },
+};
+
+// Each capped tier uses the published sale price as its routing ceiling.
+const SEEDANCE_COST_LIMITS = {
+  "seedance-2-5-per-request": { "720p": "inclusive" },
+  "seedance-2-5-per-second": { "480p": "inclusive", "720p": "inclusive", "1080p": "strict", "4k": "inclusive" },
+  "seedance-2-5-flash-per-second": { "480p": "strict", "720p": "strict" },
+  "seedance-2-0-per-second": { "480p": "strict", "720p": "strict" },
+  "seedance-2-0-fast-per-second": { "480p": "strict", "720p": "strict" },
+  "seedance-2-0-mini-per-second": { "480p": "strict", "720p": "strict" },
 };
 
 const WAN_POOLS = {
@@ -2935,6 +3062,32 @@ function videoRouteResolutions(vendorModel) {
   const fixed = FIXED_VIDEO_OUTPUTS[vendorModel]?.resolution;
   const profile = MODELS[vendorModel];
   return fixed ? [fixed] : profile.parameters.resolution?.values ?? Object.keys(profile.billing.resolution_prices ?? {});
+}
+
+function videoOutputRate(billing, resolution, withVideo = false) {
+  if (withVideo && billing.video_reference_prices?.[resolution] !== undefined) return billing.video_reference_prices[resolution];
+  if (billing.resolution_prices) return billing.resolution_prices[resolution];
+  return billing.price_per_request ?? billing.equivalent_second_price;
+}
+
+function withinVideoCostLimit(mode, cost, price) {
+  return Number.isFinite(cost) && cost > 0 && Number.isFinite(price) &&
+    (mode === "inclusive" ? cost <= price : cost < price);
+}
+
+// The catalog and submission must agree on which routes accept video input at this resolution.
+function videoPoolAcceptsRate(profile, candidate, resolution, withVideo) {
+  const billing = profile.billing;
+  const cost = videoOutputRate(candidate.billing, resolution, withVideo);
+  const limit = profile.costLimits?.[resolution];
+  if (limit && !withinVideoCostLimit(limit, cost, billing.resolution_prices[resolution])) return false;
+  if (!profile.limitRouteCost || !billing.resolution_prices) return true;
+  return withinVideoCostLimit("strict", cost, videoOutputRate(billing, resolution, withVideo)) &&
+    (!withVideo || !candidate.bill_reference_videos || billing.video_reference_input_prices?.[resolution] >= cost);
+}
+
+function poolRouteResolutions(profile, route) {
+  return profile.routeResolutions?.[route] ?? videoRouteResolutions(route);
 }
 
 function videoPoolProfile(routes, resolutions, billing) {
@@ -3006,22 +3159,32 @@ for (const [model, [legacy, ...siblings]] of Object.entries(VIDEO_POOLS)) {
 }
 
 for (const [model, candidates] of Object.entries({ ...SEEDANCE_POOLS, ...WAN_POOLS })) {
-  const routes = candidates.filter((name) => !MODELS[name].retired);
-  if (!routes.length) continue;
+  const availableRoutes = candidates.filter((name) => !MODELS[name].retired);
+  if (!availableRoutes.length) continue;
   const wan = Object.hasOwn(WAN_POOLS, model);
   const billing = SEEDANCE_PRICES[model] ?? WAN_PRICES[model];
   const unit = billing.billing_unit;
   const prices = billing.resolution_prices ?? billing.token_prices_per_million;
   const supported = new Set();
-  for (const route of routes) {
+  const costLimits = SEEDANCE_COST_LIMITS[model];
+  const routeResolutions = {};
+  for (const route of availableRoutes) {
     const candidate = MODELS[route];
     if (candidate.billing.billing_unit !== unit || candidate.source_duration || candidate.billing.duration_prices ||
         (candidate.bill_reference_videos && (!wan || !billing.video_reference_input_prices)))
       throw new Error("Incompatible LecAPI billing route: " + route);
     for (const resolution of videoRouteResolutions(route)) {
       if (!Object.prototype.hasOwnProperty.call(prices, resolution)) throw new Error("Missing LecAPI platform price: " + model + " " + resolution);
+      const limit = costLimits?.[resolution];
+      if (limit && !withinVideoCostLimit(limit, videoOutputRate(candidate.billing, resolution), prices[resolution])) continue;
+      (routeResolutions[route] ??= []).push(resolution);
       supported.add(resolution);
     }
+  }
+  const routes = availableRoutes.filter((route) => routeResolutions[route]?.length);
+  if (!routes.length) {
+    MODELS[model] = { kind: "video", poolUnavailable: true, parameters: { duration: { min: 4, max: 30 } }, billing, tags: [] };
+    continue;
   }
   const resolutions = Object.keys(prices).filter((resolution) => supported.has(resolution));
   const pooled = videoPoolProfile([...routes], resolutions, {
@@ -3029,9 +3192,13 @@ for (const [model, candidates] of Object.entries({ ...SEEDANCE_POOLS, ...WAN_POO
     ...(unit === "million_tokens" ? { tokens_per_second: MODELS[routes[0]].billing.tokens_per_second } : {}),
   });
   pooled.uniformVideoPool = true;
+  if (costLimits) {
+    pooled.costLimits = costLimits;
+    pooled.routeResolutions = routeResolutions;
+  }
   const seedance25PerRequest = model === "seedance-2-5-per-request";
   pooled.enforceSecondRouteCost = !wan && unit === "second";
-  pooled.limitRouteCost = wan || seedance25PerRequest || (model.startsWith("seedance-2-0-") && !pooled.enforceSecondRouteCost);
+  pooled.limitRouteCost = wan || (model.startsWith("seedance-2-0-") && unit === "request");
   if (wan || seedance25PerRequest) {
     for (const route of candidates) INTERNAL_VIDEO_MODELS.add(route);
   }
@@ -3045,6 +3212,25 @@ for (const [model, candidates] of Object.entries({ ...SEEDANCE_POOLS, ...WAN_POO
     };
   }
   MODELS[model] = pooled;
+}
+
+// Keep the existing callable ID, but never cross from one billing unit to the other.
+const MAGI_POOLS = {
+  "mg-magi-2": { routes: ["lec-jw-magi-2", "lec-mg-magi-2"], unit: "request", price: 3.5 },
+  "magi-2-per-second": { routes: ["lec-jw-magi-2-sec"], unit: "second", price: 0.2 },
+};
+for (const [name, { routes, unit, price }] of Object.entries(MAGI_POOLS)) {
+  const profile = videoPoolProfile([...routes], ["1080p"], { billing_unit: unit, resolution_prices: { "1080p": price } });
+  profile.uniformVideoPool = true;
+  profile.costLimits = { "1080p": "inclusive" };
+  profile.routes.sort((a, b) => videoOutputRate(MODELS[a].billing, "1080p") - videoOutputRate(MODELS[b].billing, "1080p"));
+  if (unit === "request") {
+    profile.keepRouteOrder = true;
+    // Existing callers that omit the ratio should still get 21:9 on either route.
+    profile.parameters.aspect_ratio = { ...profile.parameters.aspect_ratio, default: "21:9" };
+  }
+  MODELS[name] = profile;
+  for (const route of routes) INTERNAL_VIDEO_MODELS.add(route);
 }
 
 // Previous pooled names remain resolvable for polling, not new work.
@@ -3083,6 +3269,8 @@ const MODEL_MAPPING = {};
 const PUBLIC_MODEL_NAMES = {};
 const MODEL_LOOKUP = {};
 for (const vendorModel of Object.keys(MODELS)) {
+  // The historical wire name remains an alias of the public pool, not a direct route.
+  if (vendorModel === "lec-mg-magi-2") { MODEL_LOOKUP[vendorModel] = "mg-magi-2"; continue; }
   // Reuse the exact spelling already shared by Hailuo's host binding.
   const publicModel = vendorModel === "lec-minimax-h3" ? "MiniMax-H3" : vendorModel.startsWith("lec-") ? vendorModel.slice(4) : vendorModel;
   if (Object.prototype.hasOwnProperty.call(MODEL_MAPPING, publicModel)) throw new Error("LecAPI public model id collision: " + publicModel);
@@ -3356,28 +3544,74 @@ const PARAMETER_VALUE_LABELS = {
   extend: "延长视频",
 };
 
-function describeVideoPoolMaterials(profile) {
+// Public, resolution-specific combinations. Never combine maxima from different routes.
+function videoSpecs(name, profile) {
+  const options = profile.parameters.resolution;
+  const resolutions = options?.values ?? videoRouteResolutions(name);
+  const specs = [];
+  for (const resolution of resolutions) {
+    const shapes = new Map();
+    for (const route of profile.routes ?? [name]) {
+      if (!poolRouteResolutions(profile, route).includes(resolution)) continue;
+      const candidate = MODELS[route];
+      const params = candidate.parameters;
+      const plain = videoPoolAcceptsRate(profile, candidate, resolution, false);
+      // Discounts or custom prices are checked again by the host at submission. At catalog rates,
+      // do not promise input with a surcharge that is not covered by the advertised input rate.
+      const referenceCost = candidate.billing.video_reference_input_prices?.[resolution] ?? 0;
+      const referencePrice = profile.billing.video_reference_input_prices?.[resolution] ?? 0;
+      const video = videoPoolAcceptsRate(profile, candidate, resolution, true) &&
+        (!profile.enforceSecondRouteCost || referenceCost <= referencePrice) && !(route === "lec-ms-minimax-h3" && resolution === "480p");
+      if (!plain && !video) continue;
+      const fields = [params.images, params.videos, params.audios];
+      // Do not mistake an unspecified array limit, an origin task, or a frame-only input for zero references.
+      if (params.documents || (params.source_task_id && route !== "lec-ms-minimax-h3-upscale") || fields.some((p) => p?.type === "array" && !Number.isInteger(p.constraints?.max_items))) return [];
+      const maxima = fields.map((p) => !p ? 0 : p.type === "array" ? p.constraints.max_items : 1);
+      if (!maxima[0] && (params.first_frame || params.start_image)) return [];
+      if (candidate.max_reference_images) maxima[0] = Math.min(maxima[0], candidate.max_reference_images);
+      if (!video) maxima[1] = 0;
+      const minima = fields.map((p) => Math.max(p?.constraints?.min_items ?? 0, p?.required ? 1 : 0));
+      if (!plain) minima[1] = Math.max(minima[1], 1);
+      const bounds = [[minima, maxima]];
+      // Split conditional requirements into actual alternatives, rather than allowing audio on its own.
+      const videoNeedsImage = candidate.audiovisual_requires_image || route === "lec-gt-seedance-2-0-full";
+      if (!minima[0] && (route === "lec-mg-seedance-2-5-6" || videoNeedsImage)) {
+        bounds[0] = [[1, minima[1], minima[2]], maxima];
+        bounds.push([minima, [maxima[0], videoNeedsImage ? 0 : maxima[1], 0]]);
+      }
+      for (const [min, max] of bounds) {
+        const total = Math.min(candidate.max_reference_total ?? Infinity, max.reduce((a, b) => a + b, 0));
+        const minimum = min.reduce((a, b) => a + b, 0);
+        if (max.some((n, i) => n < min[i]) || minimum > total) continue;
+        const shape = { maxima: max.map((n, i) => Math.min(n, total - minimum + min[i])), minima: min, total,
+          videoSeconds: max[1] ? candidate.max_reference_video_seconds ?? 0 : 0,
+          videoTotalSeconds: max[1] ? candidate.max_reference_video_total_seconds ?? (route === "lec-ms-minimax-h3" ? params.reference_video_seconds.max : 0) : 0,
+          videoWithinOutput: !!(max[1] && candidate.reference_video_duration_must_not_exceed_output),
+          nativeFace: candidate.face_policy === "native" };
+        shapes.set(JSON.stringify(shape), shape);
+      }
+    }
+    const all = [...shapes.values()];
+    const combinations = all.filter((a) => !all.some((b) => a !== b && (!a.nativeFace || b.nativeFace) && b.total >= a.total &&
+      (!a.maxima[1] || ((!b.videoSeconds || (a.videoSeconds && b.videoSeconds >= a.videoSeconds)) &&
+        (!b.videoTotalSeconds || (a.videoTotalSeconds && b.videoTotalSeconds >= a.videoTotalSeconds)) && (!b.videoWithinOutput || a.videoWithinOutput))) &&
+      b.maxima.every((max, i) => max >= a.maxima[i] && b.minima[i] <= a.minima[i])));
+    if (!combinations.length) return [];
+    specs.push({ resolution, preferred: resolution === (options?.default ?? resolutions[0]), combinations,
+      ...(profile.billing.duration_prices ? { durationTiers: Object.keys(profile.billing.duration_prices[resolution]), includedImages: 5 } : {}),
+      ...(name === "lec-ms-minimax-h3-upscale" ? { requiresSourceTask: true } : {}) });
+  }
+  return specs;
+}
+
+function describeVideoPoolMaterials(specs) {
   const fields = ["images", "videos", "audios"];
   const labels = { en: ["images", "videos", "audio clips"], zh: [" 张图", " 段视频", " 段音频"] };
   const english = [], chinese = [];
-  for (const resolution of profile.parameters.resolution.values) {
-    const shapes = new Map();
-    for (const route of profile.routes) {
-      const candidate = MODELS[route];
-      const fixed = FIXED_VIDEO_OUTPUTS[route]?.resolution;
-      if (fixed ? fixed !== resolution : !(candidate.parameters.resolution?.values ?? Object.keys(candidate.billing.resolution_prices)).includes(resolution)) continue;
-      const maxima = fields.map((field) => candidate.parameters[field]?.constraints?.max_items ?? 0);
-      const minima = fields.map((field) => candidate.parameters[field]?.constraints?.min_items || (candidate.parameters[field]?.required ? 1 : 0));
-      const sum = maxima.reduce((a, b) => a + b, 0);
-      const total = Math.min(candidate.max_reference_total ?? sum, sum);
-      const videoSeconds = maxima[1] ? candidate.max_reference_video_seconds ?? 0 : 0;
-      shapes.set(JSON.stringify([maxima, minima, total, videoSeconds]), { maxima, minima, total, sum, videoSeconds });
-    }
-    const all = [...shapes.values()];
-    // Keep alternatives unless a single other combination covers all of their counts.
-    const options = all.filter((a) => !all.some((b) => a !== b && b.total >= a.total && (!a.maxima[1] || !b.videoSeconds || (a.videoSeconds && b.videoSeconds >= a.videoSeconds)) && b.maxima.every((max, i) => max >= a.maxima[i] && b.minima[i] <= a.minima[i])));
+  for (const { resolution, combinations: options } of specs) {
     const en = [], zh = [];
-    for (const { maxima, minima, total, sum, videoSeconds } of options) {
+    for (const { maxima, minima, total, videoSeconds, videoTotalSeconds, videoWithinOutput } of options) {
+      const sum = maxima.reduce((a, b) => a + b, 0);
       const enCounts = [], zhCounts = [];
       for (let i = 0; i < fields.length; i++) {
         if (!maxima[i]) continue;
@@ -3394,11 +3628,19 @@ function describeVideoPoolMaterials(profile) {
         enLimits.push("up to " + videoSeconds + " seconds per video");
         zhLimits.push("单段视频最长 " + videoSeconds + " 秒");
       }
+      if (videoTotalSeconds) {
+        enLimits.push("up to " + videoTotalSeconds + " seconds of reference video in total");
+        zhLimits.push("参考视频合计最长 " + videoTotalSeconds + " 秒");
+      }
+      if (videoWithinOutput) {
+        enLimits.push("combined reference video duration cannot exceed output duration");
+        zhLimits.push("参考视频总时长不能超过生成时长");
+      }
       en.push((enCounts.join(" + ") || "text only") + (enLimits.length ? " (" + enLimits.join(", ") + ")" : ""));
       zh.push((zhCounts.join(" + ") || "纯文生") + (zhLimits.length ? "（" + zhLimits.join("，") + "）" : ""));
     }
-    english.push(resolution + ": " + en.join(" or "));
-    chinese.push(resolution + "：" + zh.join("，或 "));
+    english.push(resolution + ": " + [...new Set(en)].join(" or "));
+    chinese.push(resolution + "：" + [...new Set(zh)].join("，或 "));
   }
   return ["Reference combinations by resolution: " + english.join(" | "), "各分辨率的参考素材组合：" + chinese.join(" | ")];
 }
@@ -3408,15 +3650,14 @@ function describeVideoPoolRatios(profile) {
     const ratios = new Set();
     for (const route of profile.routes) {
       const candidate = MODELS[route];
-      const fixed = FIXED_VIDEO_OUTPUTS[route]?.resolution;
-      if (fixed ? fixed !== resolution : !(candidate.parameters.resolution?.values ?? Object.keys(candidate.billing.resolution_prices)).includes(resolution)) continue;
+      if (!poolRouteResolutions(profile, route).includes(resolution)) continue;
       for (const ratio of candidate.parameters.aspect_ratio?.values ?? []) ratios.add(ratio);
     }
     return ratios.size ? resolution + " (" + [...ratios].join(" / ") + ")" : "";
   }).filter(Boolean).join(" | ");
 }
 
-function modelDescription(profile) {
+function modelDescription(profile, specs) {
   const english = [],
     chinese = [];
   const types = { string: "字符串类型", integer: "整数类型", number: "数字类型", boolean: "布尔类型", array: "数组类型" };
@@ -3523,8 +3764,8 @@ function modelDescription(profile) {
       en.push("one English name per reference image, in the same order");
       zh.push("每张参考图对应一个英文主体名，顺序须一致");
     }
-    if (field === "resolution" && profile.routes) {
-      const [enMaterials, zhMaterials] = describeVideoPoolMaterials(profile);
+    if (field === "resolution" && profile.routes && specs.length) {
+      const [enMaterials, zhMaterials] = describeVideoPoolMaterials(specs);
       en.push(enMaterials);
       zh.push(zhMaterials);
     }
@@ -3671,6 +3912,8 @@ const PUBLIC_DISPLAY_NAMES = {
   image2: "Image 2 · OpenAI",
   "nano-banana-2": "Nano Banana 2 · Google",
   "vp-seedance-2-9-301010": "Seedance 2.9 301010 · VP",
+  "mg-magi-2": "Magi-2",
+  "magi-2-per-second": "Magi-2 · 按秒",
   "ap-muse-video-720-10s": "Muse Video · 720p",
   "muse-zr-700": "Muse Video · Character",
   "mf-gemini-omni-1-2-flash": "Gemini Omni 1.2 Flash",
@@ -3697,7 +3940,20 @@ const MODEL_DEFAULTS = Object.fromEntries(
   Object.entries(MODEL_MAPPING).map(([publicModel, name]) => {
       const profile = MODELS[name];
       const displayName = PUBLIC_DISPLAY_NAMES[publicModel] ?? publicModel;
-      const defaults = { displayName, description: modelDescription(profile), icon: profile.icon, tags: [...new Set(profile.tags)] };
+      const specs = profile.kind === "video" ? videoSpecs(name, profile) : [];
+      const defaults = { displayName, ...(specs.length ? { videoSpecs: specs } : {}), description: modelDescription(profile, specs), icon: profile.icon, tags: [...new Set(profile.tags)] };
+      if (profile.kind === "image") {
+        const { resolution, image_size, images, action, n } = profile.parameters;
+        const sizes = resolution?.values ?? image_size?.values ?? [null];
+        defaults.imageSpecs = sizes.flatMap((size) => (action?.values ?? [null]).map((op) => ({
+          ...(size ? (resolution ? { resolution: size } : { imageSize: size }) : {}),
+          ...(op ? { action: op } : {}),
+          minImages: Math.max(images?.constraints?.min_items ?? (images?.required ? 1 : 0), op === "edits" || op === "blend" ? 1 : 0),
+          ...(images ? (images.constraints?.max_items !== undefined ? { maxImages: images.constraints.max_items } : {}) : { maxImages: 0 }),
+          ...(n?.max ? { maxOutputs: n.max } : {}),
+          ...(op === "hd_upscale" ? { requiresSourceTask: true } : {}),
+        })));
+      }
       if (/seedance|seedream|face-processing/.test(name)) defaults.vendor = "ByteDance";
       else if (/minimax|h3video/.test(name)) defaults.vendor = "Minimax";
       else if (/wan-/.test(name)) defaults.vendor = "Wan";
@@ -3725,7 +3981,7 @@ export const meta = {
   key: "lecapi",
   name: "LecAPI",
   icon: "text:LE",
-  version: "1.21.0",
+  version: "1.22.0",
   author: { name: "QuantumNous" },
   website: "https://api.lecapi.net/docs",
   baseUrl: "https://api.lecapi.net",
@@ -3733,7 +3989,7 @@ export const meta = {
     en: "LecAPI image and video generation with model parameters, reference materials and published default pricing",
     zh: "LecAPI 图片与视频生成，包含模型参数、参考素材要求及公开默认定价",
   },
-  requiredCapabilities: ["submit-no-retry@1", "media-duration@1", "lecapi-video-pool@1", "lecapi-route-cost@1", "lecapi-image-pool@1"],
+  requiredCapabilities: ["submit-no-retry@1", "media-duration@1", "lecapi-video-pool@1", "lecapi-route-cost@1", "lecapi-video-order@1", "lecapi-image-pool@1"],
   upstreams: ["vendor", "new_api"],
   fetchMode: "per_task",
   models: Object.keys(MODEL_MAPPING),
@@ -4064,6 +4320,7 @@ function submission(ctx, profile = modelProfile(ctx)) {
       throw new Error(body.omni_reference_task_type + " requires reference videos");
   }
   const referenceImageCount = imageCount + (media.start_image?.length || 0) + (media.end_image?.length || 0);
+  if (profile.audiovisual_requires_image && (audioCount || videoCount) && !referenceImageCount) throw new Error("Reference audio or video requires a reference image");
   if (profile.max_reference_total && referenceImageCount + videoCount + audioCount + (media.documents?.length || 0) > profile.max_reference_total)
     throw new Error("too many combined reference materials");
   if (profile.vendorModel === "lec-mg-seedance-2-5-6" && audioCount && !imageCount) throw new Error("audio references require at least one image");
@@ -4202,20 +4459,12 @@ function videoPoolSubmission(ctx, profile, includeAlternatives) {
         parameters: {
           ...candidate.parameters,
           aspect_ratio: { ...candidate.parameters.aspect_ratio, default: profile.parameters.aspect_ratio.default },
-          resolution: { ...resolutionParameter, values: videoRouteResolutions(vendorModel) },
+          resolution: { ...resolutionParameter, values: poolRouteResolutions(profile, vendorModel) },
           ...(duration ? { duration: { ...duration, default: defaultDuration } } : {}),
         },
       });
       const resolution = request.body.resolution;
-      if (profile.limitRouteCost && profile.billing.resolution_prices) {
-        const upstream = candidate.billing;
-        const platform = profile.billing;
-        const cost = (request.videoCount && upstream.video_reference_prices?.[resolution]) ||
-          (upstream.resolution_prices?.[resolution] ?? upstream.price_per_request ?? upstream.equivalent_second_price);
-        const price = (request.videoCount && platform.video_reference_prices?.[resolution]) || platform.resolution_prices[resolution];
-        if (!Number.isFinite(cost) || cost >= price ||
-            (candidate.bill_reference_videos && request.videoCount && !(platform.video_reference_input_prices?.[resolution] >= cost))) continue;
-      }
+      if (!videoPoolAcceptsRate(profile, candidate, resolution, request.videoCount > 0)) continue;
       if (ctx.upstream?.kind !== "new_api") {
         if (fixed.resolution) delete request.body.resolution;
         if (fixed.duration) delete request.body.duration;
@@ -4232,7 +4481,7 @@ function videoPoolSubmission(ctx, profile, includeAlternatives) {
       if (routeCosts) {
         const upstream = candidate.billing;
         routeCosts[vendorModel] = {
-          outputSecond: (request.videoCount && upstream.video_reference_prices?.[resolution]) || upstream.resolution_prices[resolution],
+          outputSecond: videoOutputRate(upstream, resolution, request.videoCount > 0),
           referenceSecond: request.videoCount ? upstream.video_reference_input_prices?.[resolution] ?? 0 : 0,
           // Match the durations this route can return for usage settlement.
           durations: duration.values || Array.from({ length: duration.max - duration.min + 1 }, (_, index) => duration.min + index),
@@ -4247,11 +4496,11 @@ function videoPoolSubmission(ctx, profile, includeAlternatives) {
 }
 
 export function listLecAPIVideoRoutes() {
-  return Object.keys({ ...SEEDANCE_POOLS, ...WAN_POOLS }).flatMap((model) => (MODELS[model]?.routes ?? []).map((route) => ({
+  return Object.keys({ ...SEEDANCE_POOLS, ...WAN_POOLS, ...MAGI_POOLS }).flatMap((model) => (MODELS[model]?.routes ?? []).map((route) => ({
     model,
     route,
-    resolutions: videoRouteResolutions(route).filter((resolution) => {
-      if (!Object.hasOwn(WAN_POOLS, model) && model !== "seedance-2-5-per-request") return true;
+    resolutions: poolRouteResolutions(MODELS[model], route).filter((resolution) => {
+      if (!Object.hasOwn(WAN_POOLS, model)) return true;
       const upstream = MODELS[route].billing;
       return (upstream.resolution_prices?.[resolution] ?? upstream.price_per_request) < MODELS[model].billing.resolution_prices[resolution];
     }),
@@ -4319,6 +4568,7 @@ export function buildSubmitRequest(ctx) {
     body: request.body,
     action: request.profile.kind === "image" ? request.body.action || "imagine" : "generate",
     ...(request.routeAlternatives ? { lecapiRouteAlternatives: request.routeAlternatives } : {}),
+    ...(request.routeAlternatives?.length && request.profile.keepRouteOrder ? { lecapiKeepRouteOrder: true } : {}),
     ...(request.routeCosts ? { lecapiRouteCosts: request.routeCosts } : {}),
     ...(request.imageAlternatives?.length ? { lecapiImageAlternatives: request.imageAlternatives } : {}),
   };

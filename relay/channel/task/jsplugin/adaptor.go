@@ -51,6 +51,7 @@ type requestDescriptor struct {
 	BodyType       string            `json:"bodyType"`
 	Parts          []requestPart     `json:"parts"`
 	// Used only by the LecAPI JSON video submission contract.
+	LecAPIKeepRouteOrder    bool                       `json:"lecapiKeepRouteOrder"`
 	LecAPIRouteAlternatives []map[string]any           `json:"lecapiRouteAlternatives"`
 	LecAPIRouteCosts        map[string]lecapiRouteCost `json:"lecapiRouteCosts"`
 	LecAPIImageAlternatives []map[string]any           `json:"lecapiImageAlternatives"`

@@ -125,6 +125,60 @@ type ModelDefaults struct {
 	Tags               []string            `json:"tags,omitempty"`
 	BillingExpr        string              `json:"billingExpr,omitempty"`
 	VideoTokenEstimate *VideoTokenEstimate `json:"videoTokenEstimate,omitempty"`
+	ImageSpecs         []ImageSpec         `json:"imageSpecs,omitempty"`
+	VideoSpecs         []VideoSpec         `json:"videoSpecs,omitempty"`
+}
+
+// ImageSpec describes one supported image-generation configuration, without prices.
+// A nil MaxImages means references are accepted but no model-specific cap is published.
+type ImageSpec struct {
+	Resolution         string `json:"resolution,omitempty"`
+	ImageSize          string `json:"imageSize,omitempty"`
+	Action             string `json:"action,omitempty"`
+	MinImages          int    `json:"minImages,omitempty"`
+	MaxImages          *int   `json:"maxImages,omitempty"`
+	MaxOutputs         int    `json:"maxOutputs,omitempty"`
+	RequiresSourceTask bool   `json:"requiresSourceTask,omitempty"`
+}
+
+func cloneImageSpecs(specs []ImageSpec) []ImageSpec {
+	result := slices.Clone(specs)
+	for i, row := range result {
+		if row.MaxImages != nil {
+			n := *row.MaxImages
+			result[i].MaxImages = &n
+		}
+	}
+	return result
+}
+
+// VideoSpec describes public input combinations, never the underlying route IDs.
+type VideoSpec struct {
+	RequiresSourceTask bool                    `json:"requiresSourceTask,omitempty"`
+	DurationTiers      []string                `json:"durationTiers,omitempty"`
+	IncludedImages     int                     `json:"includedImages,omitempty"`
+	Resolution         string                  `json:"resolution"`
+	Preferred          bool                    `json:"preferred,omitempty"`
+	Combinations       []VideoInputCombination `json:"combinations"`
+}
+
+type VideoInputCombination struct {
+	Maxima            [3]int `json:"maxima"`
+	Minima            [3]int `json:"minima"`
+	Total             int    `json:"total"`
+	VideoSeconds      int    `json:"videoSeconds,omitempty"`
+	VideoTotalSeconds int    `json:"videoTotalSeconds,omitempty"`
+	VideoWithinOutput bool   `json:"videoWithinOutput,omitempty"`
+	NativeFace        bool   `json:"nativeFace,omitempty"`
+}
+
+func cloneVideoSpecs(specs []VideoSpec) []VideoSpec {
+	result := slices.Clone(specs)
+	for i := range result {
+		result[i].DurationTiers = slices.Clone(result[i].DurationTiers)
+		result[i].Combinations = slices.Clone(result[i].Combinations)
+	}
+	return result
 }
 
 // VideoTokenEstimate describes request-derived video tokens for display only.
@@ -157,6 +211,8 @@ func (m Meta) DefaultsForModel(names ...string) (ModelDefaults, bool) {
 			defaults.Description = maps.Clone(defaults.Description)
 			defaults.Tags = slices.Clone(defaults.Tags)
 			defaults.VideoTokenEstimate = defaults.VideoTokenEstimate.clone()
+			defaults.ImageSpecs = cloneImageSpecs(defaults.ImageSpecs)
+			defaults.VideoSpecs = cloneVideoSpecs(defaults.VideoSpecs)
 			return defaults, true
 		}
 	}
@@ -971,6 +1027,8 @@ func cloneMeta(meta Meta) Meta {
 			entry.Description = maps.Clone(entry.Description)
 			entry.Tags = slices.Clone(entry.Tags)
 			entry.VideoTokenEstimate = entry.VideoTokenEstimate.clone()
+			entry.ImageSpecs = cloneImageSpecs(entry.ImageSpecs)
+			entry.VideoSpecs = cloneVideoSpecs(entry.VideoSpecs)
 			defaults[model] = entry
 		}
 		meta.ModelDefaults = defaults
@@ -1299,7 +1357,7 @@ func normalizeV1Meta(meta *Meta) error {
 		if (name == CapabilityLecAPIVideoPool || name == CapabilityLecAPIImagePool) && (meta.Key != "lecapi" || !slices.Contains(meta.RequiredCapabilities, CapabilitySubmitNoRetry) || meta.PreservesJSONOrder()) {
 			return fmt.Errorf("%s requires the LecAPI JSON driver with %s", name, CapabilitySubmitNoRetry)
 		}
-		if name == CapabilityLecAPIRouteCost && !slices.Contains(meta.RequiredCapabilities, CapabilityLecAPIVideoPool) {
+		if (name == CapabilityLecAPIRouteCost || name == CapabilityLecAPIVideoOrder) && !slices.Contains(meta.RequiredCapabilities, CapabilityLecAPIVideoPool) {
 			return fmt.Errorf("%s requires %s", name, CapabilityLecAPIVideoPool)
 		}
 		seenCapabilities[name] = true
@@ -1599,6 +1657,29 @@ func normalizeV1Meta(meta *Meta) error {
 				return fmt.Errorf("plugin meta modelDefaults model %q billingExpr: %w", model, err)
 			}
 		}
+		if defaults.ImageSpecs != nil {
+			seen := map[[3]string]bool{}
+			if len(defaults.ImageSpecs) == 0 || len(defaults.ImageSpecs) > 64 || len(defaults.VideoSpecs) > 0 {
+				return fmt.Errorf("plugin model %q has invalid imageSpecs", model)
+			}
+			for _, row := range defaults.ImageSpecs {
+				key := [3]string{row.Resolution, row.ImageSize, row.Action}
+				if seen[key] || (row.Resolution != "" && row.ImageSize != "") || row.MinImages < 0 || row.MinImages > 128 || row.MaxImages != nil && (*row.MaxImages < row.MinImages || *row.MaxImages > 128) || row.MaxOutputs < 0 || row.MaxOutputs > 128 {
+					return fmt.Errorf("plugin model %q has invalid image spec limits or options", model)
+				}
+				for _, v := range key {
+					if strings.TrimSpace(v) != v || utf8.RuneCountInString(v) > 32 || strings.ContainsFunc(v, unicode.IsControl) {
+						return fmt.Errorf("plugin model %q has invalid image spec label", model)
+					}
+				}
+				seen[key] = true
+			}
+		}
+		if defaults.VideoSpecs != nil {
+			if err := validateVideoSpecs(defaults.VideoSpecs, meta, model); err != nil {
+				return fmt.Errorf("plugin model %q videoSpecs: %w", model, err)
+			}
+		}
 		if estimate := defaults.VideoTokenEstimate; estimate != nil {
 			schema, _ := meta.UsageForModel(model)
 			if schema["tokens"].Unit != "token" || len(estimate.TokensPerSecond) == 0 || len(estimate.TokensPerSecond) > 32 ||
@@ -1617,6 +1698,102 @@ func normalizeV1Meta(meta *Meta) error {
 	return nil
 }
 
+// Fixed-size Go arrays silently pad or discard elements during JSON decoding.
+// Verify the closed wire shape before decoding, including required zero limits.
+func decodeVideoSpecs(value any) ([]VideoSpec, error) {
+	rows, _ := value.([]any)
+	if len(rows) == 0 || len(rows) > 32 {
+		return nil, fmt.Errorf("expected 1 to 32 resolutions")
+	}
+	for _, row := range rows {
+		spec, _ := row.(map[string]any)
+		for key, value := range spec {
+			if value == nil || !slices.Contains([]string{"resolution", "preferred", "combinations", "durationTiers", "includedImages", "requiresSourceTask"}, key) {
+				return nil, fmt.Errorf("invalid resolution field %q", key)
+			}
+		}
+		combinations, _ := spec["combinations"].([]any)
+		if len(combinations) == 0 || len(combinations) > 32 {
+			return nil, fmt.Errorf("expected 1 to 32 input combinations")
+		}
+		for _, combo := range combinations {
+			fields, _ := combo.(map[string]any)
+			if fields["total"] == nil {
+				return nil, fmt.Errorf("missing total limit")
+			}
+			for key, value := range fields {
+				if value == nil || !slices.Contains([]string{"minima", "maxima", "total", "videoSeconds", "videoTotalSeconds", "videoWithinOutput", "nativeFace"}, key) {
+					return nil, fmt.Errorf("invalid combination field %q", key)
+				}
+			}
+			for _, field := range []string{"minima", "maxima"} {
+				counts, _ := fields[field].([]any)
+				if len(counts) != 3 || slices.Contains(counts, nil) {
+					return nil, fmt.Errorf("expected three %s counts", field)
+				}
+			}
+		}
+	}
+	data, err := common.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	var specs []VideoSpec
+	if err := common.Unmarshal(data, &specs); err != nil {
+		return nil, err
+	}
+	return specs, nil
+}
+
+func validateVideoSpecs(specs []VideoSpec, meta *Meta, model string) error {
+	schema, _ := meta.UsageForModel(model)
+	if len(specs) == 0 || len(specs) > 32 {
+		return fmt.Errorf("expected 1 to 32 resolutions")
+	}
+	seen := make(map[string]bool, len(specs))
+	preferred := false
+	for _, spec := range specs {
+		res := spec.Resolution
+		if res == "" || strings.TrimSpace(res) != res || utf8.RuneCountInString(res) > 32 || strings.ContainsFunc(res, unicode.IsControl) || seen[res] || (spec.Preferred && preferred) {
+			return fmt.Errorf("invalid or duplicate resolution %q", res)
+		}
+		if spec.IncludedImages < 0 || spec.IncludedImages > 128 || len(spec.DurationTiers) > 16 {
+			return fmt.Errorf("invalid video spec tier limits")
+		}
+		for i, tier := range spec.DurationTiers {
+			if !slices.Contains(schema["duration_tier"].Enum, tier) || slices.Contains(spec.DurationTiers[:i], tier) {
+				return fmt.Errorf("invalid duration tier %q", tier)
+			}
+		}
+		seen[res] = true
+		preferred = preferred || spec.Preferred
+		if len(spec.Combinations) == 0 || len(spec.Combinations) > 32 {
+			return fmt.Errorf("expected 1 to 32 input combinations")
+		}
+		for _, c := range spec.Combinations {
+			if c.Total < 0 || c.Total > 384 || c.VideoSeconds < 0 || c.VideoSeconds > relaycommon.MaxTaskDurationSeconds || c.VideoTotalSeconds < 0 || c.VideoTotalSeconds > relaycommon.MaxTaskDurationSeconds {
+				return fmt.Errorf("invalid material limits")
+			}
+			minimum := 0
+			for i, n := range c.Minima {
+				if n < 0 || c.Maxima[i] < n || c.Maxima[i] > 128 {
+					return fmt.Errorf("invalid material counts")
+				}
+				minimum += n
+			}
+			for i, max := range c.Maxima {
+				if max+minimum-c.Minima[i] > c.Total {
+					return fmt.Errorf("counts exceed combined limit")
+				}
+			}
+			if c.Maxima[1] == 0 && (c.VideoSeconds > 0 || c.VideoTotalSeconds > 0 || c.VideoWithinOutput) {
+				return fmt.Errorf("duration limit without reference video")
+			}
+		}
+	}
+	return nil
+}
+
 func decodeModelDefaults(value any) (map[string]ModelDefaults, error) {
 	object, ok := value.(map[string]any)
 	if !ok {
@@ -1630,7 +1807,7 @@ func decodeModelDefaults(value any) (map[string]ModelDefaults, error) {
 		}
 		for name := range entry {
 			switch name {
-			case "displayName", "vendor", "description", "icon", "tags", "billingExpr", "videoTokenEstimate":
+			case "displayName", "vendor", "description", "icon", "tags", "billingExpr", "videoTokenEstimate", "videoSpecs", "imageSpecs":
 			default:
 				return nil, fmt.Errorf("plugin meta modelDefaults model %q has unknown field %q", model, name)
 			}
@@ -1654,6 +1831,36 @@ func decodeModelDefaults(value any) (map[string]ModelDefaults, error) {
 		}
 		if item.BillingExpr, err = stringMetaField(entry, "billingExpr"); err != nil {
 			return nil, fmt.Errorf("plugin meta modelDefaults model %q: %w", model, err)
+		}
+		if value, exists := entry["imageSpecs"]; exists {
+			rows, _ := value.([]any)
+			if len(rows) == 0 || len(rows) > 64 {
+				return nil, fmt.Errorf("plugin model %q imageSpecs: expected 1 to 64 options", model)
+			}
+			for _, row := range rows {
+				obj, ok := row.(map[string]any)
+				if !ok {
+					return nil, fmt.Errorf("plugin model %q imageSpecs: expected an object", model)
+				}
+				for key, v := range obj {
+					if v == nil || !slices.Contains([]string{"resolution", "imageSize", "action", "minImages", "maxImages", "maxOutputs", "requiresSourceTask"}, key) {
+						return nil, fmt.Errorf("plugin model %q imageSpecs: invalid field %q", model, key)
+					}
+				}
+			}
+			data, err := common.Marshal(value)
+			if err != nil {
+				return nil, err
+			}
+			if err := common.Unmarshal(data, &item.ImageSpecs); err != nil {
+				return nil, fmt.Errorf("plugin model %q imageSpecs: %w", model, err)
+			}
+		}
+		if value, exists := entry["videoSpecs"]; exists {
+			item.VideoSpecs, err = decodeVideoSpecs(value)
+			if err != nil {
+				return nil, fmt.Errorf("plugin model %q videoSpecs: %w", model, err)
+			}
 		}
 		if value, exists := entry["videoTokenEstimate"]; exists {
 			estimate, ok := value.(map[string]any)

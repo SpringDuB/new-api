@@ -1132,6 +1132,11 @@ func TestRegistryRejectsInvalidModelDefaults(t *testing.T) {
 		declaration string
 		wantError   string
 	}{
+		{"ambiguous image size", `{image:{imageSpecs:[{resolution:"1K",imageSize:"1"}]}}`, "invalid image spec"},
+		{"inverted reference limit", `{image:{imageSpecs:[{minImages:2,maxImages:1}]}}`, "invalid image spec"},
+		{"null reference limit", `{image:{imageSpecs:[{maxImages:null}]}}`, "invalid field"},
+		{"unknown material count", `{video:{videoSpecs:[{resolution:"720p",combinations:[{minima:[0,0,0],maxima:[1,null,0],total:1}]}]}}`, "expected three maxima counts"},
+		{"incompatible limits", `{video:{videoSpecs:[{resolution:"720p",combinations:[{minima:[1,0,0],maxima:[2,2,0],total:2}]}]}}`, "counts exceed combined limit"},
 		{"null defaults", `null`, "modelDefaults must be an object"},
 		{"array defaults", `[]`, "modelDefaults must be an object"},
 		{"null model", `{video: null}`, `model "video" must be an object`},
@@ -1274,7 +1279,7 @@ func TestRegistryModelDefaultsLookupAndSnapshotsAreIndependent(t *testing.T) {
 	registry := NewRegistry()
 	plugin, err := registry.Register(routingTestPluginSource("defaults-snapshot", 0, `["video", "image"]`, `
 		modelDefaults: {
-			video: {displayName: "Video Model", description: {en: "Video generation"}, tags: ["video"], billingExpr: "0.4"},
+			video: {displayName: "Video Model", description: {en: "Video generation"}, tags: ["video"], videoSpecs:[{resolution:"720p",combinations:[{minima:[0,0,0],maxima:[9,3,0],total:12}]}], billingExpr: "0.4"},
 			image: {displayName: "Image Model", billingExpr: "0.02"},
 		},`, ""), Options{})
 	require.NoError(t, err)
@@ -1291,12 +1296,17 @@ func TestRegistryModelDefaultsLookupAndSnapshotsAreIndependent(t *testing.T) {
 	require.True(t, ok)
 	selected.Description["en"] = "Changed lookup"
 	selected.Tags[0] = "changed lookup"
+	selected.VideoSpecs[0].Resolution = "480p"
+	selected.VideoSpecs[0].Combinations[0].Total = 1
 
 	snapshot := registry.Snapshot()
 	require.Len(t, snapshot.Override, 1)
 	defaults := snapshot.Override[0].ModelDefaults["video"]
 	defaults.Description["en"] = "Changed snapshot"
 	defaults.Tags[0] = "changed snapshot"
+	defaults.VideoSpecs[0].Combinations[0].Total = 2
+	assert.Equal(t, "720p", plugin.Meta.ModelDefaults["video"].VideoSpecs[0].Resolution)
+	assert.Equal(t, 12, plugin.Meta.ModelDefaults["video"].VideoSpecs[0].Combinations[0].Total)
 	snapshot.Override[0].ModelDefaults["video"] = ModelDefaults{BillingExpr: "999"}
 	delete(snapshot.Override[0].ModelDefaults, "image")
 	assert.Equal(t, "Video generation", plugin.Meta.ModelDefaults["video"].Description["en"])

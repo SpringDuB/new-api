@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -168,6 +169,92 @@ func TestCanvasModelCatalogDatabaseMatrix(t *testing.T) {
 			assert.Equal(t, []canvasCatalogModel{}, catalog(), "model limits can produce a successful empty result")
 			require.NoError(t, db.Model(token).Update("expired_time", time.Now().Add(-time.Minute).Unix()).Error)
 			assert.Equal(t, http.StatusUnauthorized, read(token.Key, secret).Code)
+
+			// The public square must not promise plugin limits for the generic OpenAI route above.
+			mapping := `{"square-sd25":"seedance-2-5-per-second"}`
+			square := model.Channel{Name: "square fixture", Key: "fixture", Type: constant.ChannelTypeTaskPlugin, Group: "default", Models: "square-sd25,seedance-2-5-per-request,ms-minimax-h3,ms-minimax-h3-upscale,ap-minimax-h3,st-gpt-image-2", ModelMapping: &mapping, Status: common.ChannelStatusEnabled}
+			square.SetSetting(dto.ChannelSettings{TaskPluginKey: "lecapi"})
+			require.NoError(t, square.Insert())
+			model.InitChannelCache()
+			model.InvalidatePricingCache()
+			var public struct {
+				Data []struct {
+					ModelName  string             `json:"model_name"`
+					VideoSpecs []catalogVideoSpec `json:"video_specs"`
+					ImageSpecs []catalogImageSpec `json:"image_specs"`
+				}
+			}
+			modelManagementRequest(t, GetPricing, http.MethodGet, "/api/pricing", nil, &public)
+			entriesByName := make(map[string][]catalogVideoSpec)
+			var pooledImage []catalogImageSpec
+			for _, entry := range public.Data {
+				entriesByName[entry.ModelName] = entry.VideoSpecs
+				if entry.ModelName == "st-gpt-image-2" {
+					pooledImage = entry.ImageSpecs
+				}
+			}
+			require.Len(t, pooledImage, 3)
+			require.Contains(t, entriesByName, "seedance-2-0-per-request")
+			assert.Empty(t, entriesByName["seedance-2-0-per-request"])
+			shared := entriesByName["seedance-2-5-per-request"]
+			require.Len(t, shared, 1, "only the bound LecAPI channel can quote SD2.5")
+			assert.Empty(t, shared[0].Provider)
+			for _, row := range shared {
+				assert.Equal(t, "720p", row.Resolution)
+				assert.Equal(t, []canvasPriceAmount{{"request", 5.5}}, row.WithoutReference)
+			}
+			ms := entriesByName["ms-minimax-h3"]
+			require.Len(t, ms, 5)
+			for _, row := range ms {
+				assert.Equal(t, 5, row.IncludedImages)
+				assert.Contains(t, row.WithoutReference, canvasPriceAmount{"reference_image", 0.24})
+				if row.Resolution == "480p" {
+					assert.Empty(t, row.WithReference)
+				}
+				if row.Resolution == "768P" && row.DurationTier == "long" {
+					assert.Equal(t, []canvasPriceAmount{{"second", 0.24}, {"reference_second", 0.6}, {"reference_image", 0.24}}, row.WithReference)
+				}
+				if row.Resolution == "2K" {
+					assert.Equal(t, "short", row.DurationTier)
+				}
+			}
+			require.Len(t, entriesByName["ms-minimax-h3-upscale"], 1)
+			assert.True(t, entriesByName["ms-minimax-h3-upscale"][0].RequiresSourceTask)
+			// Remove the unrelated generic route, then publish both actual task providers for SD2.
+			for _, key := range []string{"lecapi", "yuanxiang"} {
+				ch := model.Channel{Name: key, Key: "fixture", Type: constant.ChannelTypeTaskPlugin, Group: "default", Models: "seedance-2-0-per-request", Status: common.ChannelStatusEnabled}
+				ch.SetSetting(dto.ChannelSettings{TaskPluginKey: key})
+				require.NoError(t, ch.Insert())
+			}
+			require.NoError(t, db.Model(&channels[3]).Update("status", common.ChannelStatusManuallyDisabled).Error)
+			require.NoError(t, model.UpdateAbilityStatus(channels[3].Id, false))
+			model.InitChannelCache()
+			model.InvalidatePricingCache()
+			public.Data = nil // Decode a fresh response; omitted fields must not retain the previous catalog.
+			modelManagementRequest(t, GetPricing, http.MethodGet, "/api/pricing", nil, &public)
+			var sd2 []catalogVideoSpec
+			for _, entry := range public.Data {
+				if entry.ModelName == "seedance-2-0-per-request" {
+					sd2 = entry.VideoSpecs
+				}
+			}
+			require.Len(t, sd2, 2)
+			var supportsVideo int
+			for _, row := range sd2 {
+				require.Equal(t, []canvasPriceAmount{{"request", 2.9}}, row.WithoutReference)
+				if len(row.WithReference) > 0 {
+					supportsVideo++
+					assert.Equal(t, []canvasPriceAmount{{"request", 3.3}}, row.WithReference)
+				}
+			}
+			assert.Equal(t, 1, supportsVideo)
+
+			idx := slices.IndexFunc(entriesByName["square-sd25"], func(spec catalogVideoSpec) bool { return spec.Preferred })
+			require.NotEqual(t, -1, idx, "plugin model mapping carries its preferred resolution to /api/pricing")
+			selected := entriesByName["square-sd25"][idx]
+			assert.Equal(t, "720p", selected.Resolution)
+			assert.Equal(t, []canvasPriceAmount{{Unit: "second", Amount: 0.39}}, selected.WithoutReference)
+
 		})
 	}
 }
@@ -185,7 +272,7 @@ func TestCanvasLecAPIVideoPoolRatios(t *testing.T) {
 		{"seedance-2-5-per-token", []string{"16:9", "9:16", "1:1", "21:9", "4:3", "3:4", "adaptive"}},
 		{"seedance-2-0-per-second", []string{"16:9", "9:16", "1:1", "4:3", "3:4", "21:9"}},
 		{"seedance-2-0-per-token", []string{"16:9", "9:16", "1:1", "21:9", "4:3", "3:4"}},
-		{"seedance-2-0-fast-per-second", []string{"16:9", "9:16", "1:1", "auto", "4:3", "3:4", "21:9"}},
+		{"seedance-2-0-fast-per-second", []string{"16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "auto"}},
 		{"seedance-2-0-mini-per-second", []string{"16:9", "9:16", "1:1", "auto"}},
 		{"wan-3-0-per-second", []string{"16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "adaptive"}},
 	} {
@@ -319,8 +406,8 @@ func TestCanvasLecAPIPriceEstimatesUseSelectedVideoInput(t *testing.T) {
 		plain, reference []canvasPriceAmount
 		tokensPerSecond  int
 	}{
-		{"seedance-2-5-per-second", "720p", []canvasPriceAmount{{"second", 0.57}}, []canvasPriceAmount{{"second", 1.06}, {"reference_second", 0.31}}, 0},
-		{"seedance-2-0-per-second", "720p", []canvasPriceAmount{{"second", 0.41}}, []canvasPriceAmount{{"second", 0.82}}, 0},
+		{"seedance-2-5-per-second", "720p", []canvasPriceAmount{{"second", 0.39}}, []canvasPriceAmount{{"second", 0.39}, {"reference_second", 0.31}}, 0},
+		{"seedance-2-0-per-second", "720p", []canvasPriceAmount{{"second", 0.35}}, nil, 0},
 		{"seedance-2-5-per-token", "1080p", []canvasPriceAmount{{"video_tokens", 48.7872}}, []canvasPriceAmount{{"video_tokens", 29.1456}}, 48_600},
 		{"seedance-2-0-per-token", "720p", []canvasPriceAmount{{"video_tokens", 29.1456}}, []canvasPriceAmount{{"video_tokens", 17.7408}}, 21_600},
 	} {
@@ -330,6 +417,10 @@ func TestCanvasLecAPIPriceEstimatesUseSelectedVideoInput(t *testing.T) {
 			schema, _ := plugin.Meta.UsageForModel(tc.name)
 			item := model.Pricing{EnableGroup: []string{"default"}, BillingExpr: defaults.BillingExpr, BillingUsageSchema: schema}
 			price := canvasPriceSummary(item, groups, nil, schema["resolution"].Enum, true, defaults.VideoTokenEstimate)
+			if tc.reference == nil {
+				assert.Equal(t, tc.plain, price.EstimatesByResolution[tc.resolution])
+				return
+			}
 			quote := price.VideoEstimatesByResolution[tc.resolution]
 			for _, check := range []struct{ got, want []canvasPriceAmount }{{quote.WithoutReference, tc.plain}, {quote.WithReference, tc.reference}} {
 				require.Len(t, check.got, len(check.want))
@@ -344,6 +435,86 @@ func TestCanvasLecAPIPriceEstimatesUseSelectedVideoInput(t *testing.T) {
 				assert.Equal(t, 4, price.VideoTokenEstimate.ReferenceExtraSeconds)
 				assert.Equal(t, 180, price.VideoTokenEstimate.ReferencePercent)
 			}
+		})
+	}
+}
+
+func TestCatalogVideoSpecsOnlyQuoteEffectivePrices(t *testing.T) {
+	source, err := builtinplugins.Source("lecapi")
+	require.NoError(t, err)
+	plugin, err := jsplugin.NewRegistry().RegisterFactory(source, jsplugin.Options{Key: "lecapi"})
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		model, resolution, unit string
+		price                   float64
+	}{
+		{"seedance-2-5-per-second", "720p", "second", 0.39},
+		{"seedance-2-5-per-second", "1080p", "second", 0.65},
+		{"seedance-2-5-per-request", "720p", "request", 5.5},
+		{"seedance-2-5-per-token", "1080p", "video_tokens", 48.7872},
+		{"ap-minimax-h3", "720p", "request", 1},
+		{"ms-minimax-h3-upscale", "2K", "second", 0.1},
+	} {
+		defaults, ok := plugin.Meta.DefaultsForModel(tc.model)
+		require.True(t, ok)
+		schema, _ := plugin.Meta.UsageForModel(tc.model)
+		item := model.Pricing{VideoSpecs: defaults.VideoSpecs, BillingExpr: `tier("global", u("requests") * 99.0)`, BillingPluginVariants: []model.PricingPluginVariant{{BillingMode: "tiered_expr", BillingExpr: defaults.BillingExpr, BillingUsageSchema: schema}}}
+		specs := catalogVideoSpecs(item)
+		idx := slices.IndexFunc(specs, func(s catalogVideoSpec) bool { return s.Resolution == tc.resolution })
+		require.NotEqual(t, -1, idx, "%s %s", tc.model, tc.resolution)
+		spec := specs[idx]
+		require.NotEmpty(t, spec.WithoutReference)
+		assert.Equal(t, tc.unit, spec.WithoutReference[0].Unit)
+		assert.InDelta(t, tc.price, spec.WithoutReference[0].Amount, 1e-9)
+		if tc.model == "seedance-2-5-per-second" && tc.resolution == "720p" {
+			assert.True(t, spec.Preferred)
+			assert.Contains(t, spec.WithReference, canvasPriceAmount{Unit: "reference_second", Amount: 0.31})
+		}
+		item.BillingPluginVariants[0].BillingExpr = `tier("custom", u("seconds") * u("seconds"))`
+		assert.Empty(t, catalogVideoSpecs(item), "never substitute the global price for an unquotable provider override")
+	}
+}
+
+func TestCatalogImageSpecsQuoteImageAndRequestPrices(t *testing.T) {
+	source, err := builtinplugins.Source("lecapi")
+	require.NoError(t, err)
+	plugin, err := jsplugin.NewRegistry().RegisterFactory(source, jsplugin.Options{Key: "lecapi"})
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		name, res, size, action, unit string
+		amount                        float64
+		min, max, outputs             int
+	}{
+		{"st-gpt-image-2", "1K", "", "", "image", 0.032, 0, -1, 10},
+		{"st-gpt-image-2", "4K", "", "", "image", 0.06, 0, -1, 10},
+		{"ty-seedream-5-5", "2K", "", "", "request", 0.156, 0, 8, 0},
+		{"sl-midjourney", "", "0.25", "imagine", "request", 0.54, 0, 10, 0},
+		{"sl-midjourney", "", "0.25", "blend", "request", 0.576, 1, 10, 0},
+	} {
+		t.Run(tc.name+"/"+tc.res+tc.action, func(t *testing.T) {
+			d, ok := plugin.Meta.DefaultsForModel(tc.name)
+			require.True(t, ok)
+			schema, _ := plugin.Meta.UsageForModel(tc.name)
+			item := model.Pricing{ImageSpecs: d.ImageSpecs, BillingExpr: `u("requests")*99`, BillingPluginVariants: []model.PricingPluginVariant{{BillingExpr: d.BillingExpr, BillingUsageSchema: schema}}}
+			rows := catalogImageSpecs(item)
+			i := slices.IndexFunc(rows, func(s catalogImageSpec) bool {
+				return s.Resolution == tc.res && s.ImageSize == tc.size && s.Action == tc.action
+			})
+			require.NotEqual(t, -1, i)
+			row := rows[i]
+			assert.Equal(t, canvasPriceAmount{Unit: tc.unit, Amount: tc.amount}, row.Rate)
+			assert.Equal(t, tc.min, row.MinImages)
+			assert.Equal(t, tc.outputs, row.MaxOutputs)
+			if tc.max < 0 {
+				assert.Nil(t, row.MaxImages)
+			} else {
+				require.NotNil(t, row.MaxImages)
+				assert.Equal(t, tc.max, *row.MaxImages)
+			}
+			item.BillingPluginVariants[0].BillingExpr = `tier("override",u("requests")*1.25)`
+			require.Equal(t, canvasPriceAmount{"request", 1.25}, catalogImageSpecs(item)[i].Rate)
+			item.BillingPluginVariants[0].BillingExpr = `p * 2.0 + c * 5.0`
+			assert.Empty(t, catalogImageSpecs(item), "token fees must not be presented as an image rate")
 		})
 	}
 }

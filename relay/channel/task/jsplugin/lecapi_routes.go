@@ -165,7 +165,8 @@ func (a *TaskAdaptor) submitLecAPIVideoPool(c *gin.Context, info *relaycommon.Re
 		names = append(names, name)
 		candidates = append(candidates, lecapiRouteCandidate{Route: name, Body: value})
 	}
-	if len(candidates) > 1 && info.ChannelId > 0 {
+	keepOrder := a.submit.LecAPIKeepRouteOrder && slices.Contains(a.plugin.Meta.RequiredCapabilities, pluginruntime.CapabilityLecAPIVideoOrder)
+	if !keepOrder && len(candidates) > 1 && info.ChannelId > 0 {
 		stats, err := model.LecAPIRouteStats(info.ChannelId, names)
 		if err != nil {
 			logger.LogWarn(c, "could not load LecAPI route statistics: "+err.Error())
