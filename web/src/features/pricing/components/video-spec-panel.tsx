@@ -61,7 +61,11 @@ function MaterialLimits({
     { kind: 'audio', label: t('Audio'), Icon: Music2 },
   ]
   return (
-    <div className='flex flex-wrap items-center gap-1'>
+    <div
+      role='group'
+      aria-label={t('Reference material limits')}
+      className='flex flex-wrap items-center gap-1'
+    >
       {sum === 0 && <Badge variant='outline'>{t('No reference files')}</Badge>}
       {materials.map(({ kind, label, Icon }, index) => {
         const max = maxima[index]
@@ -115,6 +119,32 @@ function MaterialLimits({
   )
 }
 
+// Prefer a route that covers the current choice in every respect. Keep the
+// catalog order when the routes offer different trade-offs.
+function representativeCombination(combinations: VideoInputCombination[]) {
+  return combinations.reduce<VideoInputCombination | undefined>(
+    (best, next) => {
+      if (!best) return next
+      const coversCounts =
+        next.total >= best.total &&
+        next.maxima.every((max, i) => max >= best.maxima[i]) &&
+        next.minima.every((min, i) => min <= best.minima[i])
+      const coversVideo =
+        !best.maxima[1] ||
+        ((!next.videoWithinOutput || best.videoWithinOutput) &&
+          (next.videoSeconds || Infinity) >= (best.videoSeconds || Infinity) &&
+          (next.videoTotalSeconds || Infinity) >=
+            (best.videoTotalSeconds || Infinity))
+      return coversCounts &&
+        coversVideo &&
+        (!best.nativeFace || next.nativeFace)
+        ? next
+        : best
+    },
+    undefined
+  )
+}
+
 // Anonymous per-call quotes must cover every active route for this resolution.
 function callPriceRange(
   rows: CatalogVideoSpec[],
@@ -160,18 +190,11 @@ export function VideoSpecPanel({
     provider && providers.includes(provider) ? provider : providers[0]
   const bands = rows.filter((s) => s.provider === activeProvider)
   const spec = bands.find((s) => s.duration_tier === duration) ?? bands[0]
-  // Without a provider selector, list distinct supported combinations as alternatives.
-  // Taking separate maxima would advertise input combinations no route accepts.
-  const combinations =
-    anonymousCallPricing && rows.length > 1
-      ? [
-          ...new Map(
-            rows
-              .flatMap((row) => row.combinations)
-              .map((c) => [JSON.stringify(c), c])
-          ).values(),
-        ]
+  const combination = representativeCombination(
+    anonymousCallPricing
+      ? rows.flatMap((row) => row.combinations)
       : spec.combinations
+  )
   const durationLabel = (row: CatalogVideoSpec) =>
     resolveLocalizedText(row.duration_label, i18n.language) || row.duration_tier
   const plain = spec.without_reference?.[0]
@@ -317,20 +340,7 @@ export function VideoSpecPanel({
       {!anonymousCallPricing && spec.requiresSourceTask && (
         <Badge variant='outline'>{t('Completed source task required')}</Badge>
       )}
-      {combinations.length > 0 && (
-        <ul aria-label={t('Reference material limits')} className='grid gap-1'>
-          {combinations.map((combination, index) => (
-            <li key={JSON.stringify(combination)}>
-              {index > 0 && (
-                <span className='text-muted-foreground mb-1 block text-xs'>
-                  {t('or')}
-                </span>
-              )}
-              <MaterialLimits combination={combination} />
-            </li>
-          ))}
-        </ul>
-      )}
+      {combination && <MaterialLimits combination={combination} />}
     </div>
   )
 }

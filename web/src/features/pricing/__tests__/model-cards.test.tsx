@@ -150,7 +150,7 @@ describe('model cards', () => {
         },
         {
           resolution: '720p',
-          combinations: [combo],
+          combinations: [{ ...combo, nativeFace: false }, combo],
           without_reference: [{ unit: 'second', amount: 0.39 }],
           with_reference: [
             { unit: 'second', amount: 0.39 },
@@ -166,16 +166,16 @@ describe('model cards', () => {
     expect(prices()).toHaveTextContent('¥0.39')
     expect(prices()).toHaveTextContent('¥0.31')
     expect(screen.getByText('Native face support')).toBeVisible()
+    expect(screen.getAllByText('Images ≤9')).toHaveLength(1)
+    expect(screen.queryByText('or')).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '1080p' }))
     expect(prices()).toHaveTextContent('¥0.65')
     expect(prices()).not.toHaveTextContent('¥0.31')
-    const shapes = within(
-      screen.getByRole('list', { name: 'Reference material limits' })
-    ).getAllByRole('listitem')
-    expect(shapes).toHaveLength(2)
-    expect(shapes[0]).toHaveTextContent('30')
-    expect(shapes[0]).not.toHaveTextContent('Videos')
-    expect(shapes[1]).toHaveTextContent('Videos')
+    const limits = screen.getByRole('group', {
+      name: 'Reference material limits',
+    })
+    expect(limits).toHaveTextContent('Images ≤30')
+    expect(limits).not.toHaveTextContent('Videos')
     expect(screen.queryByText('Native face support')).toBeNull()
     expect(onClick).not.toHaveBeenCalled()
     rerender(
@@ -232,7 +232,7 @@ describe('model cards', () => {
     expect(prices).toHaveTextContent('$6')
     expect(prices).not.toHaveTextContent('After 5 images')
     expect(
-      screen.getByRole('list', { name: 'Reference material limits' })
+      screen.getByRole('group', { name: 'Reference material limits' })
     ).toHaveTextContent('Images ≤1')
   })
 
@@ -418,7 +418,7 @@ describe('model cards', () => {
       const price = screen.getByRole('group', { name: 'Pricing' })
       expect(price).toHaveTextContent(sd2 ? '2.9' : '5.5')
       if (sd2) expect(price).toHaveTextContent('3.3')
-      const materials = screen.getByRole('list', {
+      const materials = screen.getByRole('group', {
         name: 'Reference material limits',
       })
       expect(materials).toHaveTextContent(sd2 ? 'Images ≤9' : 'Images ≤30')
@@ -443,7 +443,7 @@ describe('model cards', () => {
               provider: 'A',
               resolution: '720p',
               combinations: [
-                { minima: [0, 0, 0], maxima: [3, 0, 0], total: 3 },
+                { minima: [0, 0, 0], maxima: [1, 0, 0], total: 1 },
               ],
               without_reference: [{ unit: 'request', amount: 3 }],
             },
@@ -465,13 +465,13 @@ describe('model cards', () => {
     expect(price).toHaveTextContent(/2\.9.*–.*3/)
     expect(price).toHaveTextContent(/With reference video.*3\.3/)
     expect(screen.queryByLabelText('Provider')).not.toBeInTheDocument()
-    const limits = screen.getByRole('list', {
+    const limits = screen.getByRole('group', {
       name: 'Reference material limits',
     })
-    const choices = within(limits).getAllByRole('listitem')
-    expect(choices).toHaveLength(2)
-    expect(choices[0]).toHaveTextContent('Images ≤3')
-    expect(choices[1]).toHaveTextContent('Videos 1')
+    expect(limits).toHaveTextContent('Images ≤3')
+    expect(limits).not.toHaveTextContent('Videos')
+    expect(limits).not.toHaveTextContent('Images ≤1')
+    expect(within(limits).queryByText('or')).not.toBeInTheDocument()
   })
 
   it('uses a paginated tile gallery while preserving promotions, group metadata, and task price units', async () => {
