@@ -1,7 +1,9 @@
 package perfmetrics
 
 import (
+	"math"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -22,11 +24,20 @@ func flushLoop() {
 	}
 }
 
-func flushCompletedBuckets() {
-	currentBucket := bucketStart(time.Now().Unix())
+var flushMu sync.Mutex
+
+// FlushOnShutdown waits for any periodic flush and drains the last partial bucket.
+// Repeated calls persist only samples that have not already been written.
+func FlushOnShutdown() { flushBucketsBefore(math.MaxInt64) }
+
+func flushCompletedBuckets() { flushBucketsBefore(bucketStart(time.Now().Unix())) }
+
+func flushBucketsBefore(cutoff int64) {
+	flushMu.Lock()
+	defer flushMu.Unlock()
 	hotBuckets.Range(func(key, value any) bool {
 		k := key.(bucketKey)
-		if k.bucketTs >= currentBucket {
+		if k.bucketTs >= cutoff {
 			return true
 		}
 

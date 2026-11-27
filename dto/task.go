@@ -5,6 +5,8 @@ import (
 )
 
 type TaskError struct {
+	// UpstreamSubmit distinguishes send/read/response failures from admission and pricing rejections.
+	UpstreamSubmit bool `json:"-"`
 	// NoRetry prevents duplicate upstream work when acceptance is known or ambiguous.
 	NoRetry    bool   `json:"-"`
 	Code       string `json:"code"`

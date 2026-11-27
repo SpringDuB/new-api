@@ -1,6 +1,6 @@
 package perfmetrics
 
-import "sync/atomic"
+import "sync"
 
 type Store interface {
 	Record(sample Sample)
@@ -101,78 +101,56 @@ type counters struct {
 	generationMs   int64
 }
 
+// A drain can overlap a sample (e.g. a poll completing during shutdown).
+// Keep its denominator, numerator and latency on the same side of the drain.
 type atomicBucket struct {
-	requestCount   atomic.Int64
-	successCount   atomic.Int64
-	totalLatencyMs atomic.Int64
-	ttftSumMs      atomic.Int64
-	ttftCount      atomic.Int64
-	outputTokens   atomic.Int64
-	generationMs   atomic.Int64
+	mu      sync.Mutex
+	pending counters
 }
 
-func (b *atomicBucket) add(sample Sample) {
-	b.requestCount.Add(1)
-	if sample.Success {
-		b.successCount.Add(1)
+func (b *atomicBucket) add(s Sample) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	c := &b.pending
+	c.requestCount++
+	if s.Success {
+		c.successCount++
 	}
-	if sample.LatencyMs > 0 {
-		b.totalLatencyMs.Add(sample.LatencyMs)
+	if s.LatencyMs > 0 {
+		c.totalLatencyMs += s.LatencyMs
 	}
-	if sample.HasTtft && sample.TtftMs >= 0 {
-		b.ttftSumMs.Add(sample.TtftMs)
-		b.ttftCount.Add(1)
+	if s.HasTtft && s.TtftMs >= 0 {
+		c.ttftSumMs += s.TtftMs
+		c.ttftCount++
 	}
-	if sample.OutputTokens > 0 && sample.GenerationMs > 0 {
-		b.outputTokens.Add(sample.OutputTokens)
-		b.generationMs.Add(sample.GenerationMs)
+	if s.OutputTokens > 0 && s.GenerationMs > 0 {
+		c.outputTokens += s.OutputTokens
+		c.generationMs += s.GenerationMs
 	}
 }
 
 func (b *atomicBucket) snapshot() counters {
-	return counters{
-		requestCount:   b.requestCount.Load(),
-		successCount:   b.successCount.Load(),
-		totalLatencyMs: b.totalLatencyMs.Load(),
-		ttftSumMs:      b.ttftSumMs.Load(),
-		ttftCount:      b.ttftCount.Load(),
-		outputTokens:   b.outputTokens.Load(),
-		generationMs:   b.generationMs.Load(),
-	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.pending
 }
 
 func (b *atomicBucket) drain() counters {
-	return counters{
-		requestCount:   b.requestCount.Swap(0),
-		successCount:   b.successCount.Swap(0),
-		totalLatencyMs: b.totalLatencyMs.Swap(0),
-		ttftSumMs:      b.ttftSumMs.Swap(0),
-		ttftCount:      b.ttftCount.Swap(0),
-		outputTokens:   b.outputTokens.Swap(0),
-		generationMs:   b.generationMs.Swap(0),
-	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	c := b.pending
+	b.pending = counters{}
+	return c
 }
 
 func (b *atomicBucket) addCounters(c counters) {
-	if c.requestCount != 0 {
-		b.requestCount.Add(c.requestCount)
-	}
-	if c.successCount != 0 {
-		b.successCount.Add(c.successCount)
-	}
-	if c.totalLatencyMs != 0 {
-		b.totalLatencyMs.Add(c.totalLatencyMs)
-	}
-	if c.ttftSumMs != 0 {
-		b.ttftSumMs.Add(c.ttftSumMs)
-	}
-	if c.ttftCount != 0 {
-		b.ttftCount.Add(c.ttftCount)
-	}
-	if c.outputTokens != 0 {
-		b.outputTokens.Add(c.outputTokens)
-	}
-	if c.generationMs != 0 {
-		b.generationMs.Add(c.generationMs)
-	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.pending.requestCount += c.requestCount
+	b.pending.successCount += c.successCount
+	b.pending.totalLatencyMs += c.totalLatencyMs
+	b.pending.ttftSumMs += c.ttftSumMs
+	b.pending.ttftCount += c.ttftCount
+	b.pending.outputTokens += c.outputTokens
+	b.pending.generationMs += c.generationMs
 }

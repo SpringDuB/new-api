@@ -365,15 +365,15 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (_ *TaskSubmit
 	}
 
 	// 9. 发送请求
-	if policy, ok := adaptor.(channel.TaskSubmitRetryPolicy); ok && policy.DisableSubmitRetry() {
-		// From the first send onward, transport errors, rejected HTTP replies,
-		// and unreadable accepted replies may all hide an already-created task.
-		defer func() {
-			if taskErr != nil {
-				taskErr.NoRetry = true
-			}
-		}()
-	}
+	policy, hasPolicy := adaptor.(channel.TaskSubmitRetryPolicy)
+	noRetry := hasPolicy && policy.DisableSubmitRetry()
+	defer func() {
+		if taskErr != nil {
+			taskErr.UpstreamSubmit = true
+			// Once sent, the vendor may already have accepted the work.
+			taskErr.NoRetry = taskErr.NoRetry || noRetry
+		}
+	}()
 	resp, err := adaptor.DoRequest(c, info, requestBody)
 	if err != nil {
 		return nil, service.TaskErrorWrapper(err, "do_request_failed", http.StatusInternalServerError, common.UpstreamAddresses(c)...)

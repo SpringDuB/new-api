@@ -233,6 +233,7 @@ func main() {
 	if common.DataExportEnabled {
 		model.SaveQuotaDataCache()
 	}
+	perfmetrics.FlushOnShutdown()
 	common.SysLog(common.LogText("server exited"))
 }
 

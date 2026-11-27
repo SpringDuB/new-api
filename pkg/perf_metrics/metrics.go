@@ -3,6 +3,7 @@ package perfmetrics
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"sort"
@@ -11,8 +12,10 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	taskdto "github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/setting/perf_metrics_setting"
 
@@ -115,18 +118,41 @@ func RecordTaskResult(task *model.Task, result *relaycommon.TaskInfo) {
 	Record(sample)
 }
 
-// Immediate failures are submit failures, which are not health samples.
+// RecordTaskSubmissionFailure is called after retries, never for individual attempts.
+func RecordTaskSubmissionFailure(ctx context.Context, info *relaycommon.RelayInfo, failure *taskdto.TaskError) {
+	if failure == nil || !failure.UpstreamSubmit || errors.Is(failure.Error, context.Canceled) {
+		return
+	}
+	var apiErr *types.NewAPIError
+	if !errors.As(failure.Error, &apiErr) {
+		apiErr = types.InitOpenAIError(types.ErrorCode(failure.Code), failure.StatusCode)
+		// Task HTTP errors carry the vendor body, not a typed relay error. Keep a
+		// specific provider code (e.g. content_filter) ahead of its HTTP status.
+		if failure.Code == "fail_to_fetch_task" {
+			var body dto.GeneralErrorResponse
+			if common.UnmarshalJsonStr(failure.Message, &body) == nil {
+				if upstream := body.TryToOpenAIError(); upstream != nil {
+					apiErr = types.WithOpenAIError(*upstream, failure.StatusCode)
+				}
+			}
+		}
+	}
+	RecordRelayResult(ctx, info, apiErr)
+}
+
+// A durable immediate result will not be polled. A receipt without a terminal
+// result belongs to the poller instead; only its winning terminal CAS samples it.
 func RecordImmediateTaskResult(info *relaycommon.RelayInfo, result *relaycommon.TaskInfo) {
-	if result == nil || result.Status != model.TaskStatusSuccess {
+	if info == nil || info.PerformanceBusinessRejection || result == nil || (result.Status != model.TaskStatusSuccess && result.Status != model.TaskStatusFailure) {
 		return
 	}
 	sample := Sample{
 		Model:     info.OriginModelName,
 		Group:     info.UsingGroup,
 		LatencyMs: time.Since(info.StartTime).Milliseconds(),
-		Success:   true,
+		Success:   result.Status == model.TaskStatusSuccess,
 	}
-	if tokens := int64(cmp.Or(result.TotalTokens, result.CompletionTokens)); tokens > 0 {
+	if tokens := int64(cmp.Or(result.TotalTokens, result.CompletionTokens)); sample.Success && tokens > 0 {
 		sample.OutputTokens = tokens
 		sample.GenerationMs = sample.LatencyMs
 	}

@@ -660,6 +660,7 @@ export function parseTaskResult() { return {status:"SUCCESS"}; }
 				assert.Equal(t, tc.wantCode, taskErr.Code)
 				assert.Equal(t, tc.status, taskErr.StatusCode)
 				assert.Contains(t, taskErr.Message, "upstream body")
+				assert.True(t, taskErr.UpstreamSubmit, "non-2xx vendor replies must reach final-outcome sampling")
 				assert.Nil(t, result)
 				return
 			}

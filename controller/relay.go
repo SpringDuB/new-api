@@ -635,6 +635,7 @@ func executeTaskSubmissionWith(
 	}
 
 	if taskErr != nil {
+		perfmetrics.RecordTaskSubmissionFailure(c.Request.Context(), relayInfo, taskErr)
 		diagnostics.failed(stage, "task_error", taskErr, false)
 		return nil, taskErr
 	}

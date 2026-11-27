@@ -150,26 +150,27 @@ func TestRecordTaskResultSamplesTerminalTasks(t *testing.T) {
 	}, mergedHotBuckets())
 }
 
-// Immediate submit results: only successes are sampled, timed from relay start.
-func TestRecordImmediateTaskResultSamplesSuccessOnly(t *testing.T) {
+// Immediate terminal results use relay latency; failures have no throughput.
+func TestRecordImmediateTaskResultSamplesTerminalOnly(t *testing.T) {
 	hotBuckets.Clear()
 	t.Cleanup(func() { hotBuckets.Clear() })
 	info := &relaycommon.RelayInfo{OriginModelName: "image-model", UsingGroup: "a", StartTime: time.Now().Add(-2 * time.Second)}
 	RecordImmediateTaskResult(info, &relaycommon.TaskInfo{Status: model.TaskStatusSuccess, TotalTokens: 4096})
-	RecordImmediateTaskResult(info, relaycommon.FailTaskInfo("boom"))
+	RecordImmediateTaskResult(info, &relaycommon.TaskInfo{Status: model.TaskStatusFailure, TotalTokens: 100})
 	RecordImmediateTaskResult(info, &relaycommon.TaskInfo{Status: model.TaskStatusInProgress})
 	RecordImmediateTaskResult(info, nil)
 
 	merged := mergedHotBuckets()
 	require.Len(t, merged, 1)
 	got := merged[bucketKey{model: "image-model", group: "a"}]
-	assert.GreaterOrEqual(t, got.totalLatencyMs, int64(2000))
+	assert.GreaterOrEqual(t, got.generationMs, int64(2000))
+	assert.GreaterOrEqual(t, got.totalLatencyMs-got.generationMs, int64(2000))
 	assert.Equal(t, counters{
-		requestCount:   1,
+		requestCount:   2,
 		successCount:   1,
 		totalLatencyMs: got.totalLatencyMs,
 		outputTokens:   4096,
-		generationMs:   got.totalLatencyMs,
+		generationMs:   got.generationMs,
 	}, got)
 }
 
@@ -399,6 +400,22 @@ func TestPerformanceAggregationAndFlush(t *testing.T) {
 				assert.Equal(t, []SuccessRatePoint{{Ts: historyStart, SuccessRate: 100}}, history.RecentSuccessSeries["history-hot-boundary"])
 				assert.Empty(t, history.RecentSuccessSeries["history-expired"])
 				assert.Empty(t, history.RecentSuccessSeries["history-hot-expired"])
+			})
+			t.Run("shutdown persists active samples once", func(t *testing.T) {
+				Record(Sample{Model: "before-restart", Group: "a", Success: true, LatencyMs: 110})
+				Record(Sample{Model: "before-restart", Group: "a", LatencyMs: 50})
+				flushCompletedBuckets()
+				rows, err := model.GetPerfMetrics("before-restart", "a", start, time.Now().Unix())
+				require.NoError(t, err)
+				assert.Empty(t, rows)
+				FlushOnShutdown()
+				FlushOnShutdown()
+				rows, err = model.GetPerfMetrics("before-restart", "a", start, time.Now().Unix())
+				require.NoError(t, err)
+				require.Len(t, rows, 1)
+				assert.EqualValues(t, 2, rows[0].RequestCount)
+				assert.EqualValues(t, 1, rows[0].SuccessCount)
+				assert.EqualValues(t, 160, rows[0].TotalLatencyMs)
 			})
 		})
 	}

@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -16,6 +18,7 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	pluginruntime "github.com/QuantumNous/new-api/pkg/jsplugin"
+	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
 	"github.com/QuantumNous/new-api/relay"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/service"
@@ -197,6 +200,112 @@ func TestPresentTaskSubmissionKeepsCompletedVideoWhenOSSDeliveryFails(t *testing
 	assert.Contains(t, recorder.Body.String(), `"status":"completed"`)
 	assert.NotContains(t, recorder.Body.String(), "cdn.example")
 	assert.NotContains(t, recorder.Body.String(), "video_delivery_failed")
+}
+
+// Model cards read both the per-model summary and the recent_model hourly series.
+func TestTaskSubmissionMarketplaceSummary(t *testing.T) {
+	oldDB, oldLog := model.DB, model.LOG_DB
+	oldPath, oldMaster, oldRetry := common.SQLitePath, common.IsMasterNode, common.RetryTimes
+	oldMain, oldLogType := common.MainDatabaseType(), common.LogDatabaseType()
+	oldRedis, oldBatch, oldConsume, oldErrors := common.RedisEnabled, common.BatchUpdateEnabled, common.LogConsumeEnabled, constant.ErrorLogEnabled
+	t.Setenv("SQL_DSN", os.Getenv("TEST_TASK_METRICS_DSN"))
+	t.Setenv("LOG_SQL_DSN", "")
+	common.SQLitePath, common.IsMasterNode, common.RetryTimes = filepath.Join(t.TempDir(), "summary.db"), false, 1
+	common.RedisEnabled, common.BatchUpdateEnabled, common.LogConsumeEnabled, constant.ErrorLogEnabled = false, false, false, false
+	t.Cleanup(func() {
+		model.DB, model.LOG_DB = oldDB, oldLog
+		common.SetDatabaseTypes(oldMain, oldLogType)
+		common.SQLitePath, common.IsMasterNode, common.RetryTimes = oldPath, oldMaster, oldRetry
+		common.RedisEnabled, common.BatchUpdateEnabled, common.LogConsumeEnabled, constant.ErrorLogEnabled = oldRedis, oldBatch, oldConsume, oldErrors
+	})
+	require.NoError(t, model.InitDB())
+	db := model.DB
+	model.LOG_DB = db
+	conn, err := db.DB()
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, conn.Close()) })
+	require.NoError(t, db.AutoMigrate(&model.Task{}, &model.PerfMetric{}, &model.Channel{}, &model.User{}))
+	name := "summary-" + common.GetUUID()
+	failed := name + "-failed"
+	upstream := &dto.TaskError{UpstreamSubmit: true, Code: "fail_to_fetch_task", StatusCode: 502, Message: "bad gateway"}
+	for _, tc := range []struct {
+		model    string
+		attempts []*dto.TaskError
+		status   string
+		cancel   bool
+	}{
+		{name, []*dto.TaskError{nil}, model.TaskStatusSuccess, false},
+		{name, []*dto.TaskError{nil}, model.TaskStatusSuccess, false},
+		{name, []*dto.TaskError{upstream, nil}, model.TaskStatusSuccess, false},
+		{name, []*dto.TaskError{upstream, upstream}, "", false},
+		{name, []*dto.TaskError{nil}, "", false}, // An async receipt is not yet a success.
+		{name, []*dto.TaskError{{UpstreamSubmit: true, Code: "fail_to_fetch_task", StatusCode: 400}}, "", false},
+		{name, []*dto.TaskError{{Code: "insufficient_user_quota", StatusCode: 403, NoRetry: true}}, "", false},
+		{name, []*dto.TaskError{upstream}, "", true},
+		{name, []*dto.TaskError{{UpstreamSubmit: true, Code: "fail_to_fetch_task", StatusCode: 500, NoRetry: true, Message: `{"error":{"type":"invalid_request_error","code":"content_filter","message":"filtered"}}`}}, "", false},
+		{failed, []*dto.TaskError{upstream, upstream}, "", false},
+		{failed, []*dto.TaskError{nil}, model.TaskStatusFailure, false},
+	} {
+		c := taskSubmissionTestContext()
+		ctx, cancel := context.WithCancel(c.Request.Context())
+		c.Request = c.Request.WithContext(ctx)
+		info := taskSubmissionRelayInfo(nil)
+		info.PublicTaskID = model.GenerateTaskID()
+		info.OriginModelName = tc.model
+		info.StartTime = time.Now()
+		info.LockedChannel.(*model.Channel).Key = "fixture"
+		calls := 0
+		outcome, taskErr := executeTaskSubmissionWith(c, info, func(*gin.Context, *relaycommon.RelayInfo) (*relay.TaskSubmitResult, *dto.TaskError) {
+			require.Less(t, calls, len(tc.attempts))
+			e := tc.attempts[calls]
+			calls++
+			if tc.cancel {
+				cancel()
+			}
+			if e != nil {
+				return nil, e
+			}
+			res := &relay.TaskSubmitResult{Platform: "plugin", UpstreamTaskID: "upstream"}
+			if tc.status != "" {
+				res.Immediate = &relaycommon.TaskInfo{Status: tc.status}
+			}
+			return res, nil
+		})
+		cancel()
+		require.Equal(t, len(tc.attempts), calls)
+		if tc.attempts[calls-1] != nil {
+			require.NotNil(t, taskErr)
+		} else {
+			require.Nil(t, taskErr)
+			require.NotNil(t, outcome)
+		}
+	}
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/perf-metrics/summary?hours=24&recent_model="+name+"&recent_model="+failed, nil)
+	GetPerfMetricsSummary(c)
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	var response struct {
+		Success bool
+		Data    perfmetrics.SummaryAllResult
+	}
+	require.NoError(t, common.DecodeJson(recorder.Body, &response))
+	require.True(t, response.Success)
+	for _, want := range []struct {
+		name     string
+		requests int64
+		rate     float64
+	}{{name, 4, 75}, {failed, 2, 0}} {
+		idx := slices.IndexFunc(response.Data.Models, func(m perfmetrics.ModelSummary) bool { return m.ModelName == want.name })
+		require.NotEqual(t, -1, idx, want.name)
+		m := response.Data.Models[idx]
+		assert.Equal(t, want.requests, m.RequestCount)
+		assert.Equal(t, want.rate, m.SuccessRate)
+		pts := response.Data.RecentSuccessSeries[want.name]
+		require.Len(t, pts, 1)
+		assert.Equal(t, want.rate, pts[0].SuccessRate)
+		assert.Equal(t, pts, m.RecentSuccessSeries)
+	}
 }
 
 func TestExecuteTaskSubmissionRefundsWhenInsertFails(t *testing.T) {
