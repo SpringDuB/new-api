@@ -150,14 +150,6 @@ export function AppHeader({
 
         {rightContent ?? (
           <div className='stolas-masthead-tools flex shrink-0 items-center gap-1'>
-            {showTopNav && library && (
-              <ModelLibraryNavigation
-                title={library.title}
-                className='stolas-library-trigger'
-                compact={isMobile}
-                directLink
-              />
-            )}
             {showTopNav && canvas && (
               <a
                 href={canvas.href}
@@ -174,6 +166,14 @@ export function AppHeader({
                   {canvas.title}
                 </span>
               </a>
+            )}
+            {showTopNav && library && (
+              <ModelLibraryNavigation
+                title={library.title}
+                className='stolas-library-trigger'
+                compact={isMobile}
+                directLink
+              />
             )}
             <WorkspaceBalance />
             {showTopNav && (

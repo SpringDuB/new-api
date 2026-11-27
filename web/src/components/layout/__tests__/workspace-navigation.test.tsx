@@ -127,7 +127,7 @@ async function renderWorkspace(
 
 describe('Stolas workspace navigation', () => {
   it.each([390, 1440])(
-    'places the canvas shortcut between the model library and wallet balance at %ipx',
+    'places the model library between the canvas shortcut and wallet balance at %ipx',
     async (width) => {
       vi.stubGlobal('innerWidth', width)
       await renderWorkspace('/keys', { walletQuota: 1250000 })
@@ -149,11 +149,11 @@ describe('Stolas workspace navigation', () => {
       expect(canvas).toHaveAttribute('target', '_blank')
       expect(canvas).toHaveAttribute('rel', 'noopener noreferrer')
       expect(
-        library.compareDocumentPosition(canvas) &
+        canvas.compareDocumentPosition(library) &
           Node.DOCUMENT_POSITION_FOLLOWING
       ).toBeTruthy()
       expect(
-        canvas.compareDocumentPosition(balance) &
+        library.compareDocumentPosition(balance) &
           Node.DOCUMENT_POSITION_FOLLOWING
       ).toBeTruthy()
       expect(await within(balance).findByText('$2.5')).toBeVisible()
@@ -221,6 +221,19 @@ describe('Stolas workspace navigation', () => {
           model_name: '59-seedance-2-5-flash',
           output_modalities: ['video'],
         },
+        ...[
+          'seedance-2-0',
+          'wan-3-0',
+          'ap-minimax-h3',
+          'ty-face-processing-1-0',
+          'gemini-omni',
+          'mg-magi-2',
+          'magi-2-per-second',
+        ].map((model_name, i) => ({
+          id: i + 4,
+          model_name,
+          output_modalities: ['video'],
+        })),
       ],
     })
     const menu = screen.getByRole('button', { name: 'Model categories' })
@@ -238,6 +251,15 @@ describe('Stolas workspace navigation', () => {
     expect(screen.getAllByRole('link', { name: /Seedance 2.5/ })).toHaveLength(
       1
     )
+    const videos = within(screen.getByRole('region', { name: 'Videos' }))
+    const magi = videos.getByRole('link', { name: /Magi-2.*2 models/ })
+    const magiUrl = new URL((magi as HTMLAnchorElement).href)
+    expect(magiUrl.pathname).toBe('/pricing')
+    expect(magiUrl.searchParams.get('category')).toBe('video')
+    expect(magiUrl.searchParams.get('family')).toBe('series:Magi-2')
+    expect(videos.queryByRole('link', { name: /Face Processing/ })).toBeNull()
+    expect(videos.getAllByRole('listitem')).toHaveLength(6)
+    expect(videos.getAllByRole('listitem')[4]).toContainElement(magi)
     const imagesCategory = screen.getByRole('link', { name: /^Images/ })
     expect(imagesCategory).toHaveAttribute('href', '/pricing?category=image')
     const videoCover = family.querySelector('.stolas-library-cover')

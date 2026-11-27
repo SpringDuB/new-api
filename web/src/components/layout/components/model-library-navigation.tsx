@@ -117,7 +117,23 @@ export function ModelLibraryNavigation({
     MODEL_CATEGORIES.find((item) => categories[item].length > 0) ??
     'video'
   const categoryModels = categories[category]
-  const featured = getModelFamilies(categoryModels).slice(0, previewSize)
+  const families = getModelFamilies(categoryModels)
+  if (category === 'video') {
+    const faceIndex = families.findIndex(
+      (f) => f.value === 'series:Face Processing'
+    )
+    if (faceIndex !== -1) families.splice(faceIndex, 1)
+    const magiIndex = families.findIndex((f) => f.value === 'series:Magi-2')
+    if (magiIndex !== -1) {
+      const [magi] = families.splice(magiIndex, 1)
+      const slot = Math.min(
+        faceIndex === -1 ? magiIndex : faceIndex,
+        previewSize - 1
+      )
+      families.splice(slot, 0, magi)
+    }
+  }
+  const featured = families.slice(0, previewSize)
   const hasFeatured = featured.length > 0
 
   return (
